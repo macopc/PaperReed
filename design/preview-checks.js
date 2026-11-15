@@ -94,7 +94,8 @@ preview('inbox'); S.unreadOnly = false; S.account = 'all'; getMail(2).unread = t
 
 check('Custom account color and shape',()=>{
  preview('accounts');click('[data-act="manage-account"][data-id="work"]');$('account-color').value='#aa5599';$('account-shape').value='diamond';click('[data-act="save-account-name"]');
- preview('inbox');ok(document.querySelector('.account-mark.diamond'));ok(!document.querySelector('.sender-account'));ok(document.querySelector('.account-mark').style.getPropertyValue('--account-color')==='#aa5599');
+ preview('inbox');ok(!document.querySelector('.sender-account'));ok(document.querySelector('.sender-avatar').style.getPropertyValue('--account-color')==='#aa5599');
+ preview('thread');ok(document.querySelector('.account-mark.diamond'));preview('inbox');
 });
 check('CLI onboarding and context-preserving Agent setup',()=>{
  S.cliInstalled=false;S.agentConnected={};S.agent='codex';S.enabled=true;S.permissions.read=true;S.agentAccounts.work=true;
@@ -184,3 +185,16 @@ check('Long page titles avoid actions and list labels remain visible', () => {
 });
 console.log('COUNCIL RESULT '+checkResults.filter(r=>r.passed).length+'/'+checkResults.length);
 S.account='all';S.category='all';S.unreadOnly=false;go('inbox');$('toast').hidden=true;
+
+check('Avatar alignment and single-account identity',()=>{
+ S.account='all';S.unreadOnly=false;S.category='all';go('inbox');
+ const row=document.querySelector('.mail-row'),avatar=row.querySelector('.sender-avatar').getBoundingClientRect();
+ const sender=row.querySelector('.sender-block').getBoundingClientRect(),topic=row.querySelector('.topic-block').getBoundingClientRect();
+ ok(avatar.width===32&&avatar.height===32);
+ const contentCenter=topic.top>sender.top+1?(sender.top+topic.top+20)/2:(topic.top+topic.bottom)/2;
+ ok(Math.abs((avatar.top+avatar.bottom)/2-contentCenter)<1,'Avatar not centered against text block');
+ act('scope-set','work');ok([...document.querySelectorAll('.sender-avatar')].every(el=>el.classList.contains('no-account-ring')));
+ go('search');S.query='';render();ok([...document.querySelectorAll('.sender-avatar')].every(el=>el.classList.contains('no-account-ring')));
+ act('scope-set','all');go('inbox');
+});
+console.log('AVATAR RESULT '+checkResults.filter(r=>r.passed).length+'/'+checkResults.length);
