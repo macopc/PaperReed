@@ -1,6 +1,6 @@
 # Paper Reed — selected patterns
 
-Only account identity direction B is selected by the user. Overall design, architecture and implementation stack remain unapproved. Current specs: `design/INTERFACE.md`.
+The user has accepted the current interface as the first-version baseline, including account identity direction B and the label color treatment. Real-data workflows and accessibility still need validation; architecture and implementation stack remain undecided. Current specs: `design/INTERFACE.md`. Proposed mail behavior: `design/MAIL-CORE.md`.
 
 - Paper-white surface, ink text, reed-green actions; quiet thin rules rather than elevated cards.
 - System sans-serif UI; Iowan Old Style brand. Existing 4px spacing rhythm and 20px list text line-height remain.

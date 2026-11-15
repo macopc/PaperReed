@@ -4,9 +4,10 @@
 
 | 阶段 | 目标与完成条件 | 状态 |
 | --- | --- | --- |
-| 界面与工作流评审 | 收件、阅读、写信、整理和 Agent 入口形成一致体验；通过设计评审，补充真实工作流反馈 | 进行中，未通过 |
+| 界面与工作流评审 | 当前界面暂作首版基线；后续用真实数据补充异常状态、可访问性与工作流验证 | 首版基线暂定 |
+| 邮件核心设计 | 明确数据归属、UI / CLI 共用操作、草稿与发送语义；保持最小边界 | [方案已起草，待评审](design/MAIL-CORE.md) |
 | 技术路线比较 | 比较同步、存储、UI、CLI 接入与维护成本；记录选型理由、许可约束和实验限制 | 候选研究中，未定稿 |
-| 最小真实闭环 | 在选定路线后验证多账号收信、回复草稿、发送、归档与 GUI / CLI 状态一致 | 未开始 |
+| 最小真实闭环 | 用真实账号验证收信、回复草稿、发送、归档与 UI / CLI 状态一致；用实验结果决定技术路线 | 未开始 |
 | 日用可靠性 | 验证离线恢复、凭据刷新、任务失败反馈、邮件渲染隔离、可访问性与性能 | 未开始 |
 | macOS 分发 | 确定应用标识、系统支持范围、签名、公证、升级与安装流程 | 未开始 |
 | 内置 AI | 在稳定邮件操作与权限机制上增加可选摘要和写作辅助 | 后续考虑 |
@@ -17,4 +18,4 @@
 
 Design review and technical evidence inform decisions; creating a repository, merging a prototype or passing checks does not approve the product design or select a stack. Record the rationale and unresolved risks in the relevant document when a decision is accepted.
 
-The sequence is: review the interface and workflows, select the technical foundation, validate real email plus CLI operations, then address reliability and macOS distribution. Built-in AI comes later. No release date is committed.
+The current interface is the first-version baseline. Next, define the minimal mail core, validate real email plus CLI operations against candidate foundations, and use that evidence to select the stack. Reliability and macOS distribution follow; built-in AI comes later. No release date is committed.
