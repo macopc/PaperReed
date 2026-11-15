@@ -1,6 +1,7 @@
 # Local upstream research snapshots; provenance is tracked in research/.
 /Mailspring/
 /Zero/
+/research/.local/
 
 # Downloaded reference-site HTML and images; source URLs remain in REFERENCES.md.
 /design/references/

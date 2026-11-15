@@ -1,0 +1,6 @@
+; Research only: allow local protocol fixtures, deny external IP connections.
+; This is not the shipping application's sandbox configuration.
+(version 1)
+(allow default)
+(deny network-outbound)
+(allow network-outbound (remote ip "localhost:*"))
