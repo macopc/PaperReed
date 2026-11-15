@@ -1,0 +1,49 @@
+{
+  "date": "2026-11-15",
+  "scope": "Real upstream prebuilt mailsync; local fake:dovecot IMAP and SMTP; external networking denied; no real mailbox; no engine source changes.",
+  "mailspring_commit": "535f13dd463536f36728bce3efb4ae0d51ab3f19",
+  "sync_commit": "8681eae1d217d993e4d4dc7de17ae8b91fc3da49",
+  "binary_sha256": "cbc1b2ac4cd21f98df7c14759d2145bc17888a83ecab5ff0c3005ddac4776448",
+  "observations": [
+    {
+      "case": "stale-draft",
+      "observation_reproduced": true,
+      "paper_reed_contract_met": false,
+      "original_revision": 1,
+      "user_revision": 3,
+      "final_revision": 5,
+      "stale_write_accepted": true,
+      "user_edit_replaced": true
+    },
+    {
+      "case": "duplicate-send",
+      "observation_reproduced": true,
+      "paper_reed_contract_met": false,
+      "distinct_task_ids": 2,
+      "smtp_submissions": 2,
+      "same_message_id": true
+    },
+    {
+      "case": "crash-before-data",
+      "observation_reproduced": true,
+      "paper_reed_contract_met": false,
+      "killed_with": "SIGKILL",
+      "smtp_before_restart": 0,
+      "smtp_after_restart": 0,
+      "restored_status": "complete",
+      "restored_error": null,
+      "automatic_resend": false
+    },
+    {
+      "case": "crash-after-data",
+      "observation_reproduced": true,
+      "paper_reed_contract_met": false,
+      "killed_with": "SIGKILL",
+      "smtp_before_restart": 1,
+      "smtp_after_restart": 1,
+      "restored_status": "complete",
+      "restored_error": null,
+      "automatic_resend": false
+    }
+  ]
+}

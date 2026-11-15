@@ -6,6 +6,8 @@
 
 [macOS 本机验证](native-validation.md) 补充完整源码准备、构建阻塞，以及仅本机网络下预编译引擎的协议运行结果；同时明确“不需要自建业务服务端”的适用边界。
 
+[邮件核心契约验证](engine-contract-validation.md) 进一步用真实引擎复现旧草稿覆盖、两个任务重复发送，以及两种 SIGKILL 后任务误报完成的情形；这些产品缺口尚未修复。
+
 研究版本、上游 URL 和文件指纹保存在 [source-manifest.json](source-manifest.json)。`Mailspring/`、`Zero/` 是工作区内单独下载的上游资料，不纳入本仓库；本项目尚未成为任何上游的产品分支。视觉参考缓存同样不入库，来源见 [REFERENCES.md](../design/REFERENCES.md)。
 
 ## 复现隔离检查
