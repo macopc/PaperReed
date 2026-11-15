@@ -124,8 +124,12 @@ function mailspring() {
     '../../../src/services/mail-access/identity': {},
   }, globals);
   const handlers = {};
-  tools.registerTools({ tool: (name, _, schema, handler) => { handlers[name] = handler; } });
-  return { config, queued, waited, handlers, access };
+  const schemas = {};
+  tools.registerTools({ tool: (name, _, schema, handler) => {
+    handlers[name] = handler;
+    schemas[name] = schema;
+  } });
+  return { config, queued, waited, handlers, schemas, access };
 }
 
 test('Mailspring registers 24 upstream mail tools', () => {
@@ -179,6 +183,27 @@ test('Mailspring send reports sent:true before any sync completion wait', async 
   assert.equal(JSON.parse(result.content[0].text).sent, true);
   assert.equal(queued[0].kind, 'send');
   assert.equal(waited.length, 0);
+});
+
+// Characterization of the pinned handler, not a claim that a real SMTP server
+// receives two messages: the database and queue are fixtures here.
+test('Mailspring repeated send calls enqueue separate tasks for the same cached draft', async () => {
+  const { handlers, config, queued } = mailspring();
+  config['core.mcp.accessLevel'] = 'read-write-send';
+  for (let i = 0; i < 2; i++) {
+    const result = await handlers.send_draft({ headerMessageId: 'header-1' });
+    assert.equal(result.isError, undefined);
+    assert.equal(JSON.parse(result.content[0].text).sent, true);
+  }
+  assert.equal(queued.length, 2);
+  assert.notEqual(queued[0], queued[1]);
+  assert.equal(queued[0].draft.headerMessageId, queued[1].draft.headerMessageId);
+});
+
+test('Mailspring MCP draft handoff lacks update and send revision/request-id inputs', () => {
+  const { handlers, schemas } = mailspring();
+  assert.equal(handlers.update_draft, undefined);
+  assert.deepEqual(Object.keys(schemas.send_draft), ['headerMessageId']);
 });
 
 test('Zero MCP account switch leaves ordinary mail handlers bound to initial account', async () => {

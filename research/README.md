@@ -2,6 +2,8 @@
 
 状态：可行性探索，不代表已最终选定产品底座或完成生产验证。
 
+最新进展：[首版技术选型](../design/TECH-CHOICE.md) 与 [本轮验证记录](tech-selection-validation.md)。当前推荐优先验证 Mailspring 产品分支；尚未通过完整构建与真实邮箱实验。
+
 研究版本、上游 URL 和文件指纹保存在 [source-manifest.json](source-manifest.json)。`Mailspring/`、`Zero/` 是工作区内单独下载的上游资料，不纳入本仓库；本项目尚未成为任何上游的产品分支。视觉参考缓存同样不入库，来源见 [REFERENCES.md](../design/REFERENCES.md)。
 
 ## 复现隔离检查
@@ -13,7 +15,7 @@ npm ci --prefix research/harness
 node --test research/harness/check-feasibility.cjs
 ```
 
-[validation.txt](validation.txt) 保存研究时的 8 项检查结果。它们使用隔离的数据库、同步和服务商依赖，以及 loopback 测试服务；没有运行 Electron、编译同步引擎或授权真实邮箱。全新克隆若未准备上游源码，不能直接运行这些检查。
+[validation.txt](validation.txt) 保存首次研究的 8 项检查结果；当前脚本补充两项，共 10 项，本轮结果见 [选型验证记录](tech-selection-validation.md)。它们使用隔离的数据库、同步和服务商依赖，以及 loopback 测试服务；没有运行 Electron、编译同步引擎或授权真实邮箱。全新克隆若未准备上游源码，不能直接运行这些检查。
 
 ## 界面检查
 

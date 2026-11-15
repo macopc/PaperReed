@@ -27,6 +27,7 @@ Paper Reed 是一个面向 macOS 的开源邮件客户端探索：重视阅读�
 | UI/UX 评审记录 | [design/UX-REVIEW.md](design/UX-REVIEW.md) |
 | 首版邮件核心设计（本轮方案） | [design/MAIL-CORE.md](design/MAIL-CORE.md) |
 | 邮件领域术语 | [GLOSSARY.md](GLOSSARY.md) |
+| 首版技术选型与验证条件 | [design/TECH-CHOICE.md](design/TECH-CHOICE.md) |
 | 历史技术选型与架构候选 | [design/ARCHITECTURE.md](design/ARCHITECTURE.md) |
 | Agent 交接候选 | [design/AGENT-HANDOFF.md](design/AGENT-HANDOFF.md) |
 | 源码研究与验证边界 | [research/README.md](research/README.md) |

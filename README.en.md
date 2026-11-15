@@ -13,6 +13,7 @@ Paper Reed is an open-source macOS email client exploration focused on thoughtfu
 - Research into Mailspring and Zero, with pinned source provenance and isolated feasibility checks.
 - Candidate architecture and CLI / agent interactions; built-in AI is a later priority.
 - A proposed [first-version mail core](design/MAIL-CORE.md) and [domain glossary](GLOSSARY.md), covering shared UI / CLI state, drafts, account boundaries and operation results. These documents are in Chinese.
+- A [technology recommendation](design/TECH-CHOICE.md) with source evidence and validation criteria: investigate a Mailspring product fork first; complete builds and real mailbox integration remain unverified.
 
 ## Try the prototype
 
