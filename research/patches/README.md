@@ -24,10 +24,11 @@
 | `0018-local-triage.patch` | Mailspring 根目录，在 0017 后应用 | 桌面固定基线，加 0002–0007 / 0009–0017 |
 | `0019-local-rules-classification.patch` | Mailspring 根目录，在 0018 后应用 | 桌面固定基线，加 0002–0007 / 0009–0018 |
 | `0020-attachments-cli-compose.patch` | Mailspring 根目录，在 0019 后应用 | 桌面固定基线，加 0002–0007 / 0009–0019 |
+| `0021-quality-lifecycles.patch` | Mailspring 根目录，在 0020 后应用 | 桌面固定基线，加 0002–0007 / 0009–0020 |
 
-在干净的固定版本 checkout 中，使用补丁的绝对路径分别执行 `git apply --check <patch>`、`git apply <patch>`。0001、0008 按顺序在子模块根目录应用；0002–0007、0009–0020 按顺序在桌面根目录应用。应用 0008 后重新构建引擎，并替换实验桌面 `app/mailsync`；0010 不要求额外原生构建。本轮已在临时目录恢复各文件的基线版本、实际应用补丁，并逐字节比对测试过的源码。
+在干净的固定版本 checkout 中，使用补丁的绝对路径分别执行 `git apply --check <patch>`、`git apply <patch>`。0001、0008 按顺序在子模块根目录应用；0002–0007、0009–0021 按顺序在桌面根目录应用。应用 0008 后重新构建引擎，并替换实验桌面 `app/mailsync`；0010 不要求额外原生构建。本轮已在临时目录恢复各文件的基线版本、实际应用补丁，并逐字节比对测试过的源码。
 
-当前工作区的 `research/.local/Mailspring` 已应用二十份补丁，**不要重复应用**。安装过程中产生的上游 `app/package-lock.json` 变化不在补丁内。
+当前工作区的 `research/.local/Mailspring` 已应用二十一份补丁，**不要重复应用**。安装过程中产生的上游 `app/package-lock.json` 变化不在补丁内。
 
 接入方式：新增一个 `MailMutationGuard.hpp`，只依赖现有 SQLiteCpp / nlohmann。它由 `TaskProcessor.cpp` 和 `MailStore.cpp` 直接包含，不新增构建目标、服务、数据库或任务调度器。迁移在原数据库中建立 `PaperReedSend` 表和活动草稿唯一索引；实验阶段不改变上游 `user_version`。正式分支需要接入自己的版本化迁移。
 
@@ -66,3 +67,7 @@
 0019 接通本机邮件规则、自动分类、手动纠正、已有邮件预览／应用及共用 CLI。在 Paper Reed 模式暂停原上游远端规则入口，不要求重编译引擎。见 [验证记录](../rules-validation-2026-11-16/README.md)。
 
 0020 补齐 CLI 收件人编辑、回复建稿、附件读写、GUI 含附件恢复副本和发送附件快照；贯通设置与收件箱账号颜色，不要求重编译引擎。见 [验证记录](../attachments-validation-2026-11-16/README.md)。
+
+0021 修复关闭期间新编辑丢失、附件错误消费与临时 pending 回收，合并列表读取、缩短后台整理占用写队列的范围，并增加启动时附件回收。不要求重编译引擎。见 [验证记录](../quality-fixes-validation-2026-11-16/README.md)。
+
+固定基线准备、全部补丁重放、CLI 副本比对与 TypeScript 检查使用 [prepare-desktop.py](../../scripts/prepare-desktop.py)，命令见 [贡献指南](../../CONTRIBUTING.md)。

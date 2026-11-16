@@ -21,7 +21,13 @@ Design feedback, workflow examples, reproducible research and small prototype im
 
 Edit the canonical prototype, regenerate standalone pages, run the checks, and manually inspect affected UI flows. Explain the problem, behavior change, validation and limitations in your PR. Keep unrelated changes separate.
 
-源码可行性实验需另外准备上游快照，见 [research/README.md](research/README.md)。它们不属于默认 CI。现有 32 项原型交互检查也不属于静态 CI，不能把语法检查通过写成全部交互通过。
+源码补丁使用固定上游版本。新增或修改补丁后执行：
+
+```sh
+python3 scripts/prepare-desktop.py /tmp/paper-reed-check --typecheck
+```
+
+目标目录必须尚不存在。脚本准备桌面与原生源码、顺序应用补丁、比对 CLI 副本，并从锁文件安装类型检查依赖；CI 运行同一入口。它不构建原生引擎或可运行安装包，真实 Electron / IMAP / SMTP 回归仍需本地实验环境，见 [research/README.md](research/README.md)。可用 `--source <本地上游 checkout>` 复用 Git 对象，用 `--compare <已测试 checkout>` 比对补丁输出。现有 32 项原型交互检查也不属于静态 CI，不能把语法检查通过写成全部交互通过。
 
 ## Contribution terms / 贡献约定
 

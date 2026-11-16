@@ -1,0 +1,20 @@
+const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
+module.exports=async({cdp,work,account,cli,evaluate,until,result:report})=>{
+ const run=s=>evaluate(cdp,s),q=JSON.stringify;
+ const rows=await until(async()=>{const r=await cli('search',{accountId:account.id,query:'in:inbox'});return r.length===8?r:null;},'inbox');
+ await run(`(()=>{global.__pendingKeys=new Set();global.__oldSet=Map.prototype.set;global.__oldDelete=Map.prototype.delete;
+ Map.prototype.set=function(k,v){if(typeof k==='string'&&k.startsWith('pr-mail-'))global.__pendingKeys.add(k);return global.__oldSet.call(this,k,v);};
+ Map.prototype.delete=function(k){if(typeof k==='string'&&k.startsWith('pr-mail-'))global.__pendingKeys.delete(k);return global.__oldDelete.call(this,k);};return true;})()`);
+ const sent=await cli('mark-unread',{targets:[{accountId:account.id,threadId:rows[0].id}],requestId:'review-pending'});
+ const taskId=sent.items[0].taskId;assert(taskId);
+ await until(()=>run(`require('mailspring-exports').DatabaseStore._query('SELECT data FROM Task WHERE id=?',[${q(taskId)}]).then(rows=>rows.length&&JSON.parse(rows[0].data).status==='complete')`),'actual native completion');
+ await until(()=>run('global.__pendingKeys.size===0'),'pending released without status polling');
+ const before=await run('global.__pendingKeys.size');
+ const status=await cli('change-get',{accountId:account.id,taskId});
+ const after=await run('global.__pendingKeys.size');
+ await run('Map.prototype.set=global.__oldSet;Map.prototype.delete=global.__oldDelete;true');
+ const result={nativeTaskCompleted:true,entriesAfterCompletionWithoutStatusPoll:before,entriesAfterStatusPoll:after,status:status.status};
+ assert.equal(before,0);assert.equal(after,0);
+ report.pendingLifecycle=result;
+ console.log('PENDING_REVIEW',JSON.stringify(result));
+};

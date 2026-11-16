@@ -1,0 +1,6 @@
+PASS: 21 patches applied in order from pinned desktop and native baselines.
+PASS: 72 modified source files byte-identical to tested checkout; CLI bundled copies match.
+PASS: fresh npm ci --ignore-scripts in root and app; full npm run typecheck.
+PASS: independent network fetch of both pinned commits and final patch replay / byte comparison.
+PASS: repository checks (58 JavaScript syntax checks, JSON, Markdown links, 12 design previews) and git diff --check.
+Cloud CI configuration added; not yet pushed or executed on GitHub.

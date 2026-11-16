@@ -13,6 +13,7 @@ module.exports = async ({ app, main, cdp, work, account, cli, click, evaluate, u
   };
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await until(() => run('document.querySelectorAll(".pr-mail-row").length===8'), 'synced fixture inbox');
+  if (process.env.PAPER_REED_QUALITY_CHECK) { await require('./check-quality-fixes.cjs')({app,main,cdp,account,cli,work,evaluate,until,restartDesktop}); return; }
   if (process.env.PAPER_REED_ATTACHMENTS_CHECK) { await require('./check-attachments-cli.cjs')({main,cdp,account,cli,work,evaluate,until,restartDesktop}); return; }
   if (process.env.PAPER_REED_INBOX_CHECK) { await require('./check-inbox-operations.cjs')({main,cdp,account,cli,work,evaluate,until}); return; }
   if (process.env.PAPER_REED_RULES_CHECK) { await require('./check-local-rules.cjs')({main,cdp,account,cli,work,evaluate,until,restartDesktop}); return; }

@@ -90,3 +90,5 @@ CLI 安装、连接诊断和 Agent 交接见 [使用说明](research/cli/README.
 本机邮件规则、自动分类与预览应用见 [实际窗口与验证](research/rules-validation-2026-11-16/README.md)。
 
 附件、CLI 写信闭环与账号颜色贯通见 [实际窗口与验证](research/attachments-validation-2026-11-16/README.md)。
+
+实现质量审查及针对性修复见 [审查报告](research/quality-review-2026-11-16/README.md) 和 [修复验证](research/quality-fixes-validation-2026-11-16/README.md)。

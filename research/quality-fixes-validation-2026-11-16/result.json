@@ -1,0 +1,42 @@
+{
+  "attachmentError": {
+    "pendingAfterFailure": true,
+    "waiters": [
+      "rejected",
+      "rejected"
+    ],
+    "remainingPending": false,
+    "dialogs": 1
+  },
+  "attachmentRetry": true,
+  "localStateReads": {
+    "threads": 8,
+    "threadFinds": 0
+  },
+  "readQueuesBehindWrite": {
+    "labelsFinished": true,
+    "inboxFinished": true
+  },
+  "closeRace": {
+    "editableDuringSave": true,
+    "beforeClose": {
+      "body": "<div>Original First edit. Late edit while closing.</div>",
+      "dirty": true
+    },
+    "persistedBody": "<div>Original First edit. Late edit while closing.</div>",
+    "lateEditLost": false
+  },
+  "cleanup": {
+    "orphanRemoved": true,
+    "savedDraftRetained": true,
+    "unmanagedRetained": true,
+    "detachedFileReclaimed": true
+  },
+  "pendingLifecycle": {
+    "nativeTaskCompleted": true,
+    "entriesAfterCompletionWithoutStatusPoll": 0,
+    "entriesAfterStatusPoll": 0,
+    "status": "succeeded"
+  },
+  "observedSMTPSubmissions": 0
+}

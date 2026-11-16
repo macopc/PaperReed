@@ -1,0 +1,834 @@
+diff --git a/app/internal_packages/paper-reed/lib/main.tsx b/app/internal_packages/paper-reed/lib/main.tsx
+index 6df560d..de3a08d 100644
+--- a/app/internal_packages/paper-reed/lib/main.tsx
++++ b/app/internal_packages/paper-reed/lib/main.tsx
+@@ -1,3 +1,4 @@
++import { cleanupDraftFilesAtStartup } from '../../../src/services/mail-core/draft-files';
+ import {
+   reconcileLocalSnoozes,
+   processLocalRules,
+@@ -14,6 +15,7 @@ import PaperReedWorkspace from './workspace';
+ export function activate() {
+   if (!AppEnv.config.get('core.paperReed.enabled')) return;
+   if (AppEnv.isMainWindow()) {
++    cleanupDraftFilesAtStartup().catch((error) => console.error('Paper Reed attachment cleanup:', error));
+     timer = setInterval(reconcile, 15000);
+     unlisten = DatabaseStore.listen(() => {
+       clearTimeout(databaseTimer);
+diff --git a/app/internal_packages/paper-reed/lib/workspace.tsx b/app/internal_packages/paper-reed/lib/workspace.tsx
+index 108715c..d39e671 100644
+--- a/app/internal_packages/paper-reed/lib/workspace.tsx
++++ b/app/internal_packages/paper-reed/lib/workspace.tsx
+@@ -84,6 +84,7 @@ interface State {
+   busy: boolean;
+   receipt: MailReceipt[];
+   receiptAction: string;
++  operationsError: string;
+   operations: {
+     accountId: string;
+     requestId: string;
+@@ -127,6 +128,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     receipt: [],
+     receiptAction: '',
+     operations: [],
++    operationsError: '',
+     ...lastLocation,
+   };
+   unlisten: (() => void)[] = [];
+@@ -240,16 +242,14 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       const recovery =
+         folder === 'drafts' && !query ? await desktopDraftRecoveryInfo(rows as Message[]) : [];
+       const snippets: Record<string, string> = {};
+-      if (folder !== 'drafts' || query)
+-        await Promise.all(
+-          rows.slice(0, limit).map(async (row) => {
+-            const messages = await DatabaseStore.findAll<Message>(Message)
+-              .where({ threadId: row.id, draft: false })
+-              .order(Message.attributes.date.descending())
+-              .limit(1);
+-            snippets[row.id] = messages[0]?.snippet || '';
+-          })
+-        );
++      if ((folder !== 'drafts' || query) && rows.length) {
++        const ids = rows.slice(0, limit).map((row) => row.id);
++        const latest = await DatabaseStore._query(`SELECT threadId, data FROM (
++          SELECT threadId, data, ROW_NUMBER() OVER (PARTITION BY threadId ORDER BY date DESC, id DESC) AS position
++          FROM Message WHERE draft=0 AND threadId IN (${ids.map(() => '?').join(',')})
++        ) WHERE position=1`, ids);
++        for (const row of latest) snippets[row.threadId] = JSON.parse(row.data).snippet || '';
++      }
+       if (this.mounted && generation === this.generation)
+         this.setState({
+           rows: rows.slice(0, limit),
+@@ -277,6 +277,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       const ids = this.accountIds();
+       if (this.mounted)
+         this.setState({
++          operationsError: '',
+           operations: rows
+             .filter((r) => ids.includes(r.accountId))
+             .map((r) => ({
+@@ -287,8 +288,9 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+               subject: JSON.parse(r.payload).draft.subject || '无主题',
+             })),
+         });
+-    } catch {
+-      /* Ledger may not yet exist before the engine opens the fixture. */
++    } catch (error) {
++      console.error('Paper Reed send results:', error);
++      if (this.mounted) this.setState({ operations: [], operationsError: '发送结果暂时无法读取。' });
+     }
+   };
+   move = async (next: () => void | Promise<void>) => {
+@@ -1071,6 +1073,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                 </div>
+               )
+             )}
++            {this.state.operationsError && <p role="status">{this.state.operationsError}</p>}
+             {!!this.state.operations.length && (
+               <details className="pr-send-results">
+                 <summary>最近发送 · {sendLabel(this.state.operations[0])}</summary>
+diff --git a/app/src/flux/stores/attachment-store.ts b/app/src/flux/stores/attachment-store.ts
+index d03c8f9..ee780d4 100644
+--- a/app/src/flux/stores/attachment-store.ts
++++ b/app/src/flux/stores/attachment-store.ts
+@@ -33,7 +33,6 @@ class AttachmentStore extends MailspringStore {
+   _filePreviewPaths = {};
+   _filesDirectory: string = path.join(AppEnv.getConfigDirPath(), 'files');
+   _lastDownloadDirectory: string;
+-  _attachmentErrorsByDraft: { [headerMessageId: string]: Error } = {};
+   _pendingAddsByDraft: { [headerMessageId: string]: Promise<void> } = {};
+
+   constructor() {
+@@ -478,33 +477,33 @@ class AttachmentStore extends MailspringStore {
+   }) => {
+     this._assertIdPresent(headerMessageId);
+
+-    // Chain links swallow rejections so a single failed add can't poison the
+-    // rest of the chain for this draft.
++    // Keep the operation's rejection for every waiter; only the queue tail recovers.
+     const previous = this._pendingAddsByDraft[headerMessageId] || Promise.resolve();
+-    const current = previous
+-      .then(() => this._addAttachmentNow({ headerMessageId, filePath, inline, onCreated }))
+-      .catch((err) => { this._attachmentErrorsByDraft[headerMessageId] = err; AppEnv.showErrorDialog(err.message); });
++    const current = previous.catch(() => {}).then(() =>
++      this._addAttachmentNow({ headerMessageId, filePath, inline, onCreated })
++    );
+     this._pendingAddsByDraft[headerMessageId] = current;
+-    current.then(() => {
+-      if (this._pendingAddsByDraft[headerMessageId] === current) {
++    const finished = () => {
++      if (this._pendingAddsByDraft[headerMessageId] === current)
+         delete this._pendingAddsByDraft[headerMessageId];
+-      }
+-    });
++    };
++    // Acknowledging the dialog abandons the failed add. Readers never consume errors.
++    current.then(finished, async (error) => {
++      try { await AppEnv.showErrorDialog(error.message); }
++      finally { finished(); }
++    }).catch((error) => console.error('Attachment error dialog:', error));
+     return current;
+   };
+
+   hasPendingDraftAttachments(headerMessageId: string) {
+-    return !!(this._pendingAddsByDraft[headerMessageId] || this._attachmentErrorsByDraft[headerMessageId]);
++    return !!this._pendingAddsByDraft[headerMessageId];
+   }
+
+   async waitForDraftAttachments(headerMessageId: string) {
+-    while (this._pendingAddsByDraft[headerMessageId]) await this._pendingAddsByDraft[headerMessageId];
+-    const error = this._attachmentErrorsByDraft[headerMessageId];
+-    if (error) { delete this._attachmentErrorsByDraft[headerMessageId]; throw error; }
++    while (this._pendingAddsByDraft[headerMessageId])
++      await this._pendingAddsByDraft[headerMessageId];
+   }
+
+-  // Errors are surfaced in a dialog rather than rejected so one failed file
+-  // never blocks the rest of the chain for the same draft.
+   async _addAttachmentNow({
+     headerMessageId,
+     filePath,
+diff --git a/app/src/flux/stores/draft-editing-session.ts b/app/src/flux/stores/draft-editing-session.ts
+index 287055d..58aee15 100644
+--- a/app/src/flux/stores/draft-editing-session.ts
++++ b/app/src/flux/stores/draft-editing-session.ts
+@@ -1,3 +1,4 @@
++import type { DraftSaveReceipt } from '../../services/mail-core';
+ import { saveDraft, getDraft, desktopAccess } from '../../services/mail-core';
+ import * as Immutable from 'immutable';
+ import MailspringStore from 'mailspring-store';
+@@ -537,13 +538,12 @@ export class DraftEditingSession extends MailspringStore {
+     this.acceptSaveReceipt(await saveDraft(this._draft, desktopAccess));
+   }
+
+-  acceptSaveReceipt(saved: SyncbackDraftTask) {
+-    saved.assertSaved();
+-    if (this._draft && saved.savedDraftRevision !== undefined) {
++  acceptSaveReceipt(saved: DraftSaveReceipt) {
++    if (this._draft) {
+       this._draft = fastCloneDraft(this._draft);
+       this._draft.version = saved.savedDraftRevision;
+       this._draft.id = saved.savedDraftId;
+-      this._draft.accountId = saved.draft.accountId;
++      this._draft.accountId = saved.accountId;
+     }
+   }
+
+diff --git a/app/src/flux/stores/draft-store.ts b/app/src/flux/stores/draft-store.ts
+index daafcf7..1beaf4c 100644
+--- a/app/src/flux/stores/draft-store.ts
++++ b/app/src/flux/stores/draft-store.ts
+@@ -127,7 +127,8 @@ class DraftStore extends MailspringStore {
+     try {
+       await AttachmentStore.waitForDraftAttachments(session.headerMessageId);
+       await session.changes.commit();
+-      return true;
++      if (session.changes.isDirty()) throw new Error(localized('You made more edits while saving. This window will stay open.'));
++      return JSON.stringify(session.draft().toJSON());
+     } catch (error) {
+       if (error.message !== 'draft-conflict' || AppEnv.isMainWindow()) throw error;
+       const { response } = await require('@electron/remote').dialog.showMessageBox(
+@@ -150,13 +151,13 @@ class DraftStore extends MailspringStore {
+       if (JSON.stringify(session.draft().toJSON()) !== snapshot) {
+         throw new Error(localized('A copy was saved, but you made more edits. This window will stay open.'));
+       }
+-      return true;
++      return snapshot;
+     }
+   }
+
+   _onBeforeUnload = (readyToUnload: () => void) => {
+     if (this._closeSaveInProgress) return false;
+-    const promises = [];
++    const saves = new Map<DraftEditingSession, Promise<string | false>>();
+
+     // Normally we'd just append all promises, even the ones already
+     // fulfilled (nothing to save), but in this case we only want to
+@@ -172,7 +173,7 @@ class DraftStore extends MailspringStore {
+       // main window we can't know if the draft session may also be open in
+       // a popout and have content there.
+       if (AttachmentStore.hasPendingDraftAttachments(session.headerMessageId)) {
+-        promises.push(this._saveSessionBeforeClose(session));
++        saves.set(session, this._saveSessionBeforeClose(session));
+       } else if (draft.pristine && !AppEnv.isMainWindow()) {
+         Actions.queueTask(
+           new DestroyDraftTask({
+@@ -182,20 +183,27 @@ class DraftStore extends MailspringStore {
+         );
+         if (!AppEnv.config.get('core.paperReed.enabled')) AttachmentStore.deleteFilesOwnedByDraft(draft.files);
+       } else if (session.changes.isDirty()) {
+-        promises.push(this._saveSessionBeforeClose(session));
++        saves.set(session, this._saveSessionBeforeClose(session));
+       }
+     });
+
+-    if (promises.length > 0) {
++    if (saves.size > 0) {
+       // A timeout is not a save receipt. Keep the editor and its dirty changes
+       // alive when persistence fails, including an external revision conflict.
+       this._closeSaveInProgress = true;
+-      Promise.all(promises)
++      Promise.all([...saves.values()])
+         .then((saved) => {
+           if (saved.some((value) => !value)) return;
++          const snapshots = new Map([...saves.keys()].map((session, i) => [session, saved[i]]));
++          const edited = Object.values(this._draftSessions).some((session) =>
++            AttachmentStore.hasPendingDraftAttachments(session.headerMessageId) ||
++            (snapshots.has(session)
++              ? JSON.stringify(session.draft().toJSON()) !== snapshots.get(session)
++              : session.changes.isDirty())
++          );
++          if (edited) throw new Error(localized('You made more edits while saving. This window will stay open.'));
+           this._draftSessions = {};
+-          // Allow committed database deltas to reach the other windows first.
+-          setTimeout(readyToUnload, 15);
++          readyToUnload();
+         })
+         .catch((error) => {
+           AppEnv.showErrorDialog(
+@@ -634,6 +642,8 @@ class DraftStore extends MailspringStore {
+     try {
+       await AttachmentStore.waitForDraftAttachments(session.headerMessageId);
+       await session.changes.commit();
++      if (session.changes.isDirty() || AttachmentStore.hasPendingDraftAttachments(headerMessageId))
++        throw new Error(localized('You made more edits while saving. Review them before sending.'));
+     } catch (error) {
+       this._draftsSending[headerMessageId] = false;
+       this.trigger({ headerMessageId });
+diff --git a/app/src/services/mail-core/draft-files.ts b/app/src/services/mail-core/draft-files.ts
+index 6b2ed9d..ca1c4ee 100644
+--- a/app/src/services/mail-core/draft-files.ts
++++ b/app/src/services/mail-core/draft-files.ts
+@@ -51,3 +51,43 @@ export async function copyDraftFiles(files: File[]): Promise<File[]> {
+     throw new Error(`attachment-copy-failed: ${error.message}`);
+   }
+ }
++
++// One startup sweep, not a background collector. Until restart, persisted drafts,
++// unsaved editors and send attempts may all own older copies of an attachment.
++export async function cleanupDraftFilesAtStartup() {
++  const { default: DatabaseStore } = await import('../../flux/stores/database-store');
++  const { default: DraftStore } = await import('../../flux/stores/draft-store');
++  const directory = path.join(AppEnv.getConfigDirPath(), 'files', 'lo', 'ca');
++  let candidates: string[];
++  try {
++    candidates = fs.readdirSync(directory, { withFileTypes: true })
++      .filter((entry) => entry.isDirectory() && /^local-[a-f0-9]{8}-[a-f0-9]{4}$/.test(entry.name))
++      .map((entry) => entry.name);
++  } catch (error) {
++    if (error.code === 'ENOENT') return 0;
++    throw error;
++  }
++  if (!candidates.length) return 0;
++  // One SQLite read snapshot includes queued drafts and unresolved sends. Preserve
++  // received-message references too, including drafts that were synchronized remotely.
++  const rows = await DatabaseStore._query(`SELECT lower(json_extract(f.value, '$.id')) AS id FROM Message m, json_each(m.data, '$.files') f
++    UNION SELECT lower(json_extract(f.value, '$.id')) FROM Task t, json_each(t.data, '$.draft.files') f
++      WHERE json_extract(t.data, '$.status') NOT IN ('complete','cancelled')
++    UNION SELECT lower(json_extract(f.value, '$.id')) FROM PaperReedSend s, json_each(s.payload, '$.draft.files') f
++      WHERE s.phase NOT IN ('accepted','rejected') OR (s.phase='accepted' AND s.sentCopy='pending')
++  `);
++  // A renderer reload with live composers is not an application startup.
++  const windows = require('@electron/remote').getGlobal('application').windowManager.getOpenWindows();
++  if (Object.keys(DraftStore._draftSessions).length || windows.some((w) => w.windowType === 'composer'))
++    return 0;
++  const referenced = new Set(rows.map((row) => row.id));
++  let removed = 0;
++  // No asynchronous gap between the ownership check and deletion. Only directories
++  // present before the database read are eligible; concurrent new imports are untouched.
++  for (const id of candidates) {
++    if (referenced.has(id)) continue;
++    fs.rmSync(path.join(directory, id), { recursive: true, force: true });
++    removed++;
++  }
++  return removed;
++}
+diff --git a/app/src/services/mail-core/inbox.ts b/app/src/services/mail-core/inbox.ts
+index 8700952..c06286b 100644
+--- a/app/src/services/mail-core/inbox.ts
++++ b/app/src/services/mail-core/inbox.ts
+@@ -1,6 +1,6 @@
++import TaskQueue from '../../flux/stores/task-queue';
+ import {
+   ensureLocalTriage,
+-  reconcileLocalSnoozes,
+   localViewSQL,
+   localPinOrder,
+ } from './local-triage';
+@@ -62,7 +62,6 @@ export async function queryInbox(
+   access: InboxAccess
+ ) {
+   await ensureLocalTriage();
+-  await reconcileLocalSnoozes();
+   const grant = access.grant();
+   input.accountIds.forEach((id) => access.check(id, false));
+   const ids = input.accountIds.filter(
+@@ -107,8 +106,6 @@ function taskState(task: ChangeMailTask): string {
+   return task.status === Task.Status.Remote ? 'syncing' : 'queued';
+ }
+ function receipt(task: ChangeMailTask): MailReceipt {
+-  pending.delete(task.id + ':' + task.paperReed.action);
+-  pending.delete(task.id + ':undo');
+   const status = taskState(task);
+   return {
+     accountId: task.accountId,
+@@ -146,10 +143,12 @@ export async function mailTaskStatus(
+   return result;
+ }
+ const pending = new Map<string, Promise<MailReceipt>>();
+-async function queued(task: ChangeMailTask) {
++async function queued(task: ChangeMailTask, key: string) {
+   task.canBeUndone = false; // Exact undo below; do not also offer the upstream approximate/global undo.
+   task.willBeQueued();
+   Actions.queueTask(task);
++  // Keep the short admission window deduplicated without delaying the queued receipt.
++  TaskQueue.waitForPerformLocal(task).then(() => pending.delete(key));
+   return {
+     accountId: task.accountId,
+     threadId: task.paperReed.threadId,
+@@ -193,7 +192,6 @@ export async function organizeMail(
+       if (existing) {
+         if (existing.paperReed?.action !== input.action) throw new Error('request-conflict');
+         items.push(receipt(await taskFor(target.accountId, id, access, true)));
+-        pending.delete(id + ':' + input.action);
+         continue;
+       }
+       const pendingKey = id + ':' + input.action;
+@@ -269,16 +267,16 @@ export async function organizeMail(
+             access.check(target.accountId, true);
+             if (messages.some((m) => !isMessageAllowed(access.grant(), m)))
+               throw new Error('Access denied: excluded mail');
+-            return queued(task);
++            return queued(task, pendingKey);
+           })()
+         );
+       try {
+         const result = await pending.get(pendingKey);
+         items.push(result);
+         if (result.status === 'unchanged') pending.delete(pendingKey);
+-      } catch (e) {
++      } catch (error) {
+         pending.delete(pendingKey);
+-        throw e;
++        throw error;
+       }
+     } catch (error) {
+       items.push({ ...target, status: 'rejected', error: error.message });
+@@ -314,7 +312,7 @@ export async function undoMail(ref: { accountId: string; taskId: string }, acces
+         undo.id = id;
+         undo.paperReed = { ...task.paperReed, undoable: false };
+         access.check(task.accountId, true);
+-        return queued(undo);
++        return queued(undo, key);
+       })()
+     );
+   try {
+diff --git a/app/src/services/mail-core/index.ts b/app/src/services/mail-core/index.ts
+index 891c516..8aa0ead 100644
+--- a/app/src/services/mail-core/index.ts
++++ b/app/src/services/mail-core/index.ts
+@@ -45,8 +45,10 @@ export function draftResult(draft: Message) {
+     files: draft.files.map(f => ({ id: f.id, filename: f.displayName(), size: f.size, contentType: f.contentType, contentId: f.contentId })) };
+ }
+
++export type DraftSaveReceipt = { savedDraftId: string; savedDraftRevision: number; accountId: string };
++
+ // Desktop edits and external edits go through the same task and receipt check.
+-export async function saveDraft(draft: Message, access: Access, recoverySource?: { sourceDraftId: string; sourceRevision: number }) {
++export async function saveDraft(draft: Message, access: Access, recoverySource?: { sourceDraftId: string; sourceRevision: number }): Promise<DraftSaveReceipt> {
+   access.check(draft.accountId, 'draft');
+   if (!(await access.visible(draft))) throw new Error('draft-not-found');
+   if (recoverySource) {
+@@ -59,7 +61,9 @@ export async function saveDraft(draft: Message, access: Access, recoverySource?:
+   const saved = await TaskQueue.waitForPerformLocal(task);
+   if (saved.error) throw new Error((saved.error as any).key || 'draft-save-failed');
+   saved.assertSaved();
+-  return saved;
++  if (!saved.savedDraftId || !Number.isSafeInteger(saved.savedDraftRevision) || saved.savedDraftRevision < 1)
++    throw new Error('draft-save-receipt-missing');
++  return { savedDraftId: saved.savedDraftId, savedDraftRevision: saved.savedDraftRevision, accountId: saved.draft.accountId };
+ }
+
+ export type DraftRecoveryInfo = {
+diff --git a/app/src/services/mail-core/local-triage.ts b/app/src/services/mail-core/local-triage.ts
+index bd8aa7d..ae89ae8 100644
+--- a/app/src/services/mail-core/local-triage.ts
++++ b/app/src/services/mail-core/local-triage.ts
+@@ -46,9 +46,9 @@ function changed() {
+   listeners.forEach((fn) => fn());
+ }
+ // The upstream renderer connection is read-only. One local writer uses the same database,
+-// and writes only our three local tables; mail mutations stay with the native engine.
++// and writes only our local tables; mail mutations stay with the native engine.
+ let writer: Sqlite3.Database;
+-const sql = async (query: string, values: any[] = []): Promise<any[]> => {
++const sql = (query: string, values: any[] = []): any[] => {
+   const statement = writer.prepare(query);
+   return statement.reader ? statement.all(values) : (statement.run(values), []);
+ };
+@@ -59,28 +59,28 @@ export function ensureLocalTriage() {
+       await DatabaseStore._query('SELECT 1');
+       if (!AppEnv.isMainWindow()) throw new Error('local-triage-requires-main-window');
+       writer = new Sqlite3(DatabaseStore._databasePath, { fileMustExist: true, timeout: 10000 });
+-      await sql(
++      sql(
+         'CREATE TABLE IF NOT EXISTS PaperReedLocalThread (accountId TEXT NOT NULL, threadId TEXT NOT NULL, pinned INTEGER NOT NULL DEFAULT 0, snoozeUntil INTEGER, baseline TEXT, PRIMARY KEY(accountId, threadId))'
+       );
+-      await sql(
++      sql(
+         'CREATE TABLE IF NOT EXISTS PaperReedLocalLabel (id TEXT PRIMARY KEY, name TEXT NOT NULL, nameKey TEXT NOT NULL UNIQUE, color TEXT NOT NULL)'
+       );
+-      await sql(
++      sql(
+         'CREATE TABLE IF NOT EXISTS PaperReedLocalThreadLabel (accountId TEXT NOT NULL, threadId TEXT NOT NULL, labelId TEXT NOT NULL, PRIMARY KEY(accountId, threadId, labelId))'
+       );
+-      const columns = await sql('PRAGMA table_info(PaperReedLocalThread)');
++      const columns = sql('PRAGMA table_info(PaperReedLocalThread)');
+       if (!columns.some((c) => c.name === 'category'))
+-        await sql(
++        sql(
+           "ALTER TABLE PaperReedLocalThread ADD COLUMN category TEXT NOT NULL DEFAULT 'ordinary'"
+         );
+       if (!columns.some((c) => c.name === 'categoryManual'))
+-        await sql(
++        sql(
+           'ALTER TABLE PaperReedLocalThread ADD COLUMN categoryManual INTEGER NOT NULL DEFAULT 0'
+         );
+-      await sql(
++      sql(
+         'CREATE TABLE IF NOT EXISTS PaperReedLocalRule (id TEXT PRIMARY KEY, accountId TEXT NOT NULL, name TEXT NOT NULL, field TEXT NOT NULL, query TEXT NOT NULL, action TEXT NOT NULL, value TEXT NOT NULL, enabled INTEGER NOT NULL, position INTEGER NOT NULL, baseline TEXT)'
+       );
+-      await sql(
++      sql(
+         'CREATE TABLE IF NOT EXISTS PaperReedRuleProcessed (accountId TEXT NOT NULL,messageId TEXT NOT NULL,PRIMARY KEY(accountId,messageId))'
+       );
+     })().catch((error) => {
+@@ -150,7 +150,7 @@ export function editLocalLabel(
+       throw new Error('duplicate-label-name');
+     const id = input.id || randomUUID();
+     globalLabelAccess(access);
+-    await sql(
++    sql(
+       'INSERT INTO PaperReedLocalLabel (id,name,nameKey,color) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,nameKey=excluded.nameKey,color=excluded.color',
+       [id, name, name.toLowerCase(), color]
+     );
+@@ -164,36 +164,59 @@ export async function localStates(
+ ): Promise<Record<string, LocalState>> {
+   await ensureLocalTriage();
+   const result: Record<string, LocalState> = {};
++  if (!targets.length) return result;
++  targets.forEach((t) => access.check(t.accountId, false));
++  const threads = await DatabaseStore.findAll<Thread>(Thread).where(
++    Thread.attributes.id.in(targets.map((t) => t.threadId))
++  );
++  // No awaits after this authorization boundary; state and labels share a local snapshot.
++  const byId = new Map(threads.map((t) => [t.id, t]));
+   for (const target of targets) {
+-    await allowed(target, access, false);
+-    const [state] = await sql(
+-      'SELECT pinned,snoozeUntil,category,categoryManual FROM PaperReedLocalThread WHERE accountId=? AND threadId=?',
+-      [target.accountId, target.threadId]
+-    );
+-    const labels = await sql(
+-      'SELECT l.id,l.name,l.color FROM PaperReedLocalLabel l JOIN PaperReedLocalThreadLabel t ON t.labelId=l.id WHERE t.accountId=? AND t.threadId=? ORDER BY l.nameKey',
+-      [target.accountId, target.threadId]
+-    );
+-    await allowed(target, access, false);
++    access.check(target.accountId, false);
++    const thread = byId.get(target.threadId);
++    if (
++      !thread ||
++      thread.accountId !== target.accountId ||
++      !isThreadAllowed(access.grant(), thread)
++    )
++      throw new Error('thread-not-found');
+     result[target.threadId] = {
+-      category: state?.category || 'ordinary',
+-      categoryManual: !!state?.categoryManual,
+-      pinned: !!state?.pinned,
+-      snoozeUntil: state?.snoozeUntil || null,
+-      labels,
++      category: 'ordinary',
++      categoryManual: false,
++      pinned: false,
++      snoozeUntil: null,
++      labels: [],
+     };
+   }
++  const marks = targets.map(() => '?').join(',');
++  const ids = targets.map((t) => t.threadId);
++  writer.transaction(() => {
++    const states = sql(`SELECT * FROM PaperReedLocalThread WHERE threadId IN (${marks})`, ids);
++    const labels = sql(
++      `SELECT t.threadId,l.id,l.name,l.color FROM PaperReedLocalThreadLabel t
++      JOIN PaperReedLocalLabel l ON l.id=t.labelId WHERE t.threadId IN (${marks}) ORDER BY l.nameKey`,
++      ids
++    );
++    for (const state of states)
++      Object.assign(result[state.threadId], {
++        category: state.category,
++        categoryManual: !!state.categoryManual,
++        pinned: !!state.pinned,
++        snoozeUntil: state.snoozeUntil > Date.now() ? state.snoozeUntil : null,
++      });
++    for (const { threadId, ...label } of labels) result[threadId].labels.push(label);
++  })();
+   return result;
+ }
+-async function inboxBaseline(accountId: string) {
+-  const rows = await sql(
++function inboxBaseline(accountId: string) {
++  const rows = sql(
+     "SELECT id,data FROM Folder WHERE accountId=? AND json_extract(data,'$.role')='inbox'",
+     [accountId]
+   );
+   const folder = rows[0];
+   const status = folder && JSON.parse(folder.data).localStatus;
+   if (!status?.uidvalidity || !status?.uidnext) throw new Error('snooze-needs-synced-inbox');
+-  const [max] = await sql(
++  const [max] = sql(
+     'SELECT MAX(remoteUID) AS uid FROM MessageFolder WHERE accountId=? AND folderId=?',
+     [accountId, folder.id]
+   );
+@@ -238,7 +261,7 @@ export function changeLocalMail(input: LocalChange, access: InboxAccess) {
+             thread.categories.some((c) => ['spam', 'trash'].includes(c.role))
+           )
+             throw new Error('snooze-requires-inbox');
+-          const cursor = await inboxBaseline(target.accountId);
++          const cursor = inboxBaseline(target.accountId);
+           const known = await DatabaseStore.findAll<Message>(Message).where({
+             accountId: target.accountId,
+             threadId: target.threadId,
+@@ -265,27 +288,27 @@ export function changeLocalMail(input: LocalChange, access: InboxAccess) {
+               : ruleEffects(await latestIncoming(target), await storedRules(target.accountId))
+                   .category || 'ordinary';
+           await allowed(target, access, true);
+-          await sql(
++          sql(
+             'INSERT INTO PaperReedLocalThread (accountId,threadId,category,categoryManual) VALUES (?,?,?,?) ON CONFLICT(accountId,threadId) DO UPDATE SET category=excluded.category,categoryManual=excluded.categoryManual',
+             [...args, category, input.action === 'classify' ? 1 : 0]
+           );
+         } else if (input.action === 'pin' || input.action === 'unpin')
+-          await sql(
++          sql(
+             'INSERT INTO PaperReedLocalThread (accountId,threadId,pinned) VALUES (?,?,?) ON CONFLICT(accountId,threadId) DO UPDATE SET pinned=excluded.pinned',
+             [...args, input.action === 'pin' ? 1 : 0]
+           );
+         else if (input.action === 'snooze' || input.action === 'unsnooze')
+-          await sql(
++          sql(
+             'INSERT INTO PaperReedLocalThread (accountId,threadId,snoozeUntil,baseline) VALUES (?,?,?,?) ON CONFLICT(accountId,threadId) DO UPDATE SET snoozeUntil=excluded.snoozeUntil,baseline=excluded.baseline',
+             [...args, input.action === 'snooze' ? until : null, baseline]
+           );
+         else if (input.action === 'label-add')
+-          await sql(
++          sql(
+             'INSERT OR IGNORE INTO PaperReedLocalThreadLabel (accountId,threadId,labelId) VALUES (?,?,?)',
+             [...args, input.labelId]
+           );
+         else
+-          await sql(
++          sql(
+             'DELETE FROM PaperReedLocalThreadLabel WHERE accountId=? AND threadId=? AND labelId=?',
+             [...args, input.labelId]
+           );
+@@ -299,56 +322,59 @@ export function changeLocalMail(input: LocalChange, access: InboxAccess) {
+   });
+ }
+ // UID baseline rejects historical backfill even when its Date header is newer. No remote move.
+-export function reconcileLocalSnoozes() {
+-  return serial(async () => {
+-    const rows = await sql(
+-      'SELECT accountId,threadId,snoozeUntil,baseline FROM PaperReedLocalThread WHERE snoozeUntil IS NOT NULL'
+-    );
+-    let count = 0;
+-    for (const row of rows) {
+-      if (!AccountStore.accountForId(row.accountId)) continue;
+-      let wake = row.snoozeUntil <= Date.now();
+-      const thread = await DatabaseStore.find<Thread>(Thread, row.threadId);
+-      if (!thread) continue;
+-      if (
+-        thread.categories.some((c) => ['spam', 'trash'].includes(c.role)) ||
+-        !thread.categories.some((c) => c.role === 'inbox')
+-      )
+-        wake = true;
+-      if (!wake) {
+-        const baseline = JSON.parse(row.baseline);
+-        const [folder] = await sql('SELECT data FROM Folder WHERE id=? AND accountId=?', [
+-          baseline.folderId,
+-          row.accountId,
+-        ]);
+-        const status = folder && JSON.parse(folder.data).localStatus;
+-        // A UIDVALIDITY reset invalidates new-mail evidence; retain the timer, never guess.
+-        if (status?.uidvalidity === baseline.validity) {
+-          const candidates = await sql(
+-            'SELECT m.id FROM Message m JOIN MessageFolder p ON p.messageId=m.id WHERE m.accountId=? AND m.threadId=? AND m.draft=0 AND p.folderId=? AND p.remoteUID>=?',
+-            [row.accountId, row.threadId, baseline.folderId, baseline.nextUID]
+-          );
+-          for (const c of candidates) {
+-            if (baseline.knownIds.includes(c.id)) continue;
+-            const message = await DatabaseStore.find<Message>(Message, c.id);
+-            if (message?.from.length && !message.isFromMe()) {
+-              wake = true;
+-              break;
+-            }
++export async function reconcileLocalSnoozes() {
++  await ensureLocalTriage();
++  const rows = sql(
++    'SELECT accountId,threadId,snoozeUntil,baseline FROM PaperReedLocalThread WHERE snoozeUntil IS NOT NULL'
++  );
++  let count = 0;
++  for (const row of rows) {
++    if (!AccountStore.accountForId(row.accountId)) continue;
++    let wake = row.snoozeUntil <= Date.now();
++    const thread = await DatabaseStore.find<Thread>(Thread, row.threadId);
++    if (!thread) continue;
++    if (
++      thread.categories.some((c) => ['spam', 'trash'].includes(c.role)) ||
++      !thread.categories.some((c) => c.role === 'inbox')
++    )
++      wake = true;
++    if (!wake) {
++      const baseline = JSON.parse(row.baseline);
++      const [folder] = sql('SELECT data FROM Folder WHERE id=? AND accountId=?', [
++        baseline.folderId,
++        row.accountId,
++      ]);
++      const status = folder && JSON.parse(folder.data).localStatus;
++      // A UIDVALIDITY reset invalidates new-mail evidence; retain the timer, never guess.
++      if (status?.uidvalidity === baseline.validity) {
++        const candidates = sql(
++          'SELECT m.id FROM Message m JOIN MessageFolder p ON p.messageId=m.id WHERE m.accountId=? AND m.threadId=? AND m.draft=0 AND p.folderId=? AND p.remoteUID>=?',
++          [row.accountId, row.threadId, baseline.folderId, baseline.nextUID]
++        );
++        for (const c of candidates) {
++          if (baseline.knownIds.includes(c.id)) continue;
++          const message = await DatabaseStore.find<Message>(Message, c.id);
++          if (message?.from.length && !message.isFromMe()) {
++            wake = true;
++            break;
+           }
+         }
+       }
+-      if (wake) {
+-        await sql(
+-          'UPDATE PaperReedLocalThread SET snoozeUntil=NULL,baseline=NULL WHERE accountId=? AND threadId=?',
+-          [row.accountId, row.threadId]
+-        );
+-        count++;
+-      }
+     }
+-    if (count) changed();
+-    return count;
+-  });
++    if (wake) {
++      // The scan does not own the write queue. Do not overwrite a later snooze.
++      count += await serial(
++        async () =>
++          writer
++            .prepare(
++              'UPDATE PaperReedLocalThread SET snoozeUntil=NULL,baseline=NULL WHERE accountId=? AND threadId=? AND snoozeUntil=? AND baseline=?'
++            )
++            .run(row.accountId, row.threadId, row.snoozeUntil, row.baseline).changes
++      );
++    }
++  }
++  if (count) changed();
++  return count;
+ }
+ // Only fixed SQL and escaped label IDs enter the query builder; filters run before pagination.
+ export function localViewSQL(view?: string, hideSnoozed = false) {
+@@ -356,7 +382,7 @@ export function localViewSQL(view?: string, hideSnoozed = false) {
+   if (view === 'pinned')
+     return `EXISTS (SELECT 1 FROM PaperReedLocalThread s WHERE ${state} AND s.pinned=1)`;
+   if (view === 'snoozed')
+-    return `EXISTS (SELECT 1 FROM PaperReedLocalThread s WHERE ${state} AND s.snoozeUntil IS NOT NULL)`;
++    return `EXISTS (SELECT 1 FROM PaperReedLocalThread s WHERE ${state} AND s.snoozeUntil > ${Date.now()})`;
+   if (view?.startsWith('category:')) {
+     const category = view.slice(9);
+     if (!Object.hasOwnProperty.call(categories, category)) return '0';
+@@ -365,7 +391,7 @@ export function localViewSQL(view?: string, hideSnoozed = false) {
+   if (view?.startsWith('label:'))
+     return `EXISTS (SELECT 1 FROM PaperReedLocalThreadLabel t JOIN PaperReedLocalLabel l ON l.id=t.labelId WHERE t.accountId=Thread.accountId AND t.threadId=Thread.id AND l.id='${view.slice(6).replace(/'/g, "''")}')`;
+   return hideSnoozed
+-    ? `NOT EXISTS (SELECT 1 FROM PaperReedLocalThread s WHERE ${state} AND s.snoozeUntil IS NOT NULL)`
++    ? `NOT EXISTS (SELECT 1 FROM PaperReedLocalThread s WHERE ${state} AND s.snoozeUntil > ${Date.now()})`
+     : '1';
+ }
+ export const localPinOrder = {
+@@ -400,11 +426,9 @@ export type RuleInput = {
+ };
+ async function storedRules(accountId: string): Promise<LocalRule[]> {
+   await ensureLocalTriage();
+-  return (
+-    await sql('SELECT * FROM PaperReedLocalRule WHERE accountId=? ORDER BY position,id', [
+-      accountId,
+-    ])
+-  ).map((r) => ({ ...r, enabled: !!r.enabled }));
++  return sql('SELECT * FROM PaperReedLocalRule WHERE accountId=? ORDER BY position,id', [
++    accountId,
++  ]).map((r) => ({ ...r, enabled: !!r.enabled }));
+ }
+ const revisionOf = (rules: LocalRule[]) =>
+   createHash('sha256').update(JSON.stringify(rules)).digest('hex');
+@@ -416,7 +440,7 @@ function ruleAccess(accountId: string, access: InboxAccess) {
+ export async function listLocalRules(accountId: string, access: InboxAccess) {
+   access.check(accountId, false);
+   const rules = await storedRules(accountId);
+-  const folders = await sql('SELECT id,data FROM Folder WHERE accountId=?', [accountId]);
++  const folders = sql('SELECT id,data FROM Folder WHERE accountId=?', [accountId]);
+   access.check(accountId, false);
+   return {
+     revision: revisionOf(rules),
+@@ -456,10 +480,10 @@ export function saveLocalRule(input: RuleInput, access: InboxAccess) {
+       throw new Error('label-not-found');
+     if (input.action === 'category' && !Object.hasOwnProperty.call(categories, input.value))
+       throw new Error('invalid-category');
+-    const baseline = input.enabled ? JSON.stringify(await inboxBaseline(input.accountId)) : null;
++    const baseline = input.enabled ? JSON.stringify(inboxBaseline(input.accountId)) : null;
+     const id = input.id || randomUUID();
+     ruleAccess(input.accountId, access);
+-    await sql(
++    sql(
+       'INSERT INTO PaperReedLocalRule (id,accountId,name,field,query,action,value,enabled,position,baseline) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,field=excluded.field,query=excluded.query,action=excluded.action,value=excluded.value,enabled=excluded.enabled,baseline=excluded.baseline',
+       [
+         id,
+@@ -481,10 +505,7 @@ export function saveLocalRule(input: RuleInput, access: InboxAccess) {
+ export function deleteLocalRule(input: { accountId: string; id: string }, access: InboxAccess) {
+   return serial(async () => {
+     ruleAccess(input.accountId, access);
+-    await sql('DELETE FROM PaperReedLocalRule WHERE accountId=? AND id=?', [
+-      input.accountId,
+-      input.id,
+-    ]);
++    sql('DELETE FROM PaperReedLocalRule WHERE accountId=? AND id=?', [input.accountId, input.id]);
+     changed();
+     return { deleted: true };
+   });
+@@ -624,12 +645,14 @@ export function applyLocalRules(
+ let autoRun: Promise<number>;
+ export function processLocalRules() {
+   if (autoRun) return autoRun;
+-  autoRun = serial(async () => {
++  autoRun = (async () => {
++    await ensureLocalTriage();
+     let count = 0;
+     for (const accountId of AccountStore.accountIds()) {
+-      const rules = (await storedRules(accountId)).filter((r) => r.enabled && r.baseline);
++      const allRules = await storedRules(accountId);
++      const rules = allRules.filter((r) => r.enabled && r.baseline);
+       if (!rules.length) continue;
+-      const folders = await sql('SELECT id,data FROM Folder WHERE accountId=?', [accountId]);
++      const folders = sql('SELECT id,data FROM Folder WHERE accountId=?', [accountId]);
+       const valid = rules.filter((r) => {
+         const b = JSON.parse(r.baseline),
+           f = folders.find((f) => f.id === b.folderId);
+@@ -643,7 +666,7 @@ export function processLocalRules() {
+       const baseline = JSON.parse(valid[0].baseline);
+       const minUID = Math.min(...valid.map((r) => JSON.parse(r.baseline).nextUID));
+       // A per-message marker avoids losing lower UIDs ingested after a higher UID.
+-      const candidates = await sql(
++      const candidates = sql(
+         'SELECT DISTINCT m.id,p.remoteUID FROM Message m JOIN MessageFolder p ON p.messageId=m.id WHERE m.accountId=? AND m.draft=0 AND p.folderId=? AND p.remoteUID>=? AND NOT EXISTS (SELECT 1 FROM PaperReedRuleProcessed seen WHERE seen.accountId=m.accountId AND seen.messageId=m.id) ORDER BY p.remoteUID,m.id LIMIT 100',
+         [accountId, baseline.folderId, minUID]
+       );
+@@ -662,20 +685,28 @@ export function processLocalRules() {
+             return b.folderId === baseline.folderId && candidate.remoteUID >= b.nextUID;
+           })
+         );
+-        writer.transaction(() => {
+-          commitEffects({ accountId, threadId: message.threadId }, effects);
+-          writer
+-            .prepare(
+-              'INSERT OR IGNORE INTO PaperReedRuleProcessed (accountId,messageId) VALUES (?,?)'
+-            )
+-            .run(accountId, message.id);
+-        })();
+-        count++;
++        await serial(async () => {
++          // A paused or edited rule must not commit results from the previous scan.
++          if (
++            !AccountStore.accountForId(accountId) ||
++            revisionOf(await storedRules(accountId)) !== revisionOf(allRules)
++          )
++            return;
++          writer.transaction(() => {
++            commitEffects({ accountId, threadId: message.threadId }, effects);
++            writer
++              .prepare(
++                'INSERT OR IGNORE INTO PaperReedRuleProcessed (accountId,messageId) VALUES (?,?)'
++              )
++              .run(accountId, message.id);
++          })();
++          count++;
++        });
+       }
+     }
+     if (count) changed();
+     return count;
+-  }).finally(() => {
++  })().finally(() => {
+     autoRun = undefined;
+   });
+   return autoRun;
