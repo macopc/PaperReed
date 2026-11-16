@@ -1,0 +1,37 @@
+{
+  "attachmentError": {
+    "pendingAfterFailure": true,
+    "waiters": [
+      "rejected",
+      "fulfilled"
+    ],
+    "remainingPending": false,
+    "dialogs": 1
+  },
+  "localStateReads": {
+    "threads": 8,
+    "threadFinds": 16
+  },
+  "readQueuesBehindWrite": {
+    "labelsFinished": true,
+    "inboxFinished": false
+  },
+  "closeRace": {
+    "editableDuringSave": true,
+    "beforeClose": {
+      "body": "<div>Original First edit. Late edit while closing.</div>",
+      "dirty": true
+    },
+    "persistedBody": "<div>Original First edit.</div>",
+    "lateEditLost": true
+  },
+  "pendingLifecycle": {
+    "nativeTaskCompleted": true,
+    "entriesAfterCompletionWithoutStatusPoll": 1,
+    "entriesAfterStatusPoll": 0,
+    "status": "succeeded"
+  },
+  "reviewedCommit": "bc5d15bd62e13f041794da27a1bd60e44a32312e",
+  "observedSMTPSubmissions": 0,
+  "scope": "Real isolated Electron and native IMAP engine; delayed native save receipt and one validation read to control interleaving. Product source unchanged."
+}
