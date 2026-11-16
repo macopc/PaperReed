@@ -1,0 +1,18 @@
+{
+  "errors": [
+    "draft-conflict"
+  ],
+  "choices": [
+    {
+      "type": "warning",
+      "message": "This draft has changed elsewhere.",
+      "detail": "Keep editing, or save your edits as a separate draft and close this window. The latest original draft will be kept.",
+      "buttons": [
+        "Keep Editing",
+        "Save Copy and Close"
+      ],
+      "defaultId": 0,
+      "cancelId": 0
+    }
+  ]
+}

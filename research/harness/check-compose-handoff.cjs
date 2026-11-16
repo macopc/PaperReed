@@ -21,9 +21,7 @@ async function cli(command,input,expectError=false){
  return JSON.parse(stdout||stderr);
 }
 async function click(page,session,selector){const box=await evaluate(session,`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)return null;const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`);assert(box,selector);await page.mouse.click(box.x,box.y);}
-(async()=>{
- const reservation=require('node:net').createServer();await new Promise(r=>reservation.listen(0,'127.0.0.1',r));port=reservation.address().port;await new Promise(r=>reservation.close(r));
- configData['*'].core.mcp.port=port;configData['*'].core.mcp.token=token;fs.writeFileSync(path.join(config,'config.json'),JSON.stringify(configData));
+async function startDesktop(){
  const env={...process.env};delete env.PLAYWRIGHT;delete env.ELECTRON_RUN_AS_NODE;
  app=await _electron.launch({executablePath:r('electron'),args:[path.join(upstream,'app'),'--dev','--no-sandbox','--config-dir-path',config],env,timeout:30000});
  app.process().stderr.on('data',b=>fs.appendFileSync(path.join(work,'electron.log'),b));
@@ -37,6 +35,23 @@ async function click(page,session,selector){const box=await evaluate(session,`((
  await until(()=>evaluate(cdp,"document.body.innerText.includes('Inbox')"),'inbox');
  await until(async()=>{try{return (await fetch(`http://127.0.0.1:${port}/mcp`)).status===401;}catch{return false;}},'production MCP listener');
  console.log('SETUP production MCP via package manager');
+}
+(async()=>{
+ const reservation=require('node:net').createServer();await new Promise(r=>reservation.listen(0,'127.0.0.1',r));port=reservation.address().port;await new Promise(r=>reservation.close(r));
+ configData['*'].core.mcp.port=port;configData['*'].core.mcp.token=token;fs.writeFileSync(path.join(config,'config.json'),JSON.stringify(configData));
+ await startDesktop();
+ if(mode==='audit') {
+   // Electron owns beforeunload; Playwright must not auto-answer a Chromium dialog.
+   const observeDialogs=page=>page.on('dialog',()=>{});
+   app.windows().forEach(observeDialogs);app.on('window',observeDialogs);
+   fs.writeFileSync(path.join(upstream,'../ux-audit-runtime.json'),JSON.stringify({pid:app.process().pid,work}));
+   const draft=await cli('draft-create',{accountId:account.id,to:[{email:'recipient@example.test'}],subject:'Paper Reed review notes',body:'Draft created by the CLI. Continue editing in the desktop app.'});
+   fs.writeFileSync(path.join(work,'audit-draft.json'),JSON.stringify(draft));
+   fs.writeFileSync(path.join(upstream,'../ux-audit-current.txt'),work);
+   console.log('AUDIT READY',work);
+   await until(async()=>fs.existsSync(path.join(work,'finish-audit')),'manual UX audit',1700000);
+   return;
+ }
  const created=await cli('draft-create',{accountId:account.id,to:[{email:'recipient@example.test'}],cc:[{email:'cc@example.test'}],bcc:[{email:'bcc@example.test'}],subject:'Paper Reed window handoff',body:'CLI original draft'});
  fs.writeFileSync(path.join(work,'created.json'),JSON.stringify(created));console.log('CREATED',JSON.stringify(created));
  const ref={accountId:account.id,draftId:created.draftId};
@@ -46,10 +61,10 @@ async function click(page,session,selector){const box=await evaluate(session,`((
  composer.on('dialog',d=>{if(d.type()!=='beforeunload')d.dismiss().catch(e=>console.error(e.message));});
  const editor=await app.context().newCDPSession(composer);
  await until(()=>evaluate(editor,`!!document.querySelector('[contenteditable="true"]')`),'composer editor');
- if(mode==='conflict') await evaluate(editor,`global.__conflictDialogs=[];AppEnv.showErrorDialog=async(message)=>{global.__conflictDialogs.push(message);return 0;};true`);
+ if(mode==='conflict'||mode==='recover') await evaluate(editor,`global.__conflictDialogs=[];global.__recoveryChoices=[];global.__recoveryChoice=0;AppEnv.showErrorDialog=async(message)=>{global.__conflictDialogs.push(message);return 0;};require('@electron/remote').dialog.showMessageBox=async(win,options)=>{global.__recoveryChoices.push(options);return {response:global.__recoveryChoice};};true`);
  fs.writeFileSync(path.join(work,'composer-before.txt'),await evaluate(editor,'document.body.innerText'));
  await click(composer,editor,'[contenteditable="true"]');await composer.keyboard.press('Meta+End');await composer.keyboard.insertText('\nPaper Reed GUI edit');
- if(mode==='conflict') {
+ if(mode==='conflict'||mode==='recover') {
    const snapshot=()=>evaluate(editor,`(async()=>{const s=await require('mailspring-exports').DraftStore.sessionForClientId(${JSON.stringify(created.draftId)});return {body:s.draft().body,revision:s.draft().version,dirty:s.changes.isDirty(),errors:global.__conflictDialogs};})()`);
    console.log('CONFLICT unsaved input');
    const before=await snapshot();assert(before.dirty);assert.equal(before.revision,created.revision);
@@ -68,8 +83,45 @@ async function click(page,session,selector){const box=await evaluate(session,`((
    await new Promise(r=>setTimeout(r,1500));
    assert(!composer.isClosed(),'Conflict must prevent closing the unsaved editor');
    const closing=await snapshot();assert(closing.dirty);assert(closing.body.includes('Paper Reed GUI edit'));
-   assert(closing.errors.some(message=>message.includes('This window will stay open.')),'Close failure must explain that edits remain in the window');
+   const choices=await evaluate(editor,'global.__recoveryChoices');assert(choices.length);assert.equal(choices[0].buttons[0],'Keep Editing');assert.equal(choices[0].cancelId,0);
    const stored=await cli('draft-get',ref);assert.equal(stored.body,'CLI newer version');assert.equal(stored.revision,remote.revision);
+   if(mode==='recover') {
+     const local=await snapshot();
+     const localVisible=await evaluate(editor,`document.querySelector('[contenteditable="true"]').innerText`);
+     await evaluate(editor,`global.__recoveryChoice=1;setTimeout(()=>AppEnv.close(),0);true`);
+     await until(async()=>composer.isClosed(),'close after recovery copy saved');
+     const rows=await evaluate(cdp,`require('mailspring-exports').DatabaseStore._query('SELECT headerMessageId FROM Message WHERE accountId = ? AND draft = 1',[${JSON.stringify(account.id)}])`);
+     const copies=rows.filter(row=>row.headerMessageId!==created.draftId);assert.equal(copies.length,1);
+     const copyRef={accountId:account.id,draftId:copies[0].headerMessageId};
+     const copy=await cli('draft-get',copyRef);assert.equal(copy.body,local.body);assert.equal(copy.subject,created.subject);
+     assert.equal(copy.cc[0].email,'cc@example.test');assert.equal(copy.bcc[0].email,'bcc@example.test');
+     const original=await cli('draft-get',ref);assert.equal(original.body,'CLI newer version');assert.equal(original.revision,remote.revision);
+     console.log('PASS copy saved; original unchanged; restarting desktop');
+     const previousPid=app.process().pid;await app.close();app=null;
+     await startDesktop();assert.notEqual(app.process().pid,previousPid);
+     const recovered=await cli('draft-get',copyRef);assert.equal(recovered.body,local.body);
+     for(const key of ['subject','plaintext','to','cc','bcc'])assert.deepEqual(recovered[key],copy[key],key);
+     assert.equal((await cli('draft-get',ref)).body,'CLI newer version');
+     for(const [draftId,body] of [[copyRef.draftId,local.body],[ref.draftId,'CLI newer version']]) {
+       await evaluate(cdp,`require('mailspring-exports').Actions.composePopoutDraft(${JSON.stringify(draftId)});true`);
+       const reopened=await until(async()=>app.windows().find(w=>{const settings=JSON.parse(new URL(w.url()).searchParams.get('loadSettings')||'{}');return settings.windowType==='composer';}),'reopened composer');
+       const reopenedCdp=await app.context().newCDPSession(reopened);
+       await until(()=>evaluate(reopenedCdp,`!!document.querySelector('[contenteditable="true"]')`),'restored editor');
+       const restored=await evaluate(reopenedCdp,`(async()=>{const s=await require('mailspring-exports').DraftStore.sessionForClientId(${JSON.stringify(draftId)});return {body:s.draft().body,dirty:s.changes.isDirty()};})()`);
+       // Slate may normalize equivalent HTML (br -> div) on mount; stored bytes were checked via CLI above.
+       assert(restored.body.includes(draftId===copyRef.draftId?'Paper Reed GUI edit':'CLI newer version'));
+       assert.equal(restored.dirty,false);
+       const visible=await evaluate(reopenedCdp,`document.querySelector('[contenteditable="true"]').innerText`);
+       const normalize=text=>text.replace(/\s+/g,' ').trim();
+       assert.equal(normalize(visible),normalize(draftId===copyRef.draftId?localVisible:'CLI newer version'));
+       await evaluate(reopenedCdp,`setTimeout(()=>AppEnv.close(),0);true`);
+       await until(async()=>reopened.isClosed(),'reopened clean editor close');
+     }
+     const finalSends=await evaluate(cdp,`require('mailspring-exports').DatabaseStore._query('SELECT requestId FROM PaperReedSend WHERE accountId = ?',[${JSON.stringify(account.id)}])`);
+     assert.equal(finalSends.length,0);
+     fs.writeFileSync(path.join(work,'recovery-result.json'),JSON.stringify({originalRevision:remote.revision,copyRevision:recovered.revision,distinctDraftIds:true,keepEditingPreservesInput:true,copySavedBeforeClose:true,originalUnchanged:true,ccBccPreserved:true,desktopRestarted:true,bothDraftsReopened:true,restoredEditorContent:true,sendOperations:0,dialogAdapter:'native choices selected by adapter; copy/save/close/restart paths real'},null,2));
+     console.log('PASS recovery copy and original reopen after desktop restart; no send');return;
+   }
    fs.writeFileSync(path.join(work,'conflict-result.json'),JSON.stringify({originalRevision:created.revision,storedRevision:stored.revision,autosaveRejected:true,sendBlocked:true,closeBlocked:true,localInputRetained:true,latestCLIContentRetained:true,sendOperations:sends.length,notificationAdapter:'warning dialogs recorded and auto-acknowledged; save/send/close logic unchanged'},null,2));
    console.log('PASS unsaved GUI / newer CLI: autosave rejected, send blocked, close blocked, both versions retained');
    return;
@@ -102,4 +154,4 @@ async function click(page,session,selector){const box=await evaluate(session,`((
  console.error(error.stack);
  if(cdp)try{fs.writeFileSync(path.join(work,'failure-dom.txt'),await evaluate(cdp,'document.body.innerText'));}catch{}
  process.exitCode=1;
-}).finally(async()=>{if(app){if(mode==='conflict')await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().forEach(w=>w.destroy())).catch(()=>{});await app.close();}});
+}).finally(async()=>{if(app){if(mode==='conflict'||mode==='recover')await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().forEach(w=>w.destroy())).catch(()=>{});await app.close();}});

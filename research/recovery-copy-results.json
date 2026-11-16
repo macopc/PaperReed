@@ -1,0 +1,123 @@
+{
+  "date": "2026-11-16",
+  "previous_work_pushed": "6bd8ad6",
+  "desktop_commit": "535f13dd463536f36728bce3efb4ae0d51ab3f19",
+  "patches": [
+    "0001",
+    "0002",
+    "0003",
+    "0004",
+    "0005",
+    "0006"
+  ],
+  "engine_sha256": "0209cb33ad90b19b7f5a7dd1a2d63bb128a103bab5d27b4e328cbbd1f4901b4c",
+  "network": "loopback only",
+  "production_mcp_server": true,
+  "playwright_mock_mode": false,
+  "recovery_runs": [
+    {
+      "artifacts": "compose-handoff-pwnaxx6i",
+      "result": {
+        "originalRevision": 3,
+        "copyRevision": 1,
+        "distinctDraftIds": true,
+        "keepEditingPreservesInput": true,
+        "copySavedBeforeClose": true,
+        "originalUnchanged": true,
+        "ccBccPreserved": true,
+        "desktopRestarted": true,
+        "bothDraftsReopened": true,
+        "restoredEditorContent": true,
+        "sendOperations": 0,
+        "dialogAdapter": "native choices selected by adapter; copy/save/close/restart paths real"
+      },
+      "smtp": {
+        "submissions": 0,
+        "subjects": []
+      }
+    },
+    {
+      "artifacts": "compose-handoff-n2xawn_s",
+      "result": {
+        "originalRevision": 3,
+        "copyRevision": 1,
+        "distinctDraftIds": true,
+        "keepEditingPreservesInput": true,
+        "copySavedBeforeClose": true,
+        "originalUnchanged": true,
+        "ccBccPreserved": true,
+        "desktopRestarted": true,
+        "bothDraftsReopened": true,
+        "restoredEditorContent": true,
+        "sendOperations": 0,
+        "dialogAdapter": "native choices selected by adapter; copy/save/close/restart paths real"
+      },
+      "smtp": {
+        "submissions": 0,
+        "subjects": []
+      }
+    }
+  ],
+  "normal_close": {
+    "artifacts": "compose-handoff-gcbafwba",
+    "result": {
+      "dirtyBeforeClose": true,
+      "closed": true,
+      "storedRevision": 3,
+      "localInputSaved": true
+    },
+    "smtp": {
+      "submissions": 0,
+      "subjects": []
+    }
+  },
+  "normal_send_regression": {
+    "artifacts": "compose-handoff-9zkb9pzs",
+    "result": {
+      "created": {
+        "draftId": "FE566FBB-59A2-4F8A-9E42-6C5901599686@getmailspring.com",
+        "revision": 1,
+        "headerMessageId": "FE566FBB-59A2-4F8A-9E42-6C5901599686@getmailspring.com",
+        "accountId": "c0ffee-harness",
+        "subject": "Paper Reed window handoff"
+      },
+      "updatedRevision": 3,
+      "staleRejected": true,
+      "ccBccPreserved": true,
+      "productionDesktopMcp": true,
+      "playwrightMockMode": false,
+      "operation": {
+        "accountId": "c0ffee-harness",
+        "operationId": "pr-send-1401d732935c7a15e16fc770b48e0022da3a0c7ffa9b227ce1d9f7dbc708cda6",
+        "draftId": "FE566FBB-59A2-4F8A-9E42-6C5901599686@getmailspring.com",
+        "revision": 3,
+        "state": "accepted",
+        "sentCopy": "filed"
+      }
+    },
+    "smtp": {
+      "submissions": 1,
+      "subjects": [
+        "Paper Reed window handoff"
+      ]
+    }
+  },
+  "focused_fault_checks": {
+    "script": "harness/check-recovery-boundaries.cjs",
+    "result": "passed",
+    "kind": "real TS methods/service, injected persistence/model/window adapters",
+    "cases": [
+      "cancel preserves session without copy",
+      "failed copy cannot close",
+      "pending receipt blocks close, repeated close does not duplicate",
+      "new input during save retains editor",
+      "copy identity, fields, permissions, attachment rejection, scheduling metadata excluded"
+    ]
+  },
+  "limits": [
+    "Native dialog choices supplied by adapter, not visually tested",
+    "Explicit saved copy survives normal app restart; not automatic crash recovery",
+    "Attachments explicitly rejected; no remote durability/cross-device guarantee",
+    "Reopening uses existing compose action, not final Paper Reed navigation"
+  ]
+}

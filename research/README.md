@@ -4,7 +4,7 @@
 
 实现进展：[CLI / GUI 共用草稿与发送结果接口](shared-core-validation.md)，包括可应用补丁、实验 CLI、真实引擎交接与请求重试检查。
 
-后续 [真实写信窗口交接](compose-handoff-validation.md) 已通过 CLI 建稿、GUI 自动保存／发送、旧 CLI 修订拒绝与结果查询；[反向未保存编辑冲突](unsaved-conflict-validation.md) 已复现并修复关闭窗口丢失输入的问题；冲突核对界面、真实服务商与新设计页面仍待验收。
+后续 [真实写信窗口交接](compose-handoff-validation.md) 已通过 CLI 建稿、GUI 自动保存／发送、旧 CLI 修订拒绝与结果查询；[反向未保存编辑冲突](unsaved-conflict-validation.md) 已复现并修复关闭窗口丢失输入的问题；后续 [另存副本与重启恢复](recovery-copy-validation.md) 已通过文本草稿路径。冲突核对界面、附件、真实服务商与新设计页面仍待验收。
 
 最新进展：[首版技术选型](../design/TECH-CHOICE.md) 与 [本轮验证记录](tech-selection-validation.md)。当前推荐优先验证 Mailspring 产品分支；尚未通过完整构建与真实邮箱实验。
 
@@ -28,3 +28,5 @@ node --test research/harness/check-feasibility.cjs
 ## 界面检查
 
 `design/preview-checks.js` 用于临时 HTML 中的原型交互检查，不随产品执行。此前 25 项检查与渲染观察见 [UI/UX 评审](../design/UX-REVIEW.md)；这些结果不能代替设计批准、真实用户测试或客户端验收。
+
+[运行界面与设计／spec 的体验走查](ux-audit-2026-11-16/REVIEW.md) 汇总本机测试邮箱下的实际页面截图、四项优先缺口和下一轮验收任务；[交互对照](ux-audit-2026-11-16/index.html) 可直接打开。

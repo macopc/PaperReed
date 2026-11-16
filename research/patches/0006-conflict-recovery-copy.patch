@@ -1,0 +1,122 @@
+diff --git a/app/src/services/mail-core/index.ts b/app/src/services/mail-core/index.ts
+--- a/app/src/services/mail-core/index.ts
++++ b/app/src/services/mail-core/index.ts
+@@ -1,4 +1,4 @@
+-import { createHash } from 'crypto';
++import { createHash, randomUUID } from 'crypto';
+ import DatabaseStore from '../../flux/stores/database-store';
+ import TaskQueue from '../../flux/stores/task-queue';
+ import { AccountStore } from '../../flux/stores/account-store';
+@@ -52,6 +52,26 @@
+   if (saved.error) throw new Error((saved.error as any).key || 'draft-save-failed');
+   saved.assertSaved();
+   return saved;
++}
++
++// Recovery copies get a new identity; they never overwrite or send the source draft.
++export async function saveDraftCopy(source: Message, access: Access) {
++  access.check(source.accountId, 'draft');
++  if (!(await access.visible(source))) throw new Error('draft-not-found');
++  if (source.files.length) throw new Error('Recovery copies with attachments are not supported yet. Keep this window open.');
++  const copy = new Message({
++    accountId: source.accountId,
++    headerMessageId: `${randomUUID().toUpperCase()}@getmailspring.com`,
++    version: 0, draft: true, pristine: false, unread: false, starred: false,
++    date: new Date(), from: source.from, to: source.to, cc: source.cc, bcc: source.bcc,
++    replyTo: source.replyTo, replyToHeaderMessageId: source.replyToHeaderMessageId,
++    forwardedHeaderMessageId: source.forwardedHeaderMessageId,
++    subject: source.subject, body: source.body, plaintext: source.plaintext,
++  });
++  const saved = await saveDraft(copy, access);
++  copy.id = saved.savedDraftId;
++  copy.version = saved.savedDraftRevision;
++  return copy;
+ }
+ 
+ export async function updateDraft(ref: Reference, revision: number,
+diff --git a/app/src/flux/stores/draft-store.ts b/app/src/flux/stores/draft-store.ts
+--- a/app/src/flux/stores/draft-store.ts
++++ b/app/src/flux/stores/draft-store.ts
+@@ -1,4 +1,4 @@
+-import { saveDraft, desktopAccess } from '../../services/mail-core';
++import { saveDraft, saveDraftCopy, desktopAccess } from '../../services/mail-core';
+ import { ipcRenderer } from 'electron';
+ import MailspringStore from 'mailspring-store';
+ import { DraftEditingSession } from './draft-editing-session';
+@@ -121,7 +121,40 @@
+     });
+   }
+ 
++  _closeSaveInProgress = false;
++
++  async _saveSessionBeforeClose(session: DraftEditingSession) {
++    try {
++      await session.changes.commit();
++      return true;
++    } catch (error) {
++      if (error.message !== 'draft-conflict' || AppEnv.isMainWindow()) throw error;
++      const { response } = await require('@electron/remote').dialog.showMessageBox(
++        AppEnv.getCurrentWindow(),
++        {
++          type: 'warning',
++          message: localized('This draft has changed elsewhere.'),
++          detail: localized(
++            'Keep editing, or save your edits as a separate draft and close this window. The latest original draft will be kept.'
++          ),
++          buttons: [localized('Keep Editing'), localized('Save Copy and Close')],
++          defaultId: 0, cancelId: 0,
++        }
++      );
++      if (response !== 1) return false;
++      // Freeze content before awaiting persistence. Later input must not be discarded.
++      const snapshot = JSON.stringify(session.draft().toJSON());
++      const frozen = new Message({}).fromJSON(JSON.parse(snapshot));
++      await saveDraftCopy(frozen, desktopAccess);
++      if (JSON.stringify(session.draft().toJSON()) !== snapshot) {
++        throw new Error(localized('A copy was saved, but you made more edits. This window will stay open.'));
++      }
++      return true;
++    }
++  }
++
+   _onBeforeUnload = (readyToUnload: () => void) => {
++    if (this._closeSaveInProgress) return false;
+     const promises = [];
+ 
+     // Normally we'd just append all promises, even the ones already
+@@ -146,25 +179,31 @@
+         );
+         AttachmentStore.deleteFilesOwnedByDraft(draft.files);
+       } else if (session.changes.isDirty()) {
+-        promises.push(session.changes.commit());
++        promises.push(this._saveSessionBeforeClose(session));
+       }
+     });
+ 
+     if (promises.length > 0) {
+       // A timeout is not a save receipt. Keep the editor and its dirty changes
+       // alive when persistence fails, including an external revision conflict.
++      this._closeSaveInProgress = true;
+       Promise.all(promises)
+-        .then(() => {
++        .then((saved) => {
++          if (saved.some((value) => !value)) return;
+           this._draftSessions = {};
+           // Allow committed database deltas to reach the other windows first.
+           setTimeout(readyToUnload, 15);
+         })
+-        .catch(() => {
++        .catch((error) => {
+           AppEnv.showErrorDialog(
+             localized(
+-              'Your changes could not be saved. This window will stay open. Keep a copy of your edits before reloading the latest draft.'
++              'Your changes could not be saved. This window will stay open. %@',
++              error.message
+             )
+           );
++        })
++        .finally(() => {
++          this._closeSaveInProgress = false;
+         });
+       return false;
+     }
