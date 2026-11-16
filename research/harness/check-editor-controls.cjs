@@ -33,6 +33,7 @@ c.commit()
   await until(() => run('document.querySelectorAll(".pr-mail-row").length===1'), 'created draft');
   await action('.pr-mail-row');
   await until(() => run('!!document.querySelector(".to-field input[role=combobox]")'), 'recipient editor');
+  if (process.env.PAPER_REED_TEMPLATE_AGENT_CHECK) { await require('./check-template-agent-settings.cjs')({main,cdp,account,cli,draft,work,evaluate,until}); return; }
   if (process.env.PAPER_REED_ORGANIZATION_CHECK) { await require('./check-organization-settings.cjs')({main,cdp,account,evaluate,until}); return; }
   if (process.env.PAPER_REED_SUBPAGES_CHECK) { await require('./check-settings-subpages.cjs')({main,cdp,account,evaluate,until}); return; }
   if (process.env.PAPER_REED_SETTINGS_CHECK) { await require('./check-settings-details.cjs')({main,cdp,work,account,cli,click,evaluate,until,draft}); return; }

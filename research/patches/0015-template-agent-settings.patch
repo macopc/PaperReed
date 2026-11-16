@@ -1,0 +1,890 @@
+diff --git a/app/internal_packages/composer-templates/lib/preferences-templates.tsx b/app/internal_packages/composer-templates/lib/preferences-templates.tsx
+index dcc96c4..f27a11b 100644
+--- a/app/internal_packages/composer-templates/lib/preferences-templates.tsx
++++ b/app/internal_packages/composer-templates/lib/preferences-templates.tsx
+@@ -69,26 +69,44 @@ class TemplateEditor extends React.Component<
+       <div className={`template-wrap ${readOnly && 'empty'}`}>
+         <div className="section fields">
+           <div className="field name">
+-            <label htmlFor="template-title" className="sr-only">
+-              {localized('Template Name')}
++            <label
++              htmlFor="template-title"
++              className={AppEnv.config.get('core.paperReed.enabled') ? undefined : 'sr-only'}
++            >
++              {AppEnv.config.get('core.paperReed.enabled')
++                ? '模板名称'
++                : localized('Template Name')}
+             </label>
+             <input
+               type="text"
+               id="template-title"
+-              placeholder={localized('Name')}
++              placeholder={
++                AppEnv.config.get('core.paperReed.enabled') ? '模板名称' : localized('Name')
++              }
+               disabled={readOnly}
+               defaultValue={template ? template.name : ''}
+-              onBlur={(e) => onEditTitle(e.target.value)}
++              onBlur={(e) => {
++                const nextName = e.target.value;
++                e.target.value = template ? template.name : '';
++                onEditTitle(nextName);
++              }}
+             />
+           </div>
+           <div className="field subject">
+-            <label htmlFor="template-subject" className="sr-only">
+-              {localized('Subject')}
++            <label
++              htmlFor="template-subject"
++              className={AppEnv.config.get('core.paperReed.enabled') ? undefined : 'sr-only'}
++            >
++              {AppEnv.config.get('core.paperReed.enabled') ? '邮件主题' : localized('Subject')}
+             </label>
+             <input
+               type="text"
+               id="template-subject"
+-              placeholder={localized('Subject (optional)')}
++              placeholder={
++                AppEnv.config.get('core.paperReed.enabled')
++                  ? '留空则保留原邮件主题'
++                  : localized('Subject (optional)')
++              }
+               disabled={readOnly}
+               value={subject}
+               onChange={this._onSubjectChange}
+@@ -107,14 +125,20 @@ class TemplateEditor extends React.Component<
+           />
+         </div>
+         <div className="section note">
+-          {localized(
+-            'The subject is filled into your draft when you use the template. Leave it blank to keep the subject you already have.'
+-          )}{' '}
+-          {localizedReactFragment(
+-            'Changes are saved automatically. View the %@ for tips and tricks.',
+-            <a href="https://getmailspring.com/docs/reply-faster-with-email-templates">
+-              {localized('Templates Guide')}
+-            </a>
++          {AppEnv.config.get('core.paperReed.enabled') ? (
++            '离开字段时保存。主题留空可保留草稿原主题；回复和转发会保留原会话主题。'
++          ) : (
++            <>
++              {localized(
++                'The subject is filled into your draft when you use the template. Leave it blank to keep the subject you already have.'
++              )}{' '}
++              {localizedReactFragment(
++                'Changes are saved automatically. View the %@ for tips and tricks.',
++                <a href="https://getmailspring.com/docs/reply-faster-with-email-templates">
++                  {localized('Templates Guide')}
++                </a>
++              )}
++            </>
+           )}
+         </div>
+       </div>
+@@ -157,7 +181,10 @@ export default class PreferencesTemplates extends React.Component<
+ 
+     const templates = TemplateStore.items();
+     const selected =
+-      templates.find((t) => t.name === lastSelName) || templates[lastSelIndex] || null;
++      templates.find((t) => t.name === lastSelName) ||
++      templates[lastSelIndex] ||
++      templates[0] ||
++      null;
+ 
+     return {
+       templates,
+@@ -166,6 +193,12 @@ export default class PreferencesTemplates extends React.Component<
+   }
+ 
+   _onAdd = () => {
++    if (AppEnv.config.get('core.paperReed.enabled')) {
++      TemplateStore.saveNewTemplate('新模板', { subject: '', body: '<div></div>' }, (template) =>
++        this.setState({ selected: template, templates: TemplateStore.items() })
++      );
++      return;
++    }
+     Actions.createTemplate({
+       name: localized('Untitled'),
+       contents: localized('Insert content here!'),
+@@ -187,6 +220,67 @@ export default class PreferencesTemplates extends React.Component<
+   render() {
+     const { selected } = this.state;
+ 
++    if (AppEnv.config.get('core.paperReed.enabled'))
++      return (
++        <div className="preferences-templates-container pr-templates">
++          <div className="pr-template-toolbar">
++            <span>{this.state.templates.length} 个模板</span>
++            <button type="button" onClick={this._onAdd}>
++              新建模板
++            </button>
++          </div>
++          {this.state.templates.length ? (
++            <div className="pr-template-layout">
++              <nav aria-label="邮件模板">
++                {this.state.templates.map((item) => (
++                  <button
++                    type="button"
++                    key={item.id}
++                    aria-current={item.id === selected?.id ? 'true' : undefined}
++                    onClick={() => this._onSelect(item)}
++                  >
++                    <span>{item.name}</span>
++                    <small>{item.subject || '保留原邮件主题'}</small>
++                  </button>
++                ))}
++              </nav>
++              <div className="pr-template-detail">
++                <TemplateEditor
++                  onEditTitle={this._onEditTitle}
++                  key={selected?.name || 'empty'}
++                  template={selected}
++                />
++                <footer>
++                  <span>已使用此模板的草稿不会随模板删除。</span>
++                  <button type="button" disabled={!selected} onClick={this._onDelete}>
++                    删除模板…
++                  </button>
++                </footer>
++              </div>
++            </div>
++          ) : (
++            <div className="pr-settings-empty">
++              <h2>从常用的一封信开始</h2>
++              <p>新建模板，保存主题和正文。</p>
++              <button type="button" onClick={this._onAdd}>
++                创建第一个模板
++              </button>
++            </div>
++          )}
++          <details className="pr-settings-group">
++            <summary>模板文件</summary>
++            <p>模板保存在本机，可作为 HTML 文件查看和备份。</p>
++            <button
++              type="button"
++              onClick={() =>
++                require('@electron/remote').shell.showItemInFolder(TemplateStore.directory())
++              }
++            >
++              打开模板文件夹
++            </button>
++          </details>
++        </div>
++      );
+     return (
+       <div className="preferences-templates-container">
+         <section>
+diff --git a/app/internal_packages/composer-templates/lib/template-picker.tsx b/app/internal_packages/composer-templates/lib/template-picker.tsx
+index 27e2d37..e2c5c7b 100644
+--- a/app/internal_packages/composer-templates/lib/template-picker.tsx
++++ b/app/internal_packages/composer-templates/lib/template-picker.tsx
+@@ -124,6 +124,18 @@ class TemplatePicker extends React.Component<{
+     if (this.props.draft.plaintext) {
+       return <span />;
+     }
++    if (AppEnv.config.get('core.paperReed.enabled')) {
++      return (
++        <button
++          type="button"
++          className="pr-template-picker btn-templates"
++          onClick={this._onClickButton}
++          aria-haspopup="dialog"
++        >
++          模板
++        </button>
++      );
++    }
+     return (
+       <button
+         tabIndex={-1}
+diff --git a/app/internal_packages/composer-templates/lib/template-store.ts b/app/internal_packages/composer-templates/lib/template-store.ts
+index edfbf99..ab75cf6 100644
+--- a/app/internal_packages/composer-templates/lib/template-store.ts
++++ b/app/internal_packages/composer-templates/lib/template-store.ts
+@@ -16,7 +16,7 @@ import { parseTemplate, stringifyTemplate, ParsedTemplate } from './template-fil
+ 
+ // Support accented characters in template names
+ // https://regex101.com/r/nD3eY8/1
+-const INVALID_TEMPLATE_NAME_REGEX = /[^a-zA-Z\u00C0-\u017F0-9_\- ]+/g;
++const INVALID_TEMPLATE_NAME_REGEX = /[^\p{L}\p{M}\p{N}_\- ]+/gu;
+ 
+ export interface TemplateItem {
+   id: string;
+@@ -227,7 +227,10 @@ class TemplateStore extends MailspringStore {
+     let number = 1;
+     let resolvedName = name;
+     const sameName = (t: TemplateItem) => t.name === resolvedName;
+-    while (this._items.find(sameName)) {
++    while (
++      this._items.find(sameName) ||
++      fs.existsSync(path.join(this._templatesDir, `${resolvedName}.html`))
++    ) {
+       resolvedName = `${name} ${number}`;
+       number += 1;
+     }
+@@ -249,6 +252,7 @@ class TemplateStore extends MailspringStore {
+       this.watch();
+       if (err) {
+         this._displayError(err.message);
++        return;
+       }
+       if (!template) {
+         template = {
+@@ -261,6 +265,7 @@ class TemplateStore extends MailspringStore {
+       } else {
+         template.subject = (subject || '').trim();
+       }
++      this.trigger(this);
+       if (callback) {
+         callback(template);
+       }
+@@ -305,10 +310,23 @@ class TemplateStore extends MailspringStore {
+       return;
+     }
+ 
++    if (name === newName) return;
+     const newFilename = `${newName}.html`;
+     const oldPath = path.join(this._templatesDir, `${name}.html`);
+     const newPath = path.join(this._templatesDir, newFilename);
+-    fs.rename(oldPath, newPath, () => {
++    if (fs.existsSync(newPath)) {
++      this._displayError(
++        AppEnv.config.get('core.paperReed.enabled')
++          ? '已有同名模板，请换一个名称。'
++          : localized('A template with this name already exists.')
++      );
++      return;
++    }
++    fs.rename(oldPath, newPath, (err) => {
++      if (err) {
++        this._displayError(err.message);
++        return;
++      }
+       template.name = newName;
+       template.id = newFilename;
+       template.path = newPath;
+diff --git a/app/internal_packages/composer/lib/composer-view.tsx b/app/internal_packages/composer/lib/composer-view.tsx
+index bb61b9f..d7b9c8c 100644
+--- a/app/internal_packages/composer/lib/composer-view.tsx
++++ b/app/internal_packages/composer/lib/composer-view.tsx
+@@ -1,4 +1,5 @@
+ import { clipboard } from '@electron/remote';
++import TemplatePicker from '../../composer-templates/lib/template-picker';
+ import PaperReedDraftStatus from '../../paper-reed/lib/draft-status';
+ import React from 'react';
+ import ReactDOM from 'react-dom';
+@@ -520,9 +521,22 @@ export default class ComposerView extends React.Component<ComposerViewProps, Com
+       await this.props.session.changes.commit();
+       if (this.props.session.changes.isDirty()) throw new Error('new-edits');
+       const draft = this.props.session.draft();
+-      await clipboard.writeText(JSON.stringify({ product: 'Paper Reed',
+-        task: '请先阅读这封草稿，发送前向我确认。',
+-        context: { scope: 'draft', accountId: draft.accountId, draftId: draft.headerMessageId, revision: draft.version } }, null, 2));
++      await clipboard.writeText(
++        JSON.stringify(
++          {
++            product: 'Paper Reed',
++            task: '请先阅读这封草稿，发送前向我确认。',
++            context: {
++              scope: 'draft',
++              accountId: draft.accountId,
++              draftId: draft.headerMessageId,
++              revision: draft.version,
++            },
++          },
++          null,
++          2
++        )
++      );
+       if (this._mounted) this.setState({ agentNotice: '已复制草稿引用，可粘贴到已连接的 Agent。' });
+     } catch {
+       if (this._mounted) this.setState({ agentNotice: '尚未交接。请先处理草稿保存状态，再重试。' });
+@@ -530,28 +544,61 @@ export default class ComposerView extends React.Component<ComposerViewProps, Com
+   };
+ 
+   renderPaperReedActions() {
+-    return <>
+-      <div className="pr-compose-actions" role="group" aria-label="邮件操作">
+-        <button type="button" className="pr-attach" onClick={this._onSelectAttachment}>
+-          <RetinaImg name="icon-composer-attachment.png" mode={RetinaImg.Mode.ContentIsMask} />添加附件
+-        </button>
+-        {!this.props.draft.plaintext && <button type="button" className="pr-format-toggle" aria-expanded={this.state.formatOpen}
+-          onMouseDown={event => event.preventDefault()} onClick={() => this.setState({ formatOpen: !this.state.formatOpen })}>Aa <span>格式</span></button>}
+-        <span className="pr-action-space" />
+-        <button type="button" className="pr-copy-agent" onClick={this.copyForAgent}>复制给 Agent</button>
+-        <SendActionButton tabIndex={0} ref={this.sendButton} style={{}} draft={this.props.draft} isValidDraft={this._isValidDraft} />
+-        <details className="pr-compose-more"><summary aria-label="更多邮件操作">•••</summary>
+-          <button type="button" onClick={this._onDestroyDraft}>删除草稿</button>
+-        </details>
+-      </div>
+-      {this.state.agentNotice && <p className="pr-agent-receipt" role="status">{this.state.agentNotice}</p>}
+-    </>;
++    return (
++      <>
++        <div className="pr-compose-actions" role="group" aria-label="邮件操作">
++          <button type="button" className="pr-attach" onClick={this._onSelectAttachment}>
++            <RetinaImg name="icon-composer-attachment.png" mode={RetinaImg.Mode.ContentIsMask} />
++            添加附件
++          </button>
++          {!this.props.draft.plaintext && (
++            <button
++              type="button"
++              className="pr-format-toggle"
++              aria-expanded={this.state.formatOpen}
++              onMouseDown={(event) => event.preventDefault()}
++              onClick={() => this.setState({ formatOpen: !this.state.formatOpen })}
++            >
++              Aa <span>格式</span>
++            </button>
++          )}
++          <TemplatePicker
++            headerMessageId={this.props.draft.headerMessageId}
++            draft={this.props.draft}
++          />
++          <span className="pr-action-space" />
++          <button type="button" className="pr-copy-agent" onClick={this.copyForAgent}>
++            复制给 Agent
++          </button>
++          <SendActionButton
++            tabIndex={0}
++            ref={this.sendButton}
++            style={{}}
++            draft={this.props.draft}
++            isValidDraft={this._isValidDraft}
++          />
++          <details className="pr-compose-more">
++            <summary aria-label="更多邮件操作">•••</summary>
++            <button type="button" onClick={this._onDestroyDraft}>
++              删除草稿
++            </button>
++          </details>
++        </div>
++        {this.state.agentNotice && (
++          <p className="pr-agent-receipt" role="status">
++            {this.state.agentNotice}
++          </p>
++        )}
++      </>
++    );
+   }
+ 
+   render() {
+     const paperReed = AppEnv.config.get('core.paperReed.enabled');
+     return (
+-      <div className={`${this.props.className || ''} ${paperReed ? 'pr-composer' : ''} ${this.state.formatOpen ? 'pr-format-open' : ''}`}>
++      <div
++        className={`${this.props.className || ''} ${paperReed ? 'pr-composer' : ''} ${this.state.formatOpen ? 'pr-format-open' : ''}`}
++      >
+         <KeyCommandsRegion
+           localHandlers={this._keymapHandlers}
+           className={'message-item-white-wrap composer-outer-wrap'}
+@@ -569,7 +616,9 @@ export default class ComposerView extends React.Component<ComposerViewProps, Com
+               <DropToAttachCover visible={this.state.isDropping} />
+ 
+               <div className="composer-content-wrap">
+-                {AppEnv.config.get('core.paperReed.enabled') && <PaperReedDraftStatus session={this.props.session} />}
++                {AppEnv.config.get('core.paperReed.enabled') && (
++                  <PaperReedDraftStatus session={this.props.session} />
++                )}
+                 {AppEnv.isComposerWindow() ? (
+                   <ScrollRegion className="compose-body-scroll">
+                     {this._renderContent()}
+@@ -594,28 +643,32 @@ export default class ComposerView extends React.Component<ComposerViewProps, Com
+ 
+               <footer className="composer-action-bar-wrap" data-tooltips-anchor>
+                 <div className="tooltips-container" />
+-                {paperReed ? this.renderPaperReedActions() : <RovingTabIndexToolbar
+-                  label={localized('Composer Actions')}
+-                  className="composer-action-bar-content"
+-                >
+-                  <ActionBarPlugins
+-                    draft={this.props.draft}
+-                    session={this.props.session}
+-                    isValidDraft={this._isValidDraft}
+-                  />
+-                  <DeleteButton onClick={this._onDestroyDraft} />
+-                  <AttachFileButton onClick={this._onSelectAttachment} />
+-
+-                  <div style={{ order: 0, flex: 1 }} />
+-
+-                  <SendActionButton
+-                    tabIndex={-1}
+-                    ref={this.sendButton}
+-                    style={{ order: -100 }}
+-                    draft={this.props.draft}
+-                    isValidDraft={this._isValidDraft}
+-                  />
+-                </RovingTabIndexToolbar>}
++                {paperReed ? (
++                  this.renderPaperReedActions()
++                ) : (
++                  <RovingTabIndexToolbar
++                    label={localized('Composer Actions')}
++                    className="composer-action-bar-content"
++                  >
++                    <ActionBarPlugins
++                      draft={this.props.draft}
++                      session={this.props.session}
++                      isValidDraft={this._isValidDraft}
++                    />
++                    <DeleteButton onClick={this._onDestroyDraft} />
++                    <AttachFileButton onClick={this._onSelectAttachment} />
++
++                    <div style={{ order: 0, flex: 1 }} />
++
++                    <SendActionButton
++                      tabIndex={-1}
++                      ref={this.sendButton}
++                      style={{ order: -100 }}
++                      draft={this.props.draft}
++                      isValidDraft={this._isValidDraft}
++                    />
++                  </RovingTabIndexToolbar>
++                )}
+               </footer>
+             </DropZone>
+           </TabGroupRegion>
+diff --git a/app/internal_packages/mcp-server/lib/preferences-mcp-accounts.tsx b/app/internal_packages/mcp-server/lib/preferences-mcp-accounts.tsx
+index 186da01..ea2b617 100644
+--- a/app/internal_packages/mcp-server/lib/preferences-mcp-accounts.tsx
++++ b/app/internal_packages/mcp-server/lib/preferences-mcp-accounts.tsx
+@@ -92,6 +92,57 @@ export default class PreferencesMcpAccounts extends React.Component<Props, State
+     const categories = CategoryStore.categories(account.id);
+     const hasExclusions = excluded.length > 0;
+ 
++    if (AppEnv.config.get('core.paperReed.enabled'))
++      return (
++        <div className="pr-agent-account" key={account.id}>
++          <div className="pr-agent-account-heading">
++            <label>
++              <input
++                type="checkbox"
++                checked={enabled}
++                onChange={() => this._toggleAccount(account.id)}
++                aria-label={`允许访问 ${account.emailAddress}`}
++                ref={(el) => {
++                  if (el) el.indeterminate = enabled && hasExclusions;
++                }}
++              />
++              <span>
++                {account.label || account.emailAddress}
++                {account.label && account.label !== account.emailAddress && (
++                  <small>{account.emailAddress}</small>
++                )}
++              </span>
++            </label>
++            <button
++              type="button"
++              disabled={!enabled}
++              aria-expanded={!!expanded}
++              onClick={() => this._toggleExpanded(account.id)}
++            >
++              {expanded ? '收起文件夹' : '选择文件夹'}
++            </button>
++          </div>
++          {enabled && hasExclusions && (
++            <p className="pr-agent-exclusions">已排除 {excluded.length} 个文件夹</p>
++          )}
++          {expanded && enabled && (
++            <div className="pr-agent-folders">
++              {categories.map((cat) => (
++                <label key={cat.id}>
++                  <input
++                    type="checkbox"
++                    data-folder-id={cat.id}
++                    checked={!excluded.includes(cat.id)}
++                    onChange={() => this._toggleFolder(account.id, cat.id)}
++                  />
++                  {(cat as any).displayName || cat.name}
++                </label>
++              ))}
++              {categories.length === 0 && <p>正在等待文件夹同步…</p>}
++            </div>
++          )}
++        </div>
++      );
+     return (
+       <div key={account.id} className="mcp-account-item">
+         <div className="mcp-account-header" onClick={() => this._toggleExpanded(account.id)}>
+diff --git a/app/internal_packages/mcp-server/lib/preferences-mcp-audit.tsx b/app/internal_packages/mcp-server/lib/preferences-mcp-audit.tsx
+index 4846998..a70e2f6 100644
+--- a/app/internal_packages/mcp-server/lib/preferences-mcp-audit.tsx
++++ b/app/internal_packages/mcp-server/lib/preferences-mcp-audit.tsx
+@@ -31,6 +31,45 @@ export default class PreferencesMcpAudit extends React.Component<Record<string,
+ 
+   render() {
+     const { entries } = this.state;
++    if (AppEnv.config.get('core.paperReed.enabled'))
++      return (
++        <div className="mcp-audit pr-agent-audit">
++          <header>
++            <h2>操作记录</h2>
++            <button type="button" disabled={!entries.length} onClick={() => clearAuditLog()}>
++              清空记录
++            </button>
++          </header>
++          <p>当前会话中的工具调用。</p>
++          {entries.length ? (
++            <ol>
++              {[...entries].reverse().map((entry, index) => (
++                <li key={index}>
++                  <div className="pr-agent-audit-heading">
++                    <strong>{entry.toolName}</strong>
++                    <time title={new Date(entry.timestamp).toLocaleString()}>
++                      {new Date(entry.timestamp).toLocaleTimeString([], {
++                        hour: '2-digit',
++                        minute: '2-digit',
++                        second: '2-digit',
++                      })}
++                    </time>
++                  </div>
++                  <p>{entry.resultSummary}</p>
++                  <details>
++                    <summary>调用详情 · {entry.durationMs} ms</summary>
++                    <pre>{entry.params}</pre>
++                  </details>
++                </li>
++              ))}
++            </ol>
++          ) : (
++            <div className="pr-settings-empty">
++              暂无操作记录。连接后，Agent 的工具调用会显示在这里。
++            </div>
++          )}
++        </div>
++      );
+     return (
+       <div className="mcp-audit">
+         <div className="mcp-audit-header">
+diff --git a/app/internal_packages/mcp-server/lib/preferences-mcp.tsx b/app/internal_packages/mcp-server/lib/preferences-mcp.tsx
+index 57b4118..e849894 100644
+--- a/app/internal_packages/mcp-server/lib/preferences-mcp.tsx
++++ b/app/internal_packages/mcp-server/lib/preferences-mcp.tsx
+@@ -15,6 +15,10 @@ const execFileAsync = promisify(execFile);
+ const CLAUDE_CODE_MCP_NAME = 'mailspring-mcp';
+ 
+ interface State {
++  showToken?: boolean;
++  confirmToken?: boolean;
++  copied?: string;
++  portDraft?: string;
+   enabled: boolean;
+   port: number;
+   accessLevel: string;
+@@ -261,7 +265,197 @@ export default class PreferencesMcp extends React.Component<Record<string, never
+     }
+   };
+ 
++  _copyConnection = (label: string, value: string) => {
++    try {
++      require('@electron/remote').clipboard.writeText(value);
++      this.setState({ copied: `已复制${label}` });
++    } catch {
++      this.setState({ copied: '复制失败，请重试。' });
++    }
++  };
++
++  _renderPaperReed() {
++    const {
++      enabled,
++      running,
++      error,
++      accessLevel,
++      enabledAccounts,
++      port,
++      token,
++      showToken,
++      confirmToken,
++      copied,
++      portDraft,
++    } = this.state;
++    const endpoint = `http://127.0.0.1:${port}/mcp`;
++    const nextPort = Number(portDraft);
++    const validPort = Number.isInteger(nextPort) && nextPort > 0 && nextPort < 65536;
++    const levels = [
++      ['read-only', '只读', '阅读邮件，不修改内容。'],
++      ['read-draft', '阅读与草稿', '可创建和编辑草稿，不能发送。'],
++      ['read-write', '阅读与整理', '包括草稿编辑，以及移动、标记等整理操作。'],
++      ['read-write-send', '允许发送', '包括整理邮件和发送邮件。'],
++    ];
++    return (
++      <div className="container-mcp pr-agent">
++        <section className="pr-settings-group">
++          <div className="pr-agent-service">
++            <label htmlFor="pr-agent-enabled">
++              <input
++                id="pr-agent-enabled"
++                type="checkbox"
++                checked={enabled}
++                onChange={this._onToggleEnabled}
++              />
++              允许本机 Agent 连接
++            </label>
++            <span className={`pr-agent-state ${running ? 'running' : ''}`} role="status">
++              {!enabled ? '已关闭' : error ? '连接异常' : running ? '正在运行' : '正在启动'}
++            </span>
++          </div>
++          <p>通过本机 MCP 连接。保持 Paper Reed 运行，Agent 才能访问已授权的邮件。</p>
++          {error && (
++            <p className="pr-agent-error" role="alert">
++              {error}
++            </p>
++          )}
++        </section>
++        <section className="pr-settings-group">
++          <h2>允许的操作</h2>
++          <fieldset className="pr-agent-levels">
++            <legend className="sr-only">Agent 权限</legend>
++            {levels.map(([value, title, note]) => (
++              <label key={value}>
++                <input
++                  type="radio"
++                  name="agent-access"
++                  value={value}
++                  checked={accessLevel === value}
++                  onChange={(e) => {
++                    AppEnv.config.set('core.mcp.accessLevel', e.target.value);
++                    this.setState({ accessLevel: e.target.value });
++                  }}
++                />
++                <span>
++                  <strong>{title}</strong>
++                  <small>{note}</small>
++                </span>
++              </label>
++            ))}
++          </fieldset>
++        </section>
++        <section className="pr-settings-group">
++          <h2>邮箱范围</h2>
++          <p>未单独配置时默认允许所有账号。取消勾选的账号或文件夹不能被 Agent 访问。</p>
++          <PreferencesMcpAccounts
++            enabledAccounts={enabledAccounts}
++            onChange={this._onAccountsChange}
++          />
++        </section>
++        <section className="pr-settings-group">
++          <h2>连接方式</h2>
++          <p>在支持 HTTP MCP 的客户端中填写地址，并以 Bearer 方式使用访问令牌。</p>
++          <div className="pr-agent-endpoint">
++            <code>{endpoint}</code>
++            <button type="button" onClick={() => this._copyConnection('地址', endpoint)}>
++              复制地址
++            </button>
++          </div>
++          <label className="pr-agent-token-label" htmlFor="pr-agent-token">
++            访问令牌
++          </label>
++          <div className="pr-agent-token">
++            <input
++              id="pr-agent-token"
++              type={showToken ? 'text' : 'password'}
++              readOnly
++              value={token}
++              autoComplete="off"
++            />
++            <button
++              type="button"
++              aria-pressed={!!showToken}
++              onClick={() => this.setState({ showToken: !showToken })}
++            >
++              {showToken ? '隐藏' : '显示'}
++            </button>
++            <button type="button" onClick={() => this._copyConnection('令牌', token)}>
++              复制令牌
++            </button>
++          </div>
++          <p role="status" className="pr-agent-copy-state">
++            {copied || '令牌仅用于你授权的客户端。'}
++          </p>
++          <details className="pr-agent-cli">
++            <summary>使用实验 CLI</summary>
++            <p>
++              当前可从 Paper Reed 项目仓库运行实验 CLI，尚未提供一键安装。CLI 与这里的连接共用权限。
++            </p>
++            <code>node research/cli/paper-reed.cjs --help</code>
++            <p>
++              <a href="https://github.com/macopc/PaperReed/blob/main/research/cli/README.md">
++                查看 CLI 使用说明 ↗
++              </a>
++            </p>
++          </details>
++        </section>
++        <details className="pr-settings-group pr-agent-advanced">
++          <summary>高级连接设置</summary>
++          <label htmlFor="pr-agent-port">本机端口</label>
++          <div className="pr-agent-port-row">
++            <input
++              id="pr-agent-port"
++              type="number"
++              min={1}
++              max={65535}
++              value={portDraft ?? String(port)}
++              onChange={(e) => this.setState({ portDraft: e.target.value })}
++            />
++            <button
++              type="button"
++              disabled={!validPort || nextPort === port}
++              onClick={() => {
++                AppEnv.config.set('core.mcp.port', nextPort);
++                this.setState({ ...this._getState(), portDraft: undefined, copied: undefined });
++              }}
++            >
++              应用端口
++            </button>
++          </div>
++          {portDraft !== undefined && !validPort && <p role="alert">请输入 1–65535 的整数。</p>}
++          <p>更改端口后，需要更新 Agent 中的连接地址。</p>
++          {confirmToken ? (
++            <div className="pr-agent-token-confirm">
++              <p>更换令牌后，使用旧令牌的连接将无法继续访问。</p>
++              <button type="button" onClick={() => this.setState({ confirmToken: false })}>
++                取消
++              </button>
++              <button
++                type="button"
++                onClick={() => {
++                  this._onRegenerateToken();
++                  this.setState({ confirmToken: false, showToken: false, copied: undefined });
++                }}
++              >
++                确认更换
++              </button>
++            </div>
++          ) : (
++            <button type="button" onClick={() => this.setState({ confirmToken: true })}>
++              更换访问令牌…
++            </button>
++          )}
++        </details>
++        <section className="pr-settings-group">
++          <PreferencesMcpAudit />
++        </section>
++      </div>
++    );
++  }
++
+   render() {
++    if (AppEnv.config.get('core.paperReed.enabled')) return this._renderPaperReed();
+     const {
+       enabled,
+       port,
+@@ -323,7 +517,7 @@ export default class PreferencesMcp extends React.Component<Record<string, never
+                       this._onAddToClaudeDesktop
+                     )}
+                     {this._renderQuickSetupButton(
+-                      localized('Add to ChatGPT Desktop'),
++                      localized('Add to Codex'),
+                       codexStatus,
+                       this._onAddToChatGPT
+                     )}
+diff --git a/app/internal_packages/paper-reed/styles/paper-reed.less b/app/internal_packages/paper-reed/styles/paper-reed.less
+index 1f2f6a8..a444003 100644
+--- a/app/internal_packages/paper-reed/styles/paper-reed.less
++++ b/app/internal_packages/paper-reed/styles/paper-reed.less
+@@ -195,6 +195,9 @@
+   .pr-signature-menu .pr-signature-manage { margin-top: 5px; border-top: 1px solid var(--pr-line); border-radius: 0; color: var(--pr-muted); }
+   .pr-picker-empty { margin: 0; padding: 8px 10px; color: var(--pr-muted); }
+   .pr-signature-picker summary:focus-visible, .pr-signature-menu button:focus-visible { outline: 2px solid var(--pr-reed); outline-offset: -2px; border-radius: 4px; }
++}
++
++.paper-reed-enabled .pr-composer, .preferences-wrap.pr-preferences .pr-templates {
+   .RichEditor-toolbar .floating-container { border-bottom: 0; }
+   .RichEditor-toolbar .inner { width: 100%; gap: 5px 0; padding: 6px; border: 1px solid var(--pr-line); border-radius: 6px; background: var(--pr-inset); }
+   .RichEditor-toolbar .pr-format-group { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; padding: 0 6px; border-left: 1px solid var(--pr-line); }
+@@ -438,3 +441,80 @@
+     .pr-folder-mappings .role-section { grid-template-columns:90px minmax(0,1fr); gap:12px; }
+   }
+ }
++
++.preferences-wrap.pr-preferences .pr-settings-page {
++  .pr-templates { max-width:none; margin:0; }
++  .pr-template-toolbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; }
++  .pr-template-toolbar > span { font-size:12px; color:#626b60; }
++  .pr-template-layout { display:grid; grid-template-columns:190px minmax(0,1fr); gap:28px; margin-bottom:28px; }
++  .pr-template-layout > nav { border-right:1px solid #dfe2d9; padding-right:16px; }
++  .pr-template-layout > nav button { display:block; width:100%; border:0; text-align:left; margin-bottom:5px; padding:10px; overflow-wrap:anywhere; }
++  .pr-template-layout > nav button[aria-current] { color:#303730; background:#e9eee5; }
++  .pr-template-layout small { display:block; color:#626b60; font-size:10px; margin-top:4px; }
++  .pr-template-detail { min-width:0; }
++  .pr-templates .template-wrap { margin:0; width:auto; }
++  .pr-templates .template-wrap .section.fields { display:block; }
++  .pr-templates .template-wrap .section.fields .field { display:block; margin:0 0 20px; }
++  .pr-templates .field label { display:block; font-size:11px; color:#626b60; margin-bottom:8px; }
++  .pr-templates .template-wrap .section.editor { background:#fffefa; border:1px solid #dfe2d9; border-radius:5px; min-height:260px; }
++  .pr-templates .RichEditor-root { width:100%; min-width:0; }
++  .pr-templates .display-deferrable:not(.deferred) { opacity:1; transition:none; }
++  .pr-templates .RichEditor-content > [contenteditable=true] { padding:20px; line-height:1.7; min-height:240px; }
++  .pr-templates .section.note { font-size:11px; line-height:19px; color:#626b60; margin-top:12px; }
++  .pr-template-detail footer { display:flex; gap:12px; align-items:center; border-top:1px solid #dfe2d9; padding-top:16px; margin-top:12px; }
++  .pr-template-detail footer span { flex:1; color:#626b60; font-size:11px; }
++  .pr-agent { width:100%; max-width:780px; min-width:0; margin:0; }
++  .pr-agent p { font-size:12px; line-height:20px; color:#626b60; }
++  .pr-agent-service { display:flex; justify-content:space-between; align-items:center; gap:16px; }
++  .pr-agent-service label { display:flex; align-items:center; gap:6px; }
++  .pr-agent-state { font-size:11px; color:#626b60; }
++  .pr-agent-state.running { color:#4b634f; }
++  .pr-agent-state::before { content:'•'; margin-right:5px; }
++  .pr-agent .pr-agent-error { color:#9a433e; }
++  .pr-agent-levels { padding:0; margin:0; border:0; display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:12px 24px; }
++  .pr-agent-levels label { display:flex; align-items:flex-start; gap:8px; padding:8px 0; }
++  .pr-agent-levels input { margin-top:3px; flex-shrink:0; }
++  .pr-agent-levels strong { font-size:12px; font-weight:500; }
++  .pr-agent-levels small, .pr-agent-account-heading small { display:block; color:#626b60; font-size:11px; line-height:18px; margin-top:4px; }
++  .pr-agent-account { padding:14px 0; border-bottom:1px solid #eceee7; }
++  .pr-agent-account-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
++  .pr-agent-account-heading label { display:flex; gap:8px; align-items:center; min-width:0; overflow-wrap:anywhere; }
++  .pr-agent-account-heading button { flex-shrink:0; }
++  .pr-agent-folders { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px; padding:18px 0 4px 22px; }
++  .pr-agent-folders label { display:flex; align-items:center; gap:6px; overflow-wrap:anywhere; }
++  .pr-agent-exclusions { margin:6px 0 0 22px; }
++  .pr-agent-endpoint, .pr-agent-token, .pr-agent-port-row { display:flex; align-items:center; gap:8px; min-width:0; }
++  .pr-agent code { font:12px/20px ui-monospace,monospace; color:#4b634f; overflow-wrap:anywhere; }
++  .pr-agent-endpoint code { flex:1; }
++  .pr-agent-token-label { display:block; font-size:11px; color:#626b60; margin:20px 0 8px; }
++  .pr-agent-token input { flex:1; min-width:0; }
++  .pr-agent button { flex-shrink:0; }
++  .pr-agent .pr-agent-copy-state { font-size:11px; min-height:20px; }
++  .pr-agent-cli { margin-top:24px; }
++  .pr-agent summary { cursor:pointer; color:#4b634f; }
++  .pr-agent-cli a { color:#4b634f; text-decoration:underline; }
++  .pr-agent-port-row { margin:8px 0; }
++  #pr-agent-port { width:120px; }
++  .pr-agent-token-confirm button + button { margin-left:8px; }
++  .pr-agent-audit header { display:flex; align-items:center; justify-content:space-between; gap:12px; }
++  .pr-agent-audit h2 { font-size:14px; font-weight:500; margin:0; }
++  .pr-agent-audit ol { list-style:none; margin:0; padding:0; }
++  .pr-agent-audit li { border-top:1px solid #eceee7; padding:16px 0; }
++  .pr-agent-audit-heading { display:flex; justify-content:space-between; gap:16px; }
++  .pr-agent-audit-heading strong { font:12px/20px ui-monospace,monospace; overflow-wrap:anywhere; }
++  .pr-agent-audit time { font-size:11px; color:#626b60; flex-shrink:0; }
++  .pr-agent-audit li p { overflow-wrap:anywhere; }
++  .pr-agent-audit li summary { font-size:11px; }
++  .pr-agent-audit pre { white-space:pre-wrap; overflow-wrap:anywhere; border:1px solid #dfe2d9; background:#fffefa; padding:12px; border-radius:5px; font-size:11px; }
++  @media(max-width:1100px) {
++    .pr-template-layout { grid-template-columns:minmax(0,1fr); gap:20px; }
++    .pr-template-layout > nav { display:flex; overflow-x:auto; border-right:0; border-bottom:1px solid #dfe2d9; padding:0 0 12px; }
++    .pr-template-layout > nav button { min-width:140px; width:auto; }
++    .pr-agent-levels { grid-template-columns:minmax(0,1fr); }
++  }
++}
++.preferences-wrap.pr-preferences .pr-settings-page {
++  .pr-agent > section, .pr-agent > details { margin-bottom:0; }
++  .pr-agent .mcp-accounts-list { border:0; padding:0; background:transparent; }
++  .pr-templates .template-wrap .RichEditor-root { border:0; padding:0; background:transparent; }
++}
+diff --git a/app/internal_packages/preferences/lib/preferences-root.tsx b/app/internal_packages/preferences/lib/preferences-root.tsx
+index 9627633..ae83eaa 100644
+--- a/app/internal_packages/preferences/lib/preferences-root.tsx
++++ b/app/internal_packages/preferences/lib/preferences-root.tsx
+@@ -75,6 +75,8 @@ class PreferencesRoot extends React.Component<{ tab: any; tabs: any[]; selection
+     const page =
+       AppEnv.config.get('core.paperReed.enabled') &&
+       {
++        Templates: ['邮件模板', '把常用表达留好，让下一封信从容开始。'],
++        MCP: ['Agent 连接', '连接本机 Agent，明确它可以访问的邮件与操作。'],
+         Appearance: ['外观', '调整界面大小与邮件正文的显示方式。'],
+         'Mail Rules': ['邮件规则', '为每个账号安排清楚、可控的自动处理。'],
+         Folders: ['文件夹', '确认常用邮件用途对应的实际文件夹。'],

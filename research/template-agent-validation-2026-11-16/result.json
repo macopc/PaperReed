@@ -1,0 +1,22 @@
+{
+  "templateCreate": true,
+  "unicodeRename": true,
+  "duplicateNameProtected": true,
+  "templateSubjectAndBodySaved": true,
+  "templateDeleteCancelConfirm": true,
+  "templateAppliedToDraft": true,
+  "tokenMasked": true,
+  "copyActionsIntercepted": true,
+  "readOnlyDeniesDraft": true,
+  "readDraftAllowsDraft": true,
+  "accountRestriction": true,
+  "folderRestriction": true,
+  "auditClear": true,
+  "portValidation": true,
+  "portRebind": true,
+  "tokenRotation": true,
+  "serviceToggle": true,
+  "compactLayouts": true,
+  "expectedSMTPSubmissions": 0,
+  "observedSMTPSubmissions": 0
+}

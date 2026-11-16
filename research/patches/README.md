@@ -19,9 +19,11 @@
 | `0013-settings-subpages.patch` | Mailspring 根目录，在 0012 后应用 | 桌面固定基线，加 0002–0007 / 0009–0012 |
 | `0014-appearance-rules-folders.patch` | Mailspring 根目录，在 0013 后应用 | 桌面固定基线，加 0002–0007 / 0009–0013 |
 
-在干净的固定版本 checkout 中，使用补丁的绝对路径分别执行 `git apply --check <patch>`、`git apply <patch>`。0001、0008 按顺序在子模块根目录应用；0002–0007、0009–0014 按顺序在桌面根目录应用。应用 0008 后重新构建引擎，并替换实验桌面 `app/mailsync`；0010 不要求额外原生构建。本轮已在临时目录恢复各文件的基线版本、实际应用补丁，并逐字节比对测试过的源码。
+| `0015-template-agent-settings.patch` | Mailspring 根目录，在 0014 后应用 | 桌面固定基线，加 0002–0007 / 0009–0014 |
 
-当前工作区的 `research/.local/Mailspring` 已应用十四份补丁，**不要重复应用**。安装过程中产生的上游 `app/package-lock.json` 变化不在补丁内。
+在干净的固定版本 checkout 中，使用补丁的绝对路径分别执行 `git apply --check <patch>`、`git apply <patch>`。0001、0008 按顺序在子模块根目录应用；0002–0007、0009–0015 按顺序在桌面根目录应用。应用 0008 后重新构建引擎，并替换实验桌面 `app/mailsync`；0010 不要求额外原生构建。本轮已在临时目录恢复各文件的基线版本、实际应用补丁，并逐字节比对测试过的源码。
+
+当前工作区的 `research/.local/Mailspring` 已应用十五份补丁，**不要重复应用**。安装过程中产生的上游 `app/package-lock.json` 变化不在补丁内。
 
 接入方式：新增一个 `MailMutationGuard.hpp`，只依赖现有 SQLiteCpp / nlohmann。它由 `TaskProcessor.cpp` 和 `MailStore.cpp` 直接包含，不新增构建目标、服务、数据库或任务调度器。迁移在原数据库中建立 `PaperReedSend` 表和活动草稿唯一索引；实验阶段不改变上游 `user_version`。正式分支需要接入自己的版本化迁移。
 
@@ -48,3 +50,5 @@
 0013 打磨通用、邮箱账号与快捷键子页，增加分组、账号颜色边框、快捷键搜索和键盘编辑入口，不要求重编译引擎。见 [验证记录](../subpages-validation-2026-11-16/README.md)。
 
 0014 打磨外观、邮件规则与文件夹设置，明确固定样式及可用调整项，完善规则状态、排序和确认操作，并改进文件夹用途映射。见 [验证记录](../organization-validation-2026-11-16/README.md)。
+
+0015 打磨邮件模板和 Agent 设置，补齐写信模板入口，改进权限、连接与令牌操作。见 [验证记录](../template-agent-validation-2026-11-16/README.md)。
