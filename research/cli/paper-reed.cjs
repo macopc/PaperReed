@@ -13,6 +13,8 @@ const mailActions = {
   'restore-inbox': 'inbox',
 };
 const localActions = {
+  classify: 'classify',
+  'classify-auto': 'classify-auto',
   pin: 'pin',
   unpin: 'unpin',
   snooze: 'snooze',
@@ -21,6 +23,12 @@ const localActions = {
   'label-remove': 'label-remove',
 };
 const commands = {
+  rules: ['local_rules', 'accountId'],
+  'rule-save': ['local_rule_save', 'accountId'],
+  'rule-delete': ['local_rule_delete', 'accountId'],
+  'rules-reorder': ['local_rules_reorder', 'accountId'],
+  'rules-preview': ['local_rules_preview', 'accountId'],
+  'rules-apply': ['local_rules_apply', 'accountId'],
   ...Object.fromEntries(
     Object.keys(localActions).map((name) => [
       name,
@@ -50,11 +58,42 @@ const commands = {
   'operation-get': ['get_operation', 'accountId'],
 };
 const examples = {
+  rules: { accountId: 'ACCOUNT_ID' },
+  'rule-save': {
+    accountId: 'ACCOUNT_ID',
+    name: '项目通知',
+    field: 'subject',
+    query: '项目',
+    action: 'category',
+    value: 'notifications',
+    enabled: false,
+  },
+  'rule-delete': { accountId: 'ACCOUNT_ID', id: 'RULE_ID' },
+  'rules-reorder': {
+    accountId: 'ACCOUNT_ID',
+    ids: ['RULE_ID_1', 'RULE_ID_2'],
+  },
+  'rules-preview': {
+    accountId: 'ACCOUNT_ID',
+    targets: [{ accountId: 'ACCOUNT_ID', threadId: 'THREAD_ID' }],
+  },
+  'rules-apply': {
+    accountId: 'ACCOUNT_ID',
+    revision: 'PREVIEW_REVISION',
+    targets: [
+      {
+        accountId: 'ACCOUNT_ID',
+        threadId: 'THREAD_ID',
+        messageId: 'PREVIEW_MESSAGE_ID',
+      },
+    ],
+  },
   ...Object.fromEntries(
     Object.keys(localActions).map((name) => [
       name,
       {
         targets: [{ accountId: 'ACCOUNT_ID', threadId: 'THREAD_ID' }],
+        ...(name === 'classify' ? { category: 'notifications' } : {}),
         ...(name === 'snooze'
           ? { until: '2027-01-01T09:00:00-05:00' }
           : {}),
@@ -232,7 +271,7 @@ function inputFor(command, args) {
 function help(command) {
   if (commands[command])
     return `paper-reed ${command} --input '${JSON.stringify(examples[command])}'\nOr pass the same JSON through stdin. Results are JSON; failures exit 1.\n${mailActions[command] ? 'Returns per-target task receipts. queued is not success; poll change-get. Reuse requestId only for the same targets/action while task history remains.\n' : ''}${command === 'draft-send' ? 'Send only with explicit user approval. Keep requestId stable across retries; inspect operation-get after uncertain results.\n' : ''}`;
-  return `Paper Reed CLI ${VERSION}\n\nStart here:\n  paper-reed doctor             Check the local connection (read-only)\n  paper-reed accounts           List authorized accounts\n  paper-reed <command> --help   Show a JSON example\n\nRead: accounts, folders, threads, search, thread-get\nDrafts: draft-get, draft-create, draft-update, draft-send, operation-get\nLocal: pin, unpin, snooze, unsnooze, local-list, local-state, labels, label-create, label-update, label-delete, label-add, label-remove\nOrganize: mark-read, mark-unread, archive, spam, trash, restore-inbox, change-get, undo\n\nJSON input: --input '{...}' or stdin. JSON output; errors exit 1.\nInstall/connect from Paper Reed → Settings → Agent. Keep the app running.\nNo mail is sent by installation or doctor. Sending requires permission and user approval.\n`;
+  return `Paper Reed CLI ${VERSION}\n\nStart here:\n  paper-reed doctor             Check the local connection (read-only)\n  paper-reed accounts           List authorized accounts\n  paper-reed <command> --help   Show a JSON example\n\nRead: accounts, folders, threads, search, thread-get\nDrafts: draft-get, draft-create, draft-update, draft-send, operation-get\nRules: rules, rule-save, rule-delete, rules-reorder, rules-preview, rules-apply\nClassification: classify, classify-auto\nLocal: pin, unpin, snooze, unsnooze, local-list, local-state, labels, label-create, label-update, label-delete, label-add, label-remove\nOrganize: mark-read, mark-unread, archive, spam, trash, restore-inbox, change-get, undo\n\nJSON input: --input '{...}' or stdin. JSON output; errors exit 1.\nInstall/connect from Paper Reed → Settings → Agent. Keep the app running.\nNo mail is sent by installation or doctor. Sending requires permission and user approval.\n`;
 }
 async function main() {
   const [command, ...args] = process.argv.slice(2);

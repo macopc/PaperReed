@@ -86,3 +86,5 @@ CLI 安装、连接诊断和 Agent 交接见 [使用说明](research/cli/README.
 收件箱搜索、批量整理及共用 CLI 命令见 [实际窗口与验证](research/inbox-validation-2026-11-16/README.md)。
 
 置顶、稍后处理、自定义标签与 CLI 共用状态见 [实际窗口与验证](research/triage-validation-2026-11-16/README.md)。
+
+本机邮件规则、自动分类与预览应用见 [实际窗口与验证](research/rules-validation-2026-11-16/README.md)。

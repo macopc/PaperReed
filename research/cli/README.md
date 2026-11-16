@@ -1,6 +1,6 @@
 # Paper Reed CLI · 实验版
 
-CLI 随实验桌面源码补丁提供，复用桌面内的运行环境与固定版本 MCP SDK，不需要另装 Node 或全局 npm 包。当前不是独立发布的安装包；先运行已应用 [补丁系列](../patches/README.md)（包括 0018）的实验桌面。
+CLI 随实验桌面源码补丁提供，复用桌面内的运行环境与固定版本 MCP SDK，不需要另装 Node 或全局 npm 包。当前不是独立发布的安装包；先运行已应用 [补丁系列](../patches/README.md)（包括 0019）的实验桌面。
 
 ## 从桌面接入
 
@@ -112,6 +112,34 @@ paper-reed label-delete --input '{"id":"LABEL_ID"}'
 
 完整重启、IMAP 新回复、权限与当前边界见 [本机整理验证](../triage-validation-2026-11-16/README.md)。
 
+## 邮件规则与分类
+
+规则只操作本机标签与分类。先保存为暂停状态，确认字段后再将同一 ID 的完整规则保存为 `enabled: true`。修改、启用或排序不会回填历史结果；已有邮件需要单独预览和应用。
+
+```sh
+paper-reed rules --input '{"accountId":"ACCOUNT_ID"}'
+paper-reed rule-save --input '{"accountId":"ACCOUNT_ID","name":"项目通知","field":"subject","query":"项目","action":"category","value":"notifications","enabled":false}'
+paper-reed rule-save --input '{"accountId":"ACCOUNT_ID","id":"RULE_ID","name":"项目通知","field":"subject","query":"项目","action":"category","value":"notifications","enabled":true}'
+paper-reed rules-reorder --input '{"accountId":"ACCOUNT_ID","ids":["RULE_ID_2","RULE_ID_1"]}'
+paper-reed rule-delete --input '{"accountId":"ACCOUNT_ID","id":"RULE_ID"}'
+
+paper-reed rules-preview --input '{"accountId":"ACCOUNT_ID","targets":[{"accountId":"ACCOUNT_ID","threadId":"THREAD_ID"}]}'
+paper-reed rules-apply --input '{"accountId":"ACCOUNT_ID","revision":"PREVIEW_REVISION","targets":[{"accountId":"ACCOUNT_ID","threadId":"THREAD_ID","messageId":"PREVIEW_MESSAGE_ID"}]}'
+
+paper-reed classify --input '{"targets":[{"accountId":"ACCOUNT_ID","threadId":"THREAD_ID"}],"category":"people"}'
+paper-reed classify-auto --input '{"targets":[{"accountId":"ACCOUNT_ID","threadId":"THREAD_ID"}]}'
+paper-reed local-list --input '{"accountId":"ACCOUNT_ID","view":"category:notifications","limit":25}'
+```
+
+- `field` 为 `sender` 或 `subject`，按名称／邮箱或主题做不区分大小写的子串匹配，`query` 最长 200 字符。`action` 为 `label`（`value` 使用已有标签 ID）或 `category`（`ordinary`、`people`、`notifications`、`subscriptions`）。
+- `rule-save` 是完整规则保存，提供 ID 为编辑，省略 ID 为创建；`enabled` 默认 `false`。`rules-reorder` 必须提供该账号全部规则 ID，各出现一次。
+- 标签累加，最后一个匹配分类生效。手动 `classify` 设置持久人工优先标记，后续规则不覆盖它；`classify-auto` 用最新外部来信重新计算当前分类并清除人工优先标记。
+- `rules-preview` 只读，返回规则 `revision` 与每项的 `messageId`、命中规则、拟添加标签、分类及人工优先状态。`rules-apply` 使用这些原值，仅提交用户明确选择的目标（最多 100 个）；规则已变或最新来信不同会拒绝，需重新预览，不能自行替换引用绕过检查。
+- 创建／修改／删除／排序规则要求该账号全部文件夹的写权限；应用到已有会话则逐项检查范围。保存的启用规则会持续作为本机自动化工作，之后关闭 Agent 连接不等于暂停规则。
+- `local-state` 现在同时返回 `category` 和 `categoryManual`。规则变化或删除不会回滚旧状态；删除标签会暂停引用它的规则。
+
+规则自动处理使用持久的逐消息已处理标记；这与远端整理 `change-get`、发送 `operation-get` 不同，不产生这两类任务 ID。窗口关闭后没有后台执行服务，打开应用后继续。执行范围、预览限制与完整验证见 [规则验证记录](../rules-validation-2026-11-16/README.md)。
+
 ## 连接恢复和移除
 
 | 状况 | 下一步 |
@@ -141,4 +169,4 @@ node research/cli/paper-reed.cjs doctor
 
 token 文件只含桌面 MCP 令牌，使用 `0600` 权限。用户安装的 launcher 会忽略这三个旧变量，以本次安装的连接文件为准。`PAPER_REED_CLI_BIN_DIR` 可在启动实验桌面时覆盖安装目录，用于隔离测试；默认始终为用户的 `~/.local/bin`。
 
-`paper-reed.cjs` 和 `install.cjs` 为 CLI 源文件，在 0016 中首次内置、0017–0018 中同步更新，以完全相同的内容放入桌面 `internal_packages/mcp-server/bin/`。更新时同步导出补丁并检查两份文件一致，不新增 npm 安装步骤。已验证范围与实际窗口见 [安装与接入验证](../cli-onboarding-validation-2026-11-16/README.md)。
+`paper-reed.cjs` 和 `install.cjs` 为 CLI 源文件，在 0016 中首次内置、0017–0019 中同步更新，以完全相同的内容放入桌面 `internal_packages/mcp-server/bin/`。更新时同步导出补丁并检查两份文件一致，不新增 npm 安装步骤。已验证范围与实际窗口见 [安装与接入验证](../cli-onboarding-validation-2026-11-16/README.md)。

@@ -25,7 +25,7 @@ async function startDesktop(){
  const env={...process.env};env.PAPER_REED_CLI_BIN_DIR=path.join(work,"bin with space '");delete env.PLAYWRIGHT;delete env.ELECTRON_RUN_AS_NODE;
  app=await _electron.launch({executablePath:r('electron'),args:[path.join(upstream,'app'),'--dev','--no-sandbox','--config-dir-path',config],env,timeout:30000});
  app.process().stderr.on('data',b=>fs.appendFileSync(path.join(work,'electron.log'),b));
- main=await until(async()=>app.windows().find(w=>JSON.parse(new URL(w.url()).searchParams.get('loadSettings')||'{}').windowType==='default'),'main window');
+ main=await until(async()=>app.windows().find(w=>JSON.parse(new URL(w.url() || 'about:blank').searchParams.get('loadSettings')||'{}').windowType==='default'),'main window');
  main.on('console',msg=>fs.appendFileSync(path.join(work,'renderer.log'),msg.type()+': '+msg.text()+'\n'));
  cdp=await app.context().newCDPSession(main);
  await until(()=>evaluate(cdp,'typeof AppEnv !== "undefined" && !!AppEnv.mailsyncBridge'),'app initialization');
@@ -64,7 +64,7 @@ async function startDesktop(){
  fs.writeFileSync(path.join(work,'created.json'),JSON.stringify(created));console.log('CREATED',JSON.stringify(created));
  const ref={accountId:account.id,draftId:created.draftId};
  await evaluate(cdp,`require('mailspring-exports').Actions.composePopoutDraft(${JSON.stringify(created.draftId)});true`);
- const composer=await until(async()=>app.windows().find(w=>JSON.parse(new URL(w.url()).searchParams.get('loadSettings')||'{}').windowType==='composer'),'composer window');
+ const composer=await until(async()=>app.windows().find(w=>JSON.parse(new URL(w.url() || 'about:blank').searchParams.get('loadSettings')||'{}').windowType==='composer'),'composer window');
  // Electron already handles its beforeunload cancellation; do not let Playwright auto-answer a nonexistent Chrome dialog.
  composer.on('dialog',d=>{if(d.type()!=='beforeunload')d.dismiss().catch(e=>console.error(e.message));});
  const editor=await app.context().newCDPSession(composer);
@@ -112,7 +112,7 @@ async function startDesktop(){
      assert.equal((await cli('draft-get',ref)).body,'CLI newer version');
      for(const [draftId,body] of [[copyRef.draftId,local.body],[ref.draftId,'CLI newer version']]) {
        await evaluate(cdp,`require('mailspring-exports').Actions.composePopoutDraft(${JSON.stringify(draftId)});true`);
-       const reopened=await until(async()=>app.windows().find(w=>{const settings=JSON.parse(new URL(w.url()).searchParams.get('loadSettings')||'{}');return settings.windowType==='composer';}),'reopened composer');
+       const reopened=await until(async()=>app.windows().find(w=>{const settings=JSON.parse(new URL(w.url() || 'about:blank').searchParams.get('loadSettings')||'{}');return settings.windowType==='composer';}),'reopened composer');
        const reopenedCdp=await app.context().newCDPSession(reopened);
        await until(()=>evaluate(reopenedCdp,`!!document.querySelector('[contenteditable="true"]')`),'restored editor');
        const restored=await evaluate(reopenedCdp,`(async()=>{const s=await require('mailspring-exports').DraftStore.sessionForClientId(${JSON.stringify(draftId)});return {body:s.draft().body,dirty:s.changes.isDirty()};})()`);

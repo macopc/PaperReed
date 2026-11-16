@@ -49,6 +49,8 @@ try:
             result_path=Path(__file__).resolve().parent.parent/'inbox-validation-2026-11-16/result.json'
         if os.environ.get('PAPER_REED_TRIAGE_CHECK'):
             result_path=Path(__file__).resolve().parent.parent/'triage-validation-2026-11-16/result.json'
+        if os.environ.get('PAPER_REED_RULES_CHECK'):
+            result_path=Path(__file__).resolve().parent.parent/'rules-validation-2026-11-16/result.json'
         result=json.loads(result_path.read_text());result['observedSMTPSubmissions']=len(sent)
         result_path.write_text(json.dumps(result,indent=2)+'\n')
     if a.conflict or a.close_save or a.recover or a.audit or a.controls:

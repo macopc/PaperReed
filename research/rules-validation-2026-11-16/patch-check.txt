@@ -1,0 +1,1 @@
+PASS: 17 desktop patches applied in order; 66 files byte-identical to tested checkout; CLI sources match bundled copies.

@@ -1,0 +1,1409 @@
+diff --git a/app/internal_packages/mcp-server/bin/paper-reed.cjs b/app/internal_packages/mcp-server/bin/paper-reed.cjs
+index 8d37624..e5bfe8a 100644
+--- a/app/internal_packages/mcp-server/bin/paper-reed.cjs
++++ b/app/internal_packages/mcp-server/bin/paper-reed.cjs
+@@ -13,6 +13,8 @@ const mailActions = {
+   'restore-inbox': 'inbox',
+ };
+ const localActions = {
++  classify: 'classify',
++  'classify-auto': 'classify-auto',
+   pin: 'pin',
+   unpin: 'unpin',
+   snooze: 'snooze',
+@@ -21,6 +23,12 @@ const localActions = {
+   'label-remove': 'label-remove',
+ };
+ const commands = {
++  rules: ['local_rules', 'accountId'],
++  'rule-save': ['local_rule_save', 'accountId'],
++  'rule-delete': ['local_rule_delete', 'accountId'],
++  'rules-reorder': ['local_rules_reorder', 'accountId'],
++  'rules-preview': ['local_rules_preview', 'accountId'],
++  'rules-apply': ['local_rules_apply', 'accountId'],
+   ...Object.fromEntries(
+     Object.keys(localActions).map((name) => [
+       name,
+@@ -50,11 +58,42 @@ const commands = {
+   'operation-get': ['get_operation', 'accountId'],
+ };
+ const examples = {
++  rules: { accountId: 'ACCOUNT_ID' },
++  'rule-save': {
++    accountId: 'ACCOUNT_ID',
++    name: '项目通知',
++    field: 'subject',
++    query: '项目',
++    action: 'category',
++    value: 'notifications',
++    enabled: false,
++  },
++  'rule-delete': { accountId: 'ACCOUNT_ID', id: 'RULE_ID' },
++  'rules-reorder': {
++    accountId: 'ACCOUNT_ID',
++    ids: ['RULE_ID_1', 'RULE_ID_2'],
++  },
++  'rules-preview': {
++    accountId: 'ACCOUNT_ID',
++    targets: [{ accountId: 'ACCOUNT_ID', threadId: 'THREAD_ID' }],
++  },
++  'rules-apply': {
++    accountId: 'ACCOUNT_ID',
++    revision: 'PREVIEW_REVISION',
++    targets: [
++      {
++        accountId: 'ACCOUNT_ID',
++        threadId: 'THREAD_ID',
++        messageId: 'PREVIEW_MESSAGE_ID',
++      },
++    ],
++  },
+   ...Object.fromEntries(
+     Object.keys(localActions).map((name) => [
+       name,
+       {
+         targets: [{ accountId: 'ACCOUNT_ID', threadId: 'THREAD_ID' }],
++        ...(name === 'classify' ? { category: 'notifications' } : {}),
+         ...(name === 'snooze'
+           ? { until: '2027-01-01T09:00:00-05:00' }
+           : {}),
+@@ -232,7 +271,7 @@ function inputFor(command, args) {
+ function help(command) {
+   if (commands[command])
+     return `paper-reed ${command} --input '${JSON.stringify(examples[command])}'\nOr pass the same JSON through stdin. Results are JSON; failures exit 1.\n${mailActions[command] ? 'Returns per-target task receipts. queued is not success; poll change-get. Reuse requestId only for the same targets/action while task history remains.\n' : ''}${command === 'draft-send' ? 'Send only with explicit user approval. Keep requestId stable across retries; inspect operation-get after uncertain results.\n' : ''}`;
+-  return `Paper Reed CLI ${VERSION}\n\nStart here:\n  paper-reed doctor             Check the local connection (read-only)\n  paper-reed accounts           List authorized accounts\n  paper-reed <command> --help   Show a JSON example\n\nRead: accounts, folders, threads, search, thread-get\nDrafts: draft-get, draft-create, draft-update, draft-send, operation-get\nLocal: pin, unpin, snooze, unsnooze, local-list, local-state, labels, label-create, label-update, label-delete, label-add, label-remove\nOrganize: mark-read, mark-unread, archive, spam, trash, restore-inbox, change-get, undo\n\nJSON input: --input '{...}' or stdin. JSON output; errors exit 1.\nInstall/connect from Paper Reed → Settings → Agent. Keep the app running.\nNo mail is sent by installation or doctor. Sending requires permission and user approval.\n`;
++  return `Paper Reed CLI ${VERSION}\n\nStart here:\n  paper-reed doctor             Check the local connection (read-only)\n  paper-reed accounts           List authorized accounts\n  paper-reed <command> --help   Show a JSON example\n\nRead: accounts, folders, threads, search, thread-get\nDrafts: draft-get, draft-create, draft-update, draft-send, operation-get\nRules: rules, rule-save, rule-delete, rules-reorder, rules-preview, rules-apply\nClassification: classify, classify-auto\nLocal: pin, unpin, snooze, unsnooze, local-list, local-state, labels, label-create, label-update, label-delete, label-add, label-remove\nOrganize: mark-read, mark-unread, archive, spam, trash, restore-inbox, change-get, undo\n\nJSON input: --input '{...}' or stdin. JSON output; errors exit 1.\nInstall/connect from Paper Reed → Settings → Agent. Keep the app running.\nNo mail is sent by installation or doctor. Sending requires permission and user approval.\n`;
+ }
+ async function main() {
+   const [command, ...args] = process.argv.slice(2);
+diff --git a/app/internal_packages/mcp-server/lib/mcp-tools.ts b/app/internal_packages/mcp-server/lib/mcp-tools.ts
+index 8336db6..54149b2 100644
+--- a/app/internal_packages/mcp-server/lib/mcp-tools.ts
++++ b/app/internal_packages/mcp-server/lib/mcp-tools.ts
+@@ -1,4 +1,10 @@
+ import {
++  listLocalRules,
++  saveLocalRule,
++  deleteLocalRule,
++  reorderLocalRules,
++  previewLocalRules,
++  applyLocalRules,
+   localLabels,
+   editLocalLabel,
+   changeLocalMail,
+@@ -1169,13 +1175,23 @@ export function registerTools(server: McpServer) {
+     'local_mail_change',
+     'Pin, snooze or label explicit threads on this device only. No provider star, folder or label changes. until requires ISO time with timezone.',
+     {
+-      action: z.enum(['pin', 'unpin', 'snooze', 'unsnooze', 'label-add', 'label-remove']),
++      action: z.enum([
++        'pin',
++        'unpin',
++        'snooze',
++        'unsnooze',
++        'label-add',
++        'label-remove',
++        'classify',
++        'classify-auto',
++      ]),
+       targets: z
+         .array(z.object({ accountId: z.string().min(1), threadId: z.string().min(1) }))
+         .min(1)
+         .max(100),
+       until: z.string().optional(),
+       labelId: z.string().optional(),
++      category: z.enum(['ordinary', 'people', 'notifications', 'subscriptions']).optional(),
+     },
+     'write',
+     async (input) => textResult(await changeLocalMail(input, inboxAccess))
+@@ -1222,7 +1238,7 @@ export function registerTools(server: McpServer) {
+       accountId: z.string().min(1),
+       view: z
+         .string()
+-        .regex(/^(pinned|snoozed|label:.+)$/)
++        .regex(/^(pinned|snoozed|label:.+|category:(ordinary|people|notifications|subscriptions))$/)
+         .optional(),
+       folder: z.enum(['inbox', 'sent', 'archive', 'spam', 'trash']).optional(),
+       query: z.string().optional(),
+@@ -1251,6 +1267,72 @@ export function registerTools(server: McpServer) {
+     }
+   );
+ 
++  const ruleTarget = z.object({ accountId: z.string().min(1), threadId: z.string().min(1) });
++  defineTool(
++    server,
++    'local_rules',
++    'List local rules in execution order. Account-scoped; no provider mailbox mutations.',
++    { accountId: z.string().min(1) },
++    'read',
++    async ({ accountId }) => textResult(await listLocalRules(accountId, inboxAccess))
++  );
++  defineTool(
++    server,
++    'local_rule_save',
++    'Save one local sender/subject contains rule. New rules default paused; enabling or editing starts with future Inbox arrivals. Account-wide write access required.',
++    {
++      accountId: z.string().min(1),
++      id: z.string().optional(),
++      name: z.string().min(1).max(80),
++      field: z.enum(['sender', 'subject']),
++      query: z.string().min(1).max(200),
++      action: z.enum(['label', 'category']),
++      value: z.string().min(1),
++      enabled: z.boolean().default(false),
++    },
++    'write',
++    async (input) => textResult(await saveLocalRule(input, inboxAccess))
++  );
++  defineTool(
++    server,
++    'local_rule_delete',
++    'Delete a local rule; keep prior labels and classifications.',
++    { accountId: z.string().min(1), id: z.string().min(1) },
++    'write',
++    async (input) => textResult(await deleteLocalRule(input, inboxAccess))
++  );
++  defineTool(
++    server,
++    'local_rules_reorder',
++    'Set the complete ordered rule ID list for one account. Labels accumulate, last matching category wins.',
++    { accountId: z.string().min(1), ids: z.array(z.string().min(1)) },
++    'write',
++    async (input) => textResult(await reorderLocalRules(input, inboxAccess))
++  );
++  defineTool(
++    server,
++    'local_rules_preview',
++    'Preview enabled rules on each thread’s latest external message. No state changes. Returns revision and messageId for explicit apply.',
++    { accountId: z.string().min(1), targets: z.array(ruleTarget).max(100) },
++    'read',
++    async (input) => textResult(await previewLocalRules(input, inboxAccess))
++  );
++  defineTool(
++    server,
++    'local_rules_apply',
++    'Apply a preview only to explicit targets. Reject changed rules or changed latest message; preserve manual classifications.',
++    {
++      accountId: z.string().min(1),
++      revision: z.string().min(1),
++      targets: z
++        .array(ruleTarget.extend({ messageId: z.string().min(1) }))
++        .min(1)
++        .max(100),
++    },
++    'write',
++    async (input) => textResult(await applyLocalRules(input, inboxAccess))
++  );
++
+   // ── Write Tools ──
+ 
+   defineTool(
+diff --git a/app/internal_packages/paper-reed/lib/main.tsx b/app/internal_packages/paper-reed/lib/main.tsx
+index 9731491..6df560d 100644
+--- a/app/internal_packages/paper-reed/lib/main.tsx
++++ b/app/internal_packages/paper-reed/lib/main.tsx
+@@ -1,13 +1,24 @@
+-import { reconcileLocalSnoozes } from '../../../src/services/mail-core/local-triage';
++import {
++  reconcileLocalSnoozes,
++  processLocalRules,
++} from '../../../src/services/mail-core/local-triage';
+ let timer: ReturnType<typeof setInterval>;
++let databaseTimer: ReturnType<typeof setTimeout>;
++let unlisten: () => void;
+ const reconcile = () =>
+-  reconcileLocalSnoozes().catch((error) => console.error('Paper Reed snooze:', error.message));
+-import { ComponentRegistry, WorkspaceStore } from 'mailspring-exports';
++  reconcileLocalSnoozes()
++    .then(() => processLocalRules())
++    .catch((error) => console.error('Paper Reed local organization:', error.message));
++import { ComponentRegistry, WorkspaceStore, DatabaseStore } from 'mailspring-exports';
+ import PaperReedWorkspace from './workspace';
+ export function activate() {
+   if (!AppEnv.config.get('core.paperReed.enabled')) return;
+   if (AppEnv.isMainWindow()) {
+     timer = setInterval(reconcile, 15000);
++    unlisten = DatabaseStore.listen(() => {
++      clearTimeout(databaseTimer);
++      databaseTimer = setTimeout(reconcile, 250);
++    });
+     window.addEventListener('focus', reconcile);
+     reconcile();
+   }
+@@ -17,6 +28,8 @@ export function activate() {
+ }
+ export function deactivate() {
+   clearInterval(timer);
++  clearTimeout(databaseTimer);
++  unlisten?.();
+   window.removeEventListener('focus', reconcile);
+   ComponentRegistry.unregister(PaperReedWorkspace);
+   document.body.classList.remove('paper-reed-enabled');
+diff --git a/app/internal_packages/paper-reed/lib/rules-settings.tsx b/app/internal_packages/paper-reed/lib/rules-settings.tsx
+new file mode 100644
+index 0000000..1cca202
+--- /dev/null
++++ b/app/internal_packages/paper-reed/lib/rules-settings.tsx
+@@ -0,0 +1,478 @@
++import React, { useState, useEffect, useRef } from 'react';
++import { AccountStore } from 'mailspring-exports';
++import {
++  listLocalRules,
++  saveLocalRule,
++  deleteLocalRule,
++  reorderLocalRules,
++  previewLocalRules,
++  applyLocalRules,
++  localLabels,
++  onLocalTriageChanged,
++  categories,
++  LocalRule,
++  LocalLabel,
++  RuleInput,
++} from '../../../src/services/mail-core/local-triage';
++import { queryInbox, inboxDesktopAccess } from '../../../src/services/mail-core/inbox';
++import { triageError } from './triage-controls';
++const explain = (message: string) =>
++  ({
++    'invalid-rule-text': '请填写名称和匹配关键词。',
++    'rules-changed': '规则已变化，请重新预览。',
++    'preview-stale': '邮件已有新回复，请重新预览。',
++    'rule-not-found': '规则已被删除，请重新选择。',
++    'rule-list-changed': '规则列表已变化，请刷新后重试。',
++  })[message] || triageError(message);
++const blank = (accountId: string): RuleInput => ({
++  accountId,
++  name: '新规则',
++  field: 'subject',
++  query: '',
++  action: 'category',
++  value: 'notifications',
++  enabled: false,
++});
++const editable = (r: LocalRule): RuleInput => ({
++  accountId: r.accountId,
++  id: r.id,
++  name: r.name,
++  field: r.field,
++  query: r.query,
++  action: r.action,
++  value: r.value,
++  enabled: r.enabled,
++});
++function RulesForAccount({
++  accountId,
++  onDirty,
++}: {
++  accountId: string;
++  onDirty: (dirty: boolean) => void;
++}) {
++  const [rules, setRules] = useState<LocalRule[]>([]),
++    [labels, setLabels] = useState<LocalLabel[]>([]);
++  const [draft, setDraft] = useState<RuleInput>(blank(accountId)),
++    [saved, setSaved] = useState(JSON.stringify(blank(accountId)));
++  const [busy, setBusy] = useState(false),
++    [notice, setNotice] = useState(''),
++    [deleting, setDeleting] = useState(false);
++  const [search, setSearch] = useState('in:inbox'),
++    [preview, setPreview] = useState<Awaited<ReturnType<typeof previewLocalRules>>>(null),
++    [checked, setChecked] = useState<string[]>([]);
++  const mounted = useRef(false),
++    initialized = useRef(false);
++  const dirty = JSON.stringify(draft) !== saved;
++  const editing = useRef({ draft, saved });
++  editing.current = { draft, saved };
++  useEffect(() => {
++    onDirty(dirty);
++    const guard = (event: MouseEvent) => {
++      if (dirty && (event.target as HTMLElement).closest('.pr-preferences-nav button')) {
++        event.preventDefault();
++        event.stopImmediatePropagation();
++        setNotice('请先保存规则或放弃修改，再切换页面。');
++      }
++    };
++    document.addEventListener('click', guard, true);
++    return () => {
++      document.removeEventListener('click', guard, true);
++      onDirty(false);
++    };
++  }, [dirty]);
++
++  const choose = (r?: LocalRule) => {
++    const d = r ? editable(r) : blank(accountId);
++    setDraft(d);
++    setSaved(JSON.stringify(d));
++    setDeleting(false);
++    setNotice('');
++  };
++  const refresh = async () => {
++    try {
++      const [r, l] = await Promise.all([
++        listLocalRules(accountId, inboxDesktopAccess),
++        localLabels(),
++      ]);
++      if (!mounted.current) return;
++      setRules(r.rules as LocalRule[]);
++      setLabels(l);
++      if (!initialized.current) {
++        initialized.current = true;
++        choose(r.rules[0] as LocalRule);
++      } else if (
++        editing.current.draft.id &&
++        JSON.stringify(editing.current.draft) === editing.current.saved
++      ) {
++        const updated = r.rules.find((rule) => rule.id === editing.current.draft.id) as LocalRule;
++        if (!updated) choose(r.rules[0] as LocalRule);
++        else if (JSON.stringify(editable(updated)) !== editing.current.saved) choose(updated);
++      }
++    } catch (e) {
++      if (mounted.current) setNotice(explain(e.message));
++    }
++  };
++  useEffect(() => {
++    mounted.current = true;
++    refresh();
++    const off = onLocalTriageChanged(refresh);
++    return () => {
++      mounted.current = false;
++      off();
++    };
++  }, [accountId]);
++  const work = async (fn: () => Promise<void>) => {
++    setBusy(true);
++    setNotice('');
++    try {
++      await fn();
++    } catch (e) {
++      setNotice(explain(e.message));
++    } finally {
++      if (mounted.current) setBusy(false);
++    }
++  };
++  const save = () =>
++    work(async () => {
++      const { id } = await saveLocalRule(draft, inboxDesktopAccess);
++      const next = await listLocalRules(accountId, inboxDesktopAccess);
++      setRules(next.rules as LocalRule[]);
++      choose(next.rules.find((r) => r.id === id) as LocalRule);
++      setPreview(null);
++      setNotice('已保存；已有邮件未改动。');
++    });
++  const reorder = (delta: number) =>
++    work(async () => {
++      const ids = rules.map((r) => r.id),
++        index = ids.indexOf(draft.id);
++      [ids[index], ids[index + delta]] = [ids[index + delta], ids[index]];
++      await reorderLocalRules({ accountId, ids }, inboxDesktopAccess);
++      setPreview(null);
++    });
++  const loadPreview = () =>
++    work(async () => {
++      const threads = await queryInbox(
++        { accountIds: [accountId], query: search || 'in:inbox', limit: 51 },
++        inboxDesktopAccess
++      );
++      const result = await previewLocalRules(
++        { accountId, targets: threads.slice(0, 50).map((t) => ({ accountId, threadId: t.id })) },
++        inboxDesktopAccess
++      );
++      setPreview(result);
++      setChecked([]);
++      if (threads.length > 50) setNotice('仅预览前 50 个会话，请收窄搜索后再处理更多邮件。');
++    });
++  const apply = () =>
++    work(async () => {
++      const targets = preview.items
++        .filter((i) => checked.includes(i.threadId) && i.messageId)
++        .map((i) => ({ accountId, threadId: i.threadId, messageId: i.messageId }));
++      const result = await applyLocalRules(
++        { accountId, revision: preview.revision, targets },
++        inboxDesktopAccess
++      );
++      const failed = result.items.filter((i) => i.status === 'rejected');
++      setNotice(
++        `${result.items.length - failed.length} / ${result.items.length} 完成${failed.length ? ' · ' + explain(failed[0].error) : ' · 手动指定的分类已保留'}`
++      );
++      setChecked([]);
++      setPreview(null);
++    });
++  const current = rules.find((r) => r.id === draft.id),
++    index = rules.indexOf(current);
++  return (
++    <div className="pr-local-rules">
++      <div className="pr-rule-toolbar">
++        <span>{rules.filter((r) => r.enabled).length} 条启用 · 按顺序执行</span>
++        <button disabled={busy || dirty} onClick={() => choose()}>
++          新建规则
++        </button>
++      </div>
++      <p>只整理本机标签与分类。标签可以累加，分类采用最后一个匹配结果；手动指定的分类优先。</p>
++      <div className="pr-rule-layout">
++        <nav className="pr-rule-sidebar" aria-label="本机邮件规则">
++          {rules.map((r, i) => (
++            <button
++              key={r.id}
++              data-local-rule={r.id}
++              aria-current={draft.id === r.id ? 'page' : undefined}
++              disabled={busy || dirty}
++              onClick={() => choose(r)}
++            >
++              <span>
++                {i + 1}. {r.name}
++              </span>
++              <small>
++                {r.enabled ? (r.syncState === 'ready' ? '启用' : '等待重新同步 / 保存') : '暂停'}
++              </small>
++            </button>
++          ))}
++          {!rules.length && <p>从一个条件开始。</p>}
++        </nav>
++        <form
++          className="pr-local-rule-editor"
++          onSubmit={(e) => {
++            e.preventDefault();
++            save();
++          }}
++        >
++          <label>
++            规则名称
++            <input
++              id="pr-local-rule-name"
++              value={draft.name}
++              maxLength={80}
++              required
++              disabled={busy}
++              onChange={(e) => setDraft({ ...draft, name: e.target.value })}
++            />
++          </label>
++          <div className="pr-rule-clause">
++            <label>
++              当
++              <select
++                aria-label="匹配字段"
++                value={draft.field}
++                disabled={busy}
++                onChange={(e) =>
++                  setDraft({ ...draft, field: e.target.value as 'sender' | 'subject' })
++                }
++              >
++                <option value="sender">发件人包含</option>
++                <option value="subject">主题包含</option>
++              </select>
++            </label>
++            <label>
++              关键词
++              <input
++                aria-label="匹配关键词"
++                value={draft.query}
++                maxLength={200}
++                required
++                disabled={busy}
++                onChange={(e) => setDraft({ ...draft, query: e.target.value })}
++              />
++            </label>
++          </div>
++          <label>
++            执行
++            <select
++              aria-label="规则动作"
++              disabled={busy}
++              value={`${draft.action}:${draft.value}`}
++              onChange={(e) => {
++                const [action, ...value] = e.target.value.split(':');
++                setDraft({
++                  ...draft,
++                  action: action as 'category' | 'label',
++                  value: value.join(':'),
++                });
++              }}
++            >
++              {Object.entries(categories).map(([id, name]) => (
++                <option key={id} value={`category:${id}`}>
++                  分类为{name}
++                </option>
++              ))}
++              {labels.map((l) => (
++                <option key={l.id} value={`label:${l.id}`}>
++                  添加标签：{l.name}
++                </option>
++              ))}
++              {draft.action === 'label' && !labels.some((l) => l.id === draft.value) && (
++                <option value={`label:${draft.value}`} disabled>
++                  标签已删除，请重新选择
++                </option>
++              )}
++            </select>
++          </label>
++          <label className="pr-rule-enabled">
++            <input
++              type="checkbox"
++              checked={draft.enabled}
++              disabled={busy}
++              onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })}
++            />
++            保存后启用，仅处理之后的新来信
++          </label>
++          <footer>
++            <button
++              type="submit"
++              disabled={busy || (!dirty && (!current?.enabled || current.syncState === 'ready'))}
++            >
++              保存规则
++            </button>
++            <button type="button" disabled={busy || !dirty} onClick={() => choose(current)}>
++              放弃修改
++            </button>
++            {draft.id && (
++              <>
++                <button
++                  type="button"
++                  disabled={busy || dirty || index <= 0}
++                  onClick={() => reorder(-1)}
++                >
++                  上移
++                </button>
++                <button
++                  type="button"
++                  disabled={busy || dirty || index === rules.length - 1}
++                  onClick={() => reorder(1)}
++                >
++                  下移
++                </button>
++                <button type="button" disabled={busy || dirty} onClick={() => setDeleting(true)}>
++                  删除
++                </button>
++              </>
++            )}
++          </footer>
++          {dirty && <small>有未保存的修改，请先保存或放弃。</small>}
++          {deleting && (
++            <div className="pr-rule-delete-confirm" role="alert">
++              <p>删除规则“{draft.name}”？已经添加的标签与分类会保留。</p>
++              <button type="button" onClick={() => setDeleting(false)}>
++                取消
++              </button>
++              <button
++                type="button"
++                disabled={busy}
++                onClick={() =>
++                  work(async () => {
++                    await deleteLocalRule({ accountId, id: draft.id }, inboxDesktopAccess);
++                    choose();
++                    setPreview(null);
++                  })
++                }
++              >
++                确认删除
++              </button>
++            </div>
++          )}
++        </form>
++      </div>
++      <section className="pr-local-rule-preview">
++        <h2>处理已有邮件</h2>
++        <p>预览所有已启用规则，依据每个会话的最新外部来信匹配。勾选后才会应用。</p>
++        <form
++          onSubmit={(e) => {
++            e.preventDefault();
++            loadPreview();
++          }}
++        >
++          <label className="sr-only" htmlFor="pr-rule-search">
++            预览范围
++          </label>
++          <input
++            id="pr-rule-search"
++            value={search}
++            disabled={busy}
++            onChange={(e) => {
++              setSearch(e.target.value);
++              setPreview(null);
++              setChecked([]);
++            }}
++            placeholder="in:inbox 或搜索关键词"
++          />
++          <button disabled={busy || dirty || !rules.some((r) => r.enabled)}>预览匹配</button>
++        </form>
++        {preview && (
++          <>
++            <div className="pr-rule-preview-list">
++              {preview.items.map((item) => (
++                <label key={item.threadId}>
++                  <input
++                    type="checkbox"
++                    disabled={busy || !item.messageId || !item.ruleIds?.length}
++                    checked={checked.includes(item.threadId)}
++                    onChange={(e) =>
++                      setChecked(
++                        e.target.checked
++                          ? [...checked, item.threadId]
++                          : checked.filter((id) => id !== item.threadId)
++                      )
++                    }
++                  />
++                  <span>
++                    <strong>{item.subject || '无主题'}</strong>
++                    <small>
++                      {item.status === 'rejected'
++                        ? explain(item.error)
++                        : !item.ruleIds.length
++                          ? '无匹配规则'
++                          : [
++                              ...item.labelIds.map(
++                                (id) =>
++                                  '标签：' + (labels.find((l) => l.id === id)?.name || '已删除')
++                              ),
++                              item.category
++                                ? item.categoryManual
++                                  ? '保留手动分类：' + categories[item.currentCategory]
++                                  : '分类为' + categories[item.category]
++                                : '',
++                            ]
++                              .filter(Boolean)
++                              .join(' · ')}
++                    </small>
++                  </span>
++                </label>
++              ))}
++            </div>
++            <button disabled={busy || dirty || !checked.length} onClick={apply}>
++              应用到所选 {checked.length} 个会话
++            </button>
++          </>
++        )}
++      </section>
++      {notice && (
++        <p className="pr-local-rule-notice" role="status">
++          {notice}
++        </p>
++      )}
++      <details className="pr-rule-notes">
++        <summary>执行范围与旧版规则</summary>
++        <p>
++          仅在应用运行时处理同步后的新收件箱邮件，不回填历史缓存。暂停或修改规则不撤销旧结果。旧版上游规则保留，在
++          Paper Reed 模式下暂停执行，不会自动迁移。
++        </p>
++      </details>
++    </div>
++  );
++}
++export default function LocalRulesSettings() {
++  const [dirty, setDirty] = useState(false);
++  const [accounts, setAccounts] = useState(AccountStore.accounts()),
++    [accountId, setAccountId] = useState(AccountStore.accountIds()[0] || '');
++  useEffect(() => {
++    const off = AccountStore.listen(() => {
++      const all = AccountStore.accounts();
++      setAccounts(all);
++      setAccountId((id) => (all.some((a) => a.id === id) ? id : all[0]?.id || ''));
++    });
++    return () => {
++      off();
++    };
++  }, []);
++  if (!accountId) return <div className="pr-settings-empty">添加邮箱后，就可以设置本机规则。</div>;
++  return (
++    <div className="pr-rules">
++      <label className="pr-local-rule-account">
++        应用于
++        <select
++          aria-label="规则邮箱"
++          disabled={dirty}
++          value={accountId}
++          onChange={(e) => setAccountId(e.target.value)}
++        >
++          {accounts.map((a) => (
++            <option value={a.id} key={a.id}>
++              {a.emailAddress}
++            </option>
++          ))}
++        </select>
++      </label>
++      <RulesForAccount key={accountId} accountId={accountId} onDirty={setDirty} />
++    </div>
++  );
++}
+diff --git a/app/internal_packages/paper-reed/lib/triage-controls.tsx b/app/internal_packages/paper-reed/lib/triage-controls.tsx
+index 2b5a508..8280d6f 100644
+--- a/app/internal_packages/paper-reed/lib/triage-controls.tsx
++++ b/app/internal_packages/paper-reed/lib/triage-controls.tsx
+@@ -1,5 +1,7 @@
+ import React, { useState, useRef } from 'react';
+ import {
++  categories,
++  MailCategory,
+   changeLocalMail,
+   editLocalLabel,
+   LocalChange,
+@@ -143,8 +145,39 @@ export function TriageControls({
+         >
+           标签
+         </button>
++        <label className="pr-category-select">
++          <span className="sr-only">分类</span>
++          <select
++            aria-label="分类"
++            disabled={busy}
++            value=""
++            onChange={(e) =>
++              run(
++                e.target.value === 'auto'
++                  ? { action: 'classify-auto' }
++                  : { action: 'classify', category: e.target.value as MailCategory }
++              )
++            }
++          >
++            <option value="" disabled>
++              分类…
++            </option>
++            {Object.entries(categories).map(([id, name]) => (
++              <option key={id} value={id}>
++                {name}
++              </option>
++            ))}
++            <option value="auto">重新跟随规则</option>
++          </select>
++        </label>
+         <span>仅在本机</span>
+       </div>
++      {targets.length === 1 && states[targets[0].threadId] && (
++        <small className="pr-classification-status">
++          {categories[states[targets[0].threadId].category]} ·{' '}
++          {states[targets[0].threadId].categoryManual ? '手动指定' : '跟随规则'}
++        </small>
++      )}
+       {panel === 'snooze' && (
+         <div className="pr-local-panel" aria-label="稍后时间">
+           <div className="pr-snooze-presets">
+diff --git a/app/internal_packages/paper-reed/lib/workspace.tsx b/app/internal_packages/paper-reed/lib/workspace.tsx
+index 98e79a0..10713d6 100644
+--- a/app/internal_packages/paper-reed/lib/workspace.tsx
++++ b/app/internal_packages/paper-reed/lib/workspace.tsx
+@@ -1,4 +1,5 @@
+ import {
++  categories,
+   localLabels,
+   localStates,
+   onLocalTriageChanged,
+@@ -203,11 +204,17 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+             accountIds: ids,
+             query,
+             folder:
+-              query || ['pinned', 'snoozed'].includes(folder) || folder.startsWith('label:')
++              query ||
++              ['pinned', 'snoozed'].includes(folder) ||
++              folder.startsWith('label:') ||
++              folder.startsWith('category:')
+                 ? undefined
+                 : folder,
+             localView:
+-              !query && (['pinned', 'snoozed'].includes(folder) || folder.startsWith('label:'))
++              !query &&
++              (['pinned', 'snoozed'].includes(folder) ||
++                folder.startsWith('label:') ||
++                folder.startsWith('category:'))
+                 ? folder
+                 : undefined,
+             pinFirst: true,
+@@ -381,7 +388,9 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+         };
+       if (route === 'list' && !this.state.checked.length && !this.state.query)
+         context.localView = {
+-          ...(['pinned', 'snoozed'].includes(folder) || folder.startsWith('label:')
++          ...(['pinned', 'snoozed'].includes(folder) ||
++          folder.startsWith('label:') ||
++          folder.startsWith('category:')
+             ? { view: folder }
+             : { folder }),
+           unread: this.state.unreadOnly,
+@@ -559,9 +568,11 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     );
+   }
+   locationTitle = () =>
+-    this.state.folder.startsWith('label:')
+-      ? this.state.labels.find((l) => l.id === this.state.folder.slice(6))?.name || '标签已删除'
+-      : folders.find((f) => f[0] === this.state.folder)?.[1];
++    this.state.folder.startsWith('category:')
++      ? categories[this.state.folder.slice(9)]
++      : this.state.folder.startsWith('label:')
++        ? this.state.labels.find((l) => l.id === this.state.folder.slice(6))?.name || '标签已删除'
++        : folders.find((f) => f[0] === this.state.folder)?.[1];
+   renderListTools() {
+     const rows = this.state.rows.filter((r) => r instanceof Thread);
+     const selected = this.selectedTargets();
+@@ -899,6 +910,23 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                 </button>
+               ))}
+             </nav>
++            <div className="pr-category-nav" aria-label="本机分类">
++              <span>分类</span>
++              <nav>
++                {Object.entries(categories).map(([id, name]) => (
++                  <button
++                    key={id}
++                    data-category={id}
++                    aria-current={
++                      !this.state.query && folder === `category:${id}` ? 'page' : undefined
++                    }
++                    onClick={() => this.navigate(`category:${id}`)}
++                  >
++                    {name}
++                  </button>
++                ))}
++              </nav>
++            </div>
+             <div className="pr-local-label-heading">
+               <span>标签</span>
+               <button
+diff --git a/app/internal_packages/paper-reed/styles/paper-reed.less b/app/internal_packages/paper-reed/styles/paper-reed.less
+index 254a27f..4cff8b4 100644
+--- a/app/internal_packages/paper-reed/styles/paper-reed.less
++++ b/app/internal_packages/paper-reed/styles/paper-reed.less
+@@ -589,3 +589,42 @@
+   .pr-local-label > span { overflow:hidden; text-overflow:ellipsis; }
+   .pr-date .pr-pin-mark { margin-right:6px; vertical-align:-1px; }
+ }
++
++.paper-reed-enabled .pr-workspace {
++  .pr-category-nav { margin:24px 0 0; }
++  .pr-category-nav > span { display:block; margin:0 8px 8px; font-size:11px; color:#626b60; }
++  .pr-category-nav nav { display:grid; grid-template-columns:1fr 1fr; gap:4px; }
++  .pr-category-nav nav button { font-size:12px; padding:6px 10px; }
++  .pr-category-select select { background:transparent; border:0; color:#4b634f; font:inherit; padding:6px; margin:0; }
++  .pr-classification-status { display:block; margin:0 10px 8px; color:#626b60; font-size:11px; }
++}
++.preferences-wrap.pr-preferences .pr-settings-page {
++  .pr-local-rule-account { display:flex; gap:12px; align-items:center; margin-bottom:20px; }
++  .pr-local-rule-account select { margin:0; }
++  .pr-local-rules .pr-rule-sidebar { display:flex; flex-direction:column; gap:5px; }
++  .pr-local-rules .pr-rule-sidebar button { text-align:left; padding:10px; border:0; background:transparent; }
++  .pr-local-rules .pr-rule-sidebar button[aria-current] { background:#e9eee5; }
++  .pr-local-rules .pr-rule-sidebar small { display:block; font-size:10px; color:#626b60; margin-top:4px; }
++  .pr-local-rule-editor { min-width:0; }
++  .pr-local-rule-editor > label, .pr-rule-clause label { display:flex; flex-direction:column; gap:8px; margin-bottom:20px; font-size:12px; }
++  .pr-local-rule-editor input:not([type=checkbox]), .pr-local-rule-editor select { width:100%; margin:0; }
++  .pr-rule-clause { display:grid; grid-template-columns:140px minmax(0,1fr); gap:16px; }
++  .pr-local-rule-editor .pr-rule-enabled { flex-direction:row; align-items:center; }
++  .pr-local-rule-editor footer { display:flex; flex-wrap:wrap; gap:8px; border-top:1px solid #dfe2d9; padding-top:16px; }
++  .pr-local-rule-editor > small { display:block; margin-top:8px; color:#626b60; }
++  .pr-local-rule-preview { margin-top:32px; border-top:1px solid #dfe2d9; padding-top:20px; }
++  .pr-local-rule-preview form { display:flex; gap:8px; margin-bottom:16px; }
++  .pr-local-rule-preview form input { flex:1; min-width:0; margin:0; }
++  .pr-rule-preview-list { margin-bottom:16px; }
++  .pr-rule-preview-list label { display:flex; gap:12px; align-items:center; padding:12px 0; border-bottom:1px solid #eceee7; }
++  .pr-rule-preview-list label > span { min-width:0; }
++  .pr-rule-preview-list strong { font-size:12px; font-weight:500; display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
++  .pr-rule-preview-list small { display:block; color:#626b60; font-size:11px; margin-top:4px; }
++  .pr-local-rule-notice { color:#4b634f; padding:12px 0; }
++  .pr-rule-notes { margin-top:24px; font-size:11px; color:#626b60; }
++  @media(max-width:1100px) { .pr-local-rules .pr-rule-sidebar { flex-direction:row; overflow:auto; } .pr-local-rules .pr-rule-sidebar button { min-width:160px; } }
++}
++.preferences-wrap.pr-preferences .pr-settings-page {
++  .pr-local-rule-preview h2 { font-size:14px; line-height:22px; font-weight:500; margin:0 0 8px; }
++  .pr-local-rule-notice { position:sticky; bottom:0; background:#faf9f6; border-top:1px solid #dfe2d9; }
++}
+diff --git a/app/internal_packages/preferences/lib/tabs/preferences-mail-rules.tsx b/app/internal_packages/preferences/lib/tabs/preferences-mail-rules.tsx
+index 22ac9e4..670bafb 100644
+--- a/app/internal_packages/preferences/lib/tabs/preferences-mail-rules.tsx
++++ b/app/internal_packages/preferences/lib/tabs/preferences-mail-rules.tsx
+@@ -1,3 +1,4 @@
++import LocalRulesSettings from '../../../paper-reed/lib/rules-settings';
+ import React from 'react';
+ import _ from 'underscore';
+ 
+@@ -569,4 +570,10 @@ class PreferencesMailRules extends React.Component<
+   }
+ }
+ 
+-export default PreferencesMailRules;
++export default function MailRulesPage(props) {
++  return AppEnv.config.get('core.paperReed.enabled') ? (
++    <LocalRulesSettings />
++  ) : (
++    <PreferencesMailRules {...props} />
++  );
++}
+diff --git a/app/src/flux/stores/mail-rules-store.ts b/app/src/flux/stores/mail-rules-store.ts
+index 4f09ea8..8301ed7 100644
+--- a/app/src/flux/stores/mail-rules-store.ts
++++ b/app/src/flux/stores/mail-rules-store.ts
+@@ -104,6 +104,7 @@ class MailRulesStore extends MailspringStore {
+   }
+ 
+   _onDatabaseChanged = (record: DatabaseChangeRecord<Message>) => {
++    if (AppEnv.config.get('core.paperReed.enabled')) return;
+     if (record.type !== 'persist' || record.objectClass !== Message.name) return;
+ 
+     // The sync engine sets `rulesReady` on exactly one delta per message: the first one on
+@@ -220,6 +221,7 @@ class MailRulesStore extends MailspringStore {
+   // Reprocessing Existing Mail
+ 
+   _onStartReprocessing = (aid: string) => {
++    if (AppEnv.config.get('core.paperReed.enabled')) return;
+     // The preferences UI explains this to the user before dispatching; here we only
+     // avoid walking the entire inbox for nothing.
+     if (!this._rules.some((r) => r.accountId === aid && !r.disabled)) {
+diff --git a/app/src/services/mail-core/local-triage.ts b/app/src/services/mail-core/local-triage.ts
+index 3da3171..bd8aa7d 100644
+--- a/app/src/services/mail-core/local-triage.ts
++++ b/app/src/services/mail-core/local-triage.ts
+@@ -1,17 +1,39 @@
+ import Sqlite3 from 'better-sqlite3';
+ import { z } from 'zod';
+-import { randomUUID } from 'crypto';
++import { randomUUID, createHash } from 'crypto';
+ import { AccountStore, DatabaseStore, Message, Thread } from 'mailspring-exports';
+ import type { InboxAccess, MailTarget } from './inbox';
+ import { isThreadAllowed } from '../mail-access/grant';
+ 
+ export type LocalLabel = { id: string; name: string; color: string };
+-export type LocalState = { pinned: boolean; snoozeUntil: number | null; labels: LocalLabel[] };
++export const categories = {
++  ordinary: '普通',
++  people: '往来',
++  notifications: '通知',
++  subscriptions: '订阅',
++};
++export type MailCategory = keyof typeof categories;
++export type LocalState = {
++  category: MailCategory;
++  categoryManual: boolean;
++  pinned: boolean;
++  snoozeUntil: number | null;
++  labels: LocalLabel[];
++};
+ export type LocalChange = {
+-  action: 'pin' | 'unpin' | 'snooze' | 'unsnooze' | 'label-add' | 'label-remove';
++  action:
++    | 'pin'
++    | 'unpin'
++    | 'snooze'
++    | 'unsnooze'
++    | 'label-add'
++    | 'label-remove'
++    | 'classify'
++    | 'classify-auto';
+   targets: MailTarget[];
+   until?: string;
+   labelId?: string;
++  category?: MailCategory;
+ };
+ const listeners = new Set<() => void>();
+ export function onLocalTriageChanged(fn: () => void) {
+@@ -46,6 +68,21 @@ export function ensureLocalTriage() {
+       await sql(
+         'CREATE TABLE IF NOT EXISTS PaperReedLocalThreadLabel (accountId TEXT NOT NULL, threadId TEXT NOT NULL, labelId TEXT NOT NULL, PRIMARY KEY(accountId, threadId, labelId))'
+       );
++      const columns = await sql('PRAGMA table_info(PaperReedLocalThread)');
++      if (!columns.some((c) => c.name === 'category'))
++        await sql(
++          "ALTER TABLE PaperReedLocalThread ADD COLUMN category TEXT NOT NULL DEFAULT 'ordinary'"
++        );
++      if (!columns.some((c) => c.name === 'categoryManual'))
++        await sql(
++          'ALTER TABLE PaperReedLocalThread ADD COLUMN categoryManual INTEGER NOT NULL DEFAULT 0'
++        );
++      await sql(
++        'CREATE TABLE IF NOT EXISTS PaperReedLocalRule (id TEXT PRIMARY KEY, accountId TEXT NOT NULL, name TEXT NOT NULL, field TEXT NOT NULL, query TEXT NOT NULL, action TEXT NOT NULL, value TEXT NOT NULL, enabled INTEGER NOT NULL, position INTEGER NOT NULL, baseline TEXT)'
++      );
++      await sql(
++        'CREATE TABLE IF NOT EXISTS PaperReedRuleProcessed (accountId TEXT NOT NULL,messageId TEXT NOT NULL,PRIMARY KEY(accountId,messageId))'
++      );
+     })().catch((error) => {
+       writer?.close();
+       writer = undefined;
+@@ -95,6 +132,9 @@ export function editLocalLabel(
+       if (!old) throw new Error('label-not-found');
+       globalLabelAccess(access);
+       writer.transaction(() => {
++        writer
++          .prepare("UPDATE PaperReedLocalRule SET enabled=0 WHERE action='label' AND value=?")
++          .run(input.id);
+         writer.prepare('DELETE FROM PaperReedLocalLabel WHERE id = ?').run(input.id);
+         writer.prepare('DELETE FROM PaperReedLocalThreadLabel WHERE labelId = ?').run(input.id);
+       })();
+@@ -127,7 +167,7 @@ export async function localStates(
+   for (const target of targets) {
+     await allowed(target, access, false);
+     const [state] = await sql(
+-      'SELECT pinned,snoozeUntil FROM PaperReedLocalThread WHERE accountId=? AND threadId=?',
++      'SELECT pinned,snoozeUntil,category,categoryManual FROM PaperReedLocalThread WHERE accountId=? AND threadId=?',
+       [target.accountId, target.threadId]
+     );
+     const labels = await sql(
+@@ -136,6 +176,8 @@ export async function localStates(
+     );
+     await allowed(target, access, false);
+     result[target.threadId] = {
++      category: state?.category || 'ordinary',
++      categoryManual: !!state?.categoryManual,
+       pinned: !!state?.pinned,
+       snoozeUntil: state?.snoozeUntil || null,
+       labels,
+@@ -164,7 +206,18 @@ async function inboxBaseline(accountId: string) {
+ export function changeLocalMail(input: LocalChange, access: InboxAccess) {
+   return serial(async () => {
+     if (!input.targets.length || input.targets.length > 100) throw new Error('invalid-targets');
+-    if (!['pin', 'unpin', 'snooze', 'unsnooze', 'label-add', 'label-remove'].includes(input.action))
++    if (
++      ![
++        'pin',
++        'unpin',
++        'snooze',
++        'unsnooze',
++        'label-add',
++        'label-remove',
++        'classify',
++        'classify-auto',
++      ].includes(input.action)
++    )
+       throw new Error('invalid-action');
+     const until = input.until ? Date.parse(input.until) : NaN;
+     if (
+@@ -200,7 +253,23 @@ export function changeLocalMail(input: LocalChange, access: InboxAccess) {
+           throw new Error('label-not-found');
+         await allowed(target, access, true);
+         const args = [target.accountId, target.threadId];
+-        if (input.action === 'pin' || input.action === 'unpin')
++        if (input.action === 'classify' || input.action === 'classify-auto') {
++          if (
++            input.action === 'classify' &&
++            !Object.hasOwnProperty.call(categories, input.category)
++          )
++            throw new Error('invalid-category');
++          const category =
++            input.action === 'classify'
++              ? input.category
++              : ruleEffects(await latestIncoming(target), await storedRules(target.accountId))
++                  .category || 'ordinary';
++          await allowed(target, access, true);
++          await sql(
++            'INSERT INTO PaperReedLocalThread (accountId,threadId,category,categoryManual) VALUES (?,?,?,?) ON CONFLICT(accountId,threadId) DO UPDATE SET category=excluded.category,categoryManual=excluded.categoryManual',
++            [...args, category, input.action === 'classify' ? 1 : 0]
++          );
++        } else if (input.action === 'pin' || input.action === 'unpin')
+           await sql(
+             'INSERT INTO PaperReedLocalThread (accountId,threadId,pinned) VALUES (?,?,?) ON CONFLICT(accountId,threadId) DO UPDATE SET pinned=excluded.pinned',
+             [...args, input.action === 'pin' ? 1 : 0]
+@@ -288,6 +357,11 @@ export function localViewSQL(view?: string, hideSnoozed = false) {
+     return `EXISTS (SELECT 1 FROM PaperReedLocalThread s WHERE ${state} AND s.pinned=1)`;
+   if (view === 'snoozed')
+     return `EXISTS (SELECT 1 FROM PaperReedLocalThread s WHERE ${state} AND s.snoozeUntil IS NOT NULL)`;
++  if (view?.startsWith('category:')) {
++    const category = view.slice(9);
++    if (!Object.hasOwnProperty.call(categories, category)) return '0';
++    return `COALESCE((SELECT category FROM PaperReedLocalThread s WHERE ${state}),'ordinary')='${category}'`;
++  }
+   if (view?.startsWith('label:'))
+     return `EXISTS (SELECT 1 FROM PaperReedLocalThreadLabel t JOIN PaperReedLocalLabel l ON l.id=t.labelId WHERE t.accountId=Thread.accountId AND t.threadId=Thread.id AND l.id='${view.slice(6).replace(/'/g, "''")}')`;
+   return hideSnoozed
+@@ -300,3 +374,309 @@ export const localPinOrder = {
+   orderBySQL: () =>
+     'COALESCE((SELECT pinned FROM PaperReedLocalThread s WHERE s.accountId=Thread.accountId AND s.threadId=Thread.id),0) DESC',
+ };
++
++export type LocalRule = {
++  id: string;
++  accountId: string;
++  name: string;
++  field: 'sender' | 'subject';
++  query: string;
++  action: 'label' | 'category';
++  value: string;
++  enabled: boolean;
++  position: number;
++  baseline?: string;
++  syncState?: string;
++};
++export type RuleInput = {
++  accountId: string;
++  id?: string;
++  name: string;
++  field: 'sender' | 'subject';
++  query: string;
++  action: 'label' | 'category';
++  value: string;
++  enabled: boolean;
++};
++async function storedRules(accountId: string): Promise<LocalRule[]> {
++  await ensureLocalTriage();
++  return (
++    await sql('SELECT * FROM PaperReedLocalRule WHERE accountId=? ORDER BY position,id', [
++      accountId,
++    ])
++  ).map((r) => ({ ...r, enabled: !!r.enabled }));
++}
++const revisionOf = (rules: LocalRule[]) =>
++  createHash('sha256').update(JSON.stringify(rules)).digest('hex');
++function ruleAccess(accountId: string, access: InboxAccess) {
++  access.check(accountId, true);
++  if (access.grant().excludedFolderIds[accountId]?.length)
++    throw new Error('Access denied: account-wide rules require all folders');
++}
++export async function listLocalRules(accountId: string, access: InboxAccess) {
++  access.check(accountId, false);
++  const rules = await storedRules(accountId);
++  const folders = await sql('SELECT id,data FROM Folder WHERE accountId=?', [accountId]);
++  access.check(accountId, false);
++  return {
++    revision: revisionOf(rules),
++    rules: rules.map((r) => {
++      const baseline = r.baseline && JSON.parse(r.baseline);
++      const folder = baseline && folders.find((f) => f.id === baseline.folderId);
++      const status =
++        folder && JSON.parse(folder.data).role === 'inbox' && JSON.parse(folder.data).localStatus;
++      const syncState = !r.enabled
++        ? 'paused'
++        : !status?.uidvalidity
++          ? 'needs-sync'
++          : status.uidvalidity !== baseline?.validity
++            ? 'mailbox-reset'
++            : 'ready';
++      const { baseline: _, ...publicRule } = r;
++      return { ...publicRule, syncState };
++    }),
++  };
++}
++export function saveLocalRule(input: RuleInput, access: InboxAccess) {
++  return serial(async () => {
++    ruleAccess(input.accountId, access);
++    const existing = await storedRules(input.accountId);
++    const old = input.id && existing.find((r) => r.id === input.id);
++    if (input.id && !old) throw new Error('rule-not-found');
++    if (
++      !['sender', 'subject'].includes(input.field) ||
++      !['label', 'category'].includes(input.action)
++    )
++      throw new Error('invalid-rule');
++    const name = input.name.trim(),
++      query = input.query.trim().normalize('NFC');
++    if (!name || name.length > 80 || !query || query.length > 200)
++      throw new Error('invalid-rule-text');
++    if (input.action === 'label' && !(await localLabels()).some((l) => l.id === input.value))
++      throw new Error('label-not-found');
++    if (input.action === 'category' && !Object.hasOwnProperty.call(categories, input.value))
++      throw new Error('invalid-category');
++    const baseline = input.enabled ? JSON.stringify(await inboxBaseline(input.accountId)) : null;
++    const id = input.id || randomUUID();
++    ruleAccess(input.accountId, access);
++    await sql(
++      'INSERT INTO PaperReedLocalRule (id,accountId,name,field,query,action,value,enabled,position,baseline) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,field=excluded.field,query=excluded.query,action=excluded.action,value=excluded.value,enabled=excluded.enabled,baseline=excluded.baseline',
++      [
++        id,
++        input.accountId,
++        name,
++        input.field,
++        query,
++        input.action,
++        input.value,
++        input.enabled ? 1 : 0,
++        old ? old.position : existing.reduce((m, r) => Math.max(m, r.position), -1) + 1,
++        baseline,
++      ]
++    );
++    changed();
++    return { id };
++  });
++}
++export function deleteLocalRule(input: { accountId: string; id: string }, access: InboxAccess) {
++  return serial(async () => {
++    ruleAccess(input.accountId, access);
++    await sql('DELETE FROM PaperReedLocalRule WHERE accountId=? AND id=?', [
++      input.accountId,
++      input.id,
++    ]);
++    changed();
++    return { deleted: true };
++  });
++}
++export function reorderLocalRules(
++  input: { accountId: string; ids: string[] },
++  access: InboxAccess
++) {
++  return serial(async () => {
++    ruleAccess(input.accountId, access);
++    const rules = await storedRules(input.accountId);
++    if (
++      input.ids.length !== rules.length ||
++      new Set(input.ids).size !== rules.length ||
++      rules.some((r) => !input.ids.includes(r.id))
++    )
++      throw new Error('rule-list-changed');
++    ruleAccess(input.accountId, access);
++    writer.transaction(() =>
++      input.ids.forEach((id, i) =>
++        writer
++          .prepare('UPDATE PaperReedLocalRule SET position=? WHERE accountId=? AND id=?')
++          .run(i, input.accountId, id)
++      )
++    )();
++    changed();
++    return { reordered: true };
++  });
++}
++const isExternal = (m: Message) =>
++  m.from.length > 0 &&
++  !m.from.some((c) => AccountStore.accountForEmail(c.email)?.id === m.accountId);
++async function latestIncoming(target: MailTarget) {
++  const messages = await DatabaseStore.findAll<Message>(Message)
++    .where({ accountId: target.accountId, threadId: target.threadId, draft: false })
++    .order(Message.attributes.date.descending())
++    .order(Message.attributes.id.descending());
++  return messages.find(isExternal);
++}
++function ruleEffects(message: Message | undefined, rules: LocalRule[]) {
++  const result: { ruleIds: string[]; labelIds: string[]; category?: MailCategory } = {
++    ruleIds: [],
++    labelIds: [],
++  };
++  if (!message || !isExternal(message)) return result;
++  for (const rule of rules) {
++    if (!rule.enabled) continue;
++    const text =
++      rule.field === 'subject'
++        ? message.subject
++        : message.from.map((c) => `${c.name || ''} ${c.email || ''}`).join(' ');
++    if (!text.normalize('NFC').toLowerCase().includes(rule.query.normalize('NFC').toLowerCase()))
++      continue;
++    result.ruleIds.push(rule.id);
++    if (rule.action === 'label') result.labelIds.push(rule.value);
++    else result.category = rule.value as MailCategory;
++  }
++  result.labelIds = [...new Set(result.labelIds)];
++  return result;
++}
++function commitEffects(target: MailTarget, effects: ReturnType<typeof ruleEffects>) {
++  for (const labelId of effects.labelIds)
++    writer
++      .prepare(
++        'INSERT OR IGNORE INTO PaperReedLocalThreadLabel (accountId,threadId,labelId) SELECT ?,?,id FROM PaperReedLocalLabel WHERE id=?'
++      )
++      .run(target.accountId, target.threadId, labelId);
++  if (effects.category)
++    writer
++      .prepare(
++        'INSERT INTO PaperReedLocalThread (accountId,threadId,category) VALUES (?,?,?) ON CONFLICT(accountId,threadId) DO UPDATE SET category=CASE WHEN categoryManual=0 THEN excluded.category ELSE category END'
++      )
++      .run(target.accountId, target.threadId, effects.category);
++}
++export async function previewLocalRules(
++  input: { accountId: string; targets: MailTarget[] },
++  access: InboxAccess
++) {
++  access.check(input.accountId, false);
++  if (input.targets.length > 100) throw new Error('too-many-targets');
++  const rules = await storedRules(input.accountId),
++    items = [];
++  for (const target of input.targets) {
++    try {
++      if (target.accountId !== input.accountId) throw new Error('account-mismatch');
++      await allowed(target, access, false);
++      const message = await latestIncoming(target);
++      const effects = ruleEffects(message, rules);
++      const states = await localStates([target], access);
++      items.push({
++        ...target,
++        messageId: message?.id || null,
++        subject: message?.subject || '',
++        ...effects,
++        categoryManual: states[target.threadId].categoryManual,
++        currentCategory: states[target.threadId].category,
++        status: 'preview',
++      });
++    } catch (error) {
++      items.push({ ...target, status: 'rejected', error: error.message });
++    }
++  }
++  // If the editor changed while the preview was being read, ask for a fresh snapshot.
++  if (revisionOf(await storedRules(input.accountId)) !== revisionOf(rules))
++    throw new Error('rules-changed');
++  access.check(input.accountId, false);
++  return { revision: revisionOf(rules), items };
++}
++export function applyLocalRules(
++  input: { accountId: string; revision: string; targets: (MailTarget & { messageId: string })[] },
++  access: InboxAccess
++) {
++  return serial(async () => {
++    access.check(input.accountId, true);
++    if (!input.targets.length || input.targets.length > 100) throw new Error('invalid-targets');
++    const rules = await storedRules(input.accountId);
++    if (revisionOf(rules) !== input.revision) throw new Error('rules-changed');
++    const items = [];
++    for (const target of input.targets) {
++      try {
++        if (target.accountId !== input.accountId) throw new Error('account-mismatch');
++        await allowed(target, access, true);
++        const message = await latestIncoming(target);
++        if (!message || message.id !== target.messageId) throw new Error('preview-stale');
++        const effects = ruleEffects(message, rules);
++        await allowed(target, access, true);
++        writer.transaction(() => commitEffects(target, effects))();
++        items.push({ ...target, status: effects.ruleIds.length ? 'succeeded' : 'unchanged' });
++      } catch (error) {
++        items.push({ ...target, status: 'rejected', error: error.message });
++      }
++    }
++    changed();
++    return { items };
++  });
++}
++let autoRun: Promise<number>;
++export function processLocalRules() {
++  if (autoRun) return autoRun;
++  autoRun = serial(async () => {
++    let count = 0;
++    for (const accountId of AccountStore.accountIds()) {
++      const rules = (await storedRules(accountId)).filter((r) => r.enabled && r.baseline);
++      if (!rules.length) continue;
++      const folders = await sql('SELECT id,data FROM Folder WHERE accountId=?', [accountId]);
++      const valid = rules.filter((r) => {
++        const b = JSON.parse(r.baseline),
++          f = folders.find((f) => f.id === b.folderId);
++        return (
++          f &&
++          JSON.parse(f.data).role === 'inbox' &&
++          JSON.parse(f.data).localStatus?.uidvalidity === b.validity
++        );
++      });
++      if (!valid.length) continue;
++      const baseline = JSON.parse(valid[0].baseline);
++      const minUID = Math.min(...valid.map((r) => JSON.parse(r.baseline).nextUID));
++      // A per-message marker avoids losing lower UIDs ingested after a higher UID.
++      const candidates = await sql(
++        'SELECT DISTINCT m.id,p.remoteUID FROM Message m JOIN MessageFolder p ON p.messageId=m.id WHERE m.accountId=? AND m.draft=0 AND p.folderId=? AND p.remoteUID>=? AND NOT EXISTS (SELECT 1 FROM PaperReedRuleProcessed seen WHERE seen.accountId=m.accountId AND seen.messageId=m.id) ORDER BY p.remoteUID,m.id LIMIT 100',
++        [accountId, baseline.folderId, minUID]
++      );
++      for (const candidate of candidates) {
++        const message = await DatabaseStore.find<Message>(Message, candidate.id);
++        if (!message) continue;
++        const thread = await DatabaseStore.find<Thread>(Thread, message.threadId);
++        if (!thread) continue;
++        const usable =
++          thread.categories.some((c) => c.role === 'inbox') &&
++          !thread.categories.some((c) => ['spam', 'trash'].includes(c.role));
++        const effects = ruleEffects(
++          usable ? message : undefined,
++          valid.filter((r) => {
++            const b = JSON.parse(r.baseline);
++            return b.folderId === baseline.folderId && candidate.remoteUID >= b.nextUID;
++          })
++        );
++        writer.transaction(() => {
++          commitEffects({ accountId, threadId: message.threadId }, effects);
++          writer
++            .prepare(
++              'INSERT OR IGNORE INTO PaperReedRuleProcessed (accountId,messageId) VALUES (?,?)'
++            )
++            .run(accountId, message.id);
++        })();
++        count++;
++      }
++    }
++    if (count) changed();
++    return count;
++  }).finally(() => {
++    autoRun = undefined;
++  });
++  return autoRun;
++}
