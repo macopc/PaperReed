@@ -1,0 +1,14 @@
+{
+  "emojiSearch": true,
+  "emojiEmptyState": true,
+  "emojiKeyboardInsert": true,
+  "emojiEscape": true,
+  "emojiSavedWithBody": true,
+  "signatureRename": true,
+  "signatureDefaultAccount": true,
+  "signatureDeleteCancel": true,
+  "signatureDeleteConfirm": true,
+  "signatureCreate": true,
+  "expectedSMTPSubmissions": 0,
+  "observedSMTPSubmissions": 0
+}

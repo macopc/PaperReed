@@ -1,0 +1,251 @@
+diff --git a/app/internal_packages/composer-signature/lib/preferences-signatures.tsx b/app/internal_packages/composer-signature/lib/preferences-signatures.tsx
+index 159a539..7de0d6f 100644
+--- a/app/internal_packages/composer-signature/lib/preferences-signatures.tsx
++++ b/app/internal_packages/composer-signature/lib/preferences-signatures.tsx
+@@ -147,12 +147,12 @@ class SignatureEditor extends React.Component<SignatureEditorProps, SignatureEdi
+       <div className={`signature-wrap ${empty && 'empty'}`}>
+         <div className="section basic-info">
+           <label htmlFor="signature-title" className="sr-only">
+-            {localized('Signature Name')}
++            {AppEnv.config.get('core.paperReed.enabled') ? '签名名称' : localized('Signature Name')}
+           </label>
+           <input
+             type="text"
+             id="signature-title"
+-            placeholder={localized('Name')}
++            placeholder={AppEnv.config.get('core.paperReed.enabled') ? '签名名称' : localized('Name')}
+             value={signature.title || ''}
+             onChange={this._onTitleChange}
+           />
+@@ -165,7 +165,7 @@ class SignatureEditor extends React.Component<SignatureEditorProps, SignatureEdi
+         </div>
+ 
+         <div className="section preview">
+-          <div className="label">{localized('Preview')}</div>
++          <div className="label">{AppEnv.config.get('core.paperReed.enabled') ? '实际效果' : localized('Preview')}</div>
+           <div className="preview" dangerouslySetInnerHTML={{ __html: signature.body }} />
+         </div>
+ 
+@@ -176,7 +176,7 @@ class SignatureEditor extends React.Component<SignatureEditorProps, SignatureEdi
+         {!resolvedData.templateName
+           ? [
+               <div key="header" className="section-header">
+-                {localized('Raw Source')}
++                {AppEnv.config.get('core.paperReed.enabled') ? '签名 HTML' : localized('Raw Source')}
+               </div>,
+               <label key="body-label" htmlFor="signature-body" className="sr-only">
+                 {localized('Signature HTML')}
+@@ -198,12 +198,12 @@ class SignatureEditor extends React.Component<SignatureEditorProps, SignatureEdi
+             ]
+           : [
+               <div key="header" className="section-header">
+-                {localized('Information')}
++                {AppEnv.config.get('core.paperReed.enabled') ? '签名信息' : localized('Information')}
+               </div>,
+               <div key="section" className="section information">
+                 {DataShape.map((item) => (
+                   <div className="field" key={item.key}>
+-                    <label htmlFor={item.key}>{item.label}</label>
++                    <label htmlFor={item.key}>{AppEnv.config.get('core.paperReed.enabled') ? ({name:'姓名',title:'职位',phone:'电话',email:'邮箱',fax:'传真',address:'地址',websiteURL:'网站',tintColor:'颜色'}[item.key] || item.label) : item.label}</label>
+                     <input
+                       type="text"
+                       onChange={this._onDataFieldChange}
+@@ -231,6 +231,7 @@ interface PreferencesSignaturesState {
+   selectedSignature: ISignature;
+   defaults: IDefaultSignatures;
+   accountsAndAliases: IAliasSet;
++  deleting?: boolean;
+ }
+ 
+ export default class PreferencesSignatures extends React.Component<
+@@ -286,7 +287,7 @@ export default class PreferencesSignatures extends React.Component<
+       body = RenderSignatureData(data);
+     }
+ 
+-    Actions.upsertSignature({ id, title: localized('Untitled'), body, data }, id);
++    Actions.upsertSignature({ id, title: AppEnv.config.get('core.paperReed.enabled') ? '新签名' : localized('Untitled'), body, data }, id);
+     Actions.selectSignature(id);
+   };
+ 
+@@ -300,6 +301,7 @@ export default class PreferencesSignatures extends React.Component<
+   };
+ 
+   _onSelectSignature = (sig: ISignature) => {
++    this.setState({ deleting: false });
+     Actions.selectSignature(sig.id);
+   };
+ 
+@@ -329,6 +331,15 @@ export default class PreferencesSignatures extends React.Component<
+   }
+ 
+   render() {
++    if (AppEnv.config.get('core.paperReed.enabled')) return <div className="preferences-signatures-container pr-signature-settings">
++      <header><div><h1>邮件签名</h1><p>为不同往来准备合适的落款。</p></div><button type="button" onClick={this._onAddSignature}>新建签名</button></header>
++      <div className="pr-signature-layout"><nav aria-label="已保存的签名">{Object.values(this.state.signatures).map(sig =>
++        <button type="button" key={sig.id} aria-current={sig.id === this.state.selectedSignature?.id ? 'true' : undefined} onClick={() => this._onSelectSignature(sig)}>{sig.title || '未命名签名'}</button>
++      )}</nav><div className="pr-signature-detail">{this.state.selectedSignature ? <>
++        <SignatureEditor signature={this.state.selectedSignature} defaults={this.state.defaults} accountsAndAliases={this.state.accountsAndAliases} />
++        <footer>{this.state.deleting ? <><span>删除这个签名？已写入草稿的内容会保留。</span><button type="button" onClick={() => this.setState({deleting:false})}>取消</button><button type="button" onClick={() => { this._onDeleteSignature(this.state.selectedSignature); this.setState({deleting:false}); }}>确认删除</button></> : <><span>更改自动保存到本机</span><button type="button" onClick={() => this.setState({deleting:true})}>删除签名</button></>}</footer>
++      </> : <div className="pr-signature-empty"><h2>从一句落款开始</h2><p>新建签名后，可为邮箱设置默认落款。</p></div>}</div></div>
++    </div>;
+     return (
+       <div className="preferences-signatures-container">
+         <section>{this._renderSignatures()}</section>
+diff --git a/app/internal_packages/composer-signature/lib/signature-account-default-picker.tsx b/app/internal_packages/composer-signature/lib/signature-account-default-picker.tsx
+index c63c382..32a6bec 100644
+--- a/app/internal_packages/composer-signature/lib/signature-account-default-picker.tsx
++++ b/app/internal_packages/composer-signature/lib/signature-account-default-picker.tsx
+@@ -20,6 +20,9 @@ export default class SignatureAccountDefaultPicker extends React.Component<Signa
+       defaults[accountOrAlias.email] === signature.id;
+     const checked = accountsAndAliases.filter(isChecked);
+ 
++    if (AppEnv.config.get('core.paperReed.enabled')) return <fieldset className="pr-signature-defaults"><legend>默认用于</legend>
++      {accountsAndAliases.map(account => <label key={account.id}><input type="checkbox" checked={isChecked(account)} onChange={() => this._onToggleAccount(account)} />{account.email}</label>)}
++    </fieldset>;
+     const noun = checked.length === 1 ? localized('Account') : localized('Accounts');
+ 
+     return (
+diff --git a/app/internal_packages/paper-reed/styles/paper-reed.less b/app/internal_packages/paper-reed/styles/paper-reed.less
+index 50e3d60..4f69bb5 100644
+--- a/app/internal_packages/paper-reed/styles/paper-reed.less
++++ b/app/internal_packages/paper-reed/styles/paper-reed.less
+@@ -220,3 +220,50 @@
+   .pr-color-custom { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px 4px; border-top: 1px solid var(--pr-line); font-size: 11px; color: var(--pr-muted); }
+   .pr-color-custom input { width: 28px; height: 26px; padding: 0; background: none; border: 0; cursor: pointer; }
+ }
++
++.preferences-signatures-container.pr-signature-settings { color: #303730; padding: 28px 24px; max-width: 900px;
++  header { display:flex; justify-content:space-between; align-items:center; margin-bottom:28px; }
++  h1 { font-size:24px; line-height:34px; margin:0; font-weight:500; }
++  h2 { font-size:18px; font-weight:500; }
++  p { color:#626b60; font-size:12px; margin:6px 0; }
++  button { background:transparent; border:1px solid #dfe2d9; border-radius:5px; padding:7px 12px; color:#4b634f; font:inherit; cursor:pointer; box-shadow:none; }
++  button:hover { background:#e9eee5; }
++  button:focus-visible, input:focus-visible, textarea:focus-visible { outline:2px solid #4b634f; outline-offset:2px; }
++  .pr-signature-layout { display:grid; grid-template-columns:160px minmax(0,1fr); gap:28px; }
++  nav { border-right:1px solid #dfe2d9; padding-right:16px; }
++  nav button { display:block; width:100%; text-align:left; border:0; margin-bottom:4px; overflow-wrap:anywhere; }
++  nav button[aria-current] { background:#e9eee5; color:#303730; }
++  .signature-wrap { margin:0; padding:0; }
++  .signature-wrap .section.basic-info { display:block; }
++  #signature-title { width:100%; max-width:none; font-size:18px; background:transparent; border:0; border-bottom:1px solid #dfe2d9; border-radius:0; padding:8px 0; box-shadow:none; }
++  .pr-signature-defaults { border:0; padding:0; margin:18px 0; }
++  .pr-signature-defaults legend { font-size:11px; color:#626b60; margin-bottom:6px; }
++  .pr-signature-defaults label { display:flex; align-items:center; gap:8px; font-size:12px; margin:6px 0; }
++  .pr-signature-defaults input { accent-color:#4b634f; }
++  .signature-wrap .section.preview { background:#faf9f6; border:1px solid #dfe2d9; padding:20px; border-radius:6px; min-height:140px; overflow:auto; }
++  .signature-wrap .section.preview .label { float:none; color:#626b60; padding:0; font-size:11px; margin-bottom:18px; }
++  .signature-template-picker { background:#f2f1eb; height:66px; }
++  .signature-template-picker .option { border-color:#dfe2d9; border-radius:3px; }
++  .signature-template-picker .option.active { border-color:#4b634f; }
++  .signature-wrap .section { border-color:#dfe2d9; }
++  .signature-wrap textarea.raw-html { height:150px; border-radius:5px; padding:12px; font:12px/20px monospace; background:#faf9f6; }
++  .signature-wrap .section-header { font-size:12px; color:#626b60; margin:20px 0 8px; }
++  .signature-wrap .section-note { font-size:11px; line-height:18px; color:#626b60; }
++  footer { margin-top:24px; padding-top:16px; border-top:1px solid #dfe2d9; display:flex; align-items:center; gap:10px; font-size:11px; color:#626b60; }
++  footer span { flex:1; }
++  .pr-signature-empty { padding:40px 0; }
++}
++.pr-emoji-picker { width:280px; padding:14px; color:#303730; background:#faf9f6; font:12px/20px -apple-system,BlinkMacSystemFont,sans-serif;
++  header { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
++  header strong { font-size:14px; font-weight:500; }
++  header button { border:0; background:none; color:#626b60; cursor:pointer; }
++  > input { width:100%; border:1px solid #dfe2d9; background:#fffefa; border-radius:5px; padding:7px 9px; font:inherit; box-shadow:none; }
++  > select { margin:12px 0 8px; width:100%; border:0; background:transparent; color:#626b60; font:inherit; box-shadow:none; }
++  .pr-emoji-grid { display:grid; grid-template-columns:repeat(6,1fr); gap:3px; max-height:224px; overflow-y:auto; }
++  .pr-emoji-grid button { width:36px; height:36px; padding:6px; background:transparent; border:0; border-radius:5px; cursor:pointer; }
++  .pr-emoji-grid img { width:24px; height:24px; }
++  button:hover { background:#e9eee5; }
++  button:focus-visible, input:focus-visible, select:focus-visible { outline:2px solid #4b634f; outline-offset:-2px; }
++  footer { font-size:10px; color:#626b60; border-top:1px solid #dfe2d9; padding-top:10px; margin-top:12px; }
++  p { color:#626b60; padding:20px 4px; }
++}
+diff --git a/app/src/components/composer-editor/emoji-plugins.tsx b/app/src/components/composer-editor/emoji-plugins.tsx
+index 9884a5e..0b80261 100644
+--- a/app/src/components/composer-editor/emoji-plugins.tsx
++++ b/app/src/components/composer-editor/emoji-plugins.tsx
+@@ -9,6 +9,7 @@ import {
+   ComposerEditorPluginToolbarComponentProps,
+ } from './types';
+ import EmojiToolbarPopover from './emoji-toolbar-popover';
++import PaperReedEmojiPicker from './paper-reed-emoji-picker';
+ import { safeActiveMarks } from './toolbar-component-factories';
+ 
+ let EmojiNameToImageTable = null;
+@@ -315,6 +316,7 @@ function onKeyUp(event: React.KeyboardEvent, editor: Editor, next: () => void) {
+ }
+ 
+ const ToolbarEmojiButton = ({ value, editor }: ComposerEditorPluginToolbarComponentProps) => {
++  let savedSelection = editor.value.selection;
+   const onInsertEmoji = (name) => {
+     const inline = {
+       object: 'inline',
+@@ -323,7 +325,7 @@ const ToolbarEmojiButton = ({ value, editor }: ComposerEditorPluginToolbarCompon
+     };
+     Actions.closePopover();
+     setTimeout(() => {
+-      editor.insertInline(inline).moveToStartOfNextText().focus();
++      editor.select(savedSelection).insertInline(inline).moveToStartOfNextText().focus();
+     }, 100);
+   };
+ 
+@@ -331,8 +333,11 @@ const ToolbarEmojiButton = ({ value, editor }: ComposerEditorPluginToolbarCompon
+     <button
+       type="button" aria-label={AppEnv.config.get('core.paperReed.enabled') ? '表情' : 'Emoji'}
+       title={AppEnv.config.get('core.paperReed.enabled') ? '表情' : 'Emoji'}
++      onMouseDown={event => event.preventDefault()}
+       onClick={(e) => {
+-        Actions.openPopover(<EmojiToolbarPopover onInsertEmoji={onInsertEmoji} />, {
++        savedSelection = editor.value.selection;
++        const Picker = AppEnv.config.get('core.paperReed.enabled') ? PaperReedEmojiPicker : EmojiToolbarPopover;
++        Actions.openPopover(<Picker onInsertEmoji={onInsertEmoji} />, {
+           originRect: (e.target as HTMLElement).getBoundingClientRect(),
+           direction: 'up',
+         });
+diff --git a/app/src/components/composer-editor/paper-reed-emoji-picker.tsx b/app/src/components/composer-editor/paper-reed-emoji-picker.tsx
+new file mode 100644
+index 0000000..4a6bc72
+--- /dev/null
++++ b/app/src/components/composer-editor/paper-reed-emoji-picker.tsx
+@@ -0,0 +1,41 @@
++import React from 'react';
++import { Actions } from 'mailspring-exports';
++import categories from './categorized-emoji';
++import { getEmojiImagePath, searchEmojiNames } from './emoji-plugins';
++
++const labels = { People:'表情与人物', Nature:'动物与自然', 'Food and Drink':'食物与饮品', Activity:'活动', 'Travel and Places':'旅行与地点', Objects:'物品', Symbols:'符号', Flags:'旗帜' };
++
++export default class PaperReedEmojiPicker extends React.Component<{onInsertEmoji:(name:string)=>void}> {
++  state = { query:'', category:'People' };
++  input: HTMLInputElement;
++  focusFrame: number;
++  componentDidMount() { this.focusFrame = requestAnimationFrame(() => this.input.focus()); }
++  componentWillUnmount() { cancelAnimationFrame(this.focusFrame); }
++  render() {
++    const query = this.state.query.trim().toLowerCase();
++    const names: string[] = query ? searchEmojiNames(query) : categories[this.state.category];
++    return <div className="pr-emoji-picker" onKeyDown={event => {
++      if (event.key === 'Escape') { event.preventDefault(); event.stopPropagation(); Actions.closePopover(); }
++    }}>
++      <header><strong>表情</strong><button type="button" onClick={() => Actions.closePopover()} aria-label="关闭表情选择器">关闭</button></header>
++      <input ref={el => this.input = el} aria-label="搜索表情（英文名称）" placeholder="搜索英文名称，如 smile" value={this.state.query}
++        onChange={event => this.setState({query:event.target.value})}
++        onKeyDown={event => { if (event.key === 'ArrowDown' && names.length) { event.preventDefault(); event.stopPropagation(); event.currentTarget.parentElement.querySelector<HTMLButtonElement>('.pr-emoji-grid button')?.focus(); } }} />
++      <select aria-label="表情分类" value={this.state.category} onChange={event => this.setState({category:event.target.value,query:''})}>
++        {Object.keys(categories).map(category => <option key={category} value={category}>{labels[category] || category}</option>)}
++      </select>
++      <div className="pr-emoji-grid" aria-label={query ? '搜索结果' : labels[this.state.category]} onKeyDown={event => {
++        const delta = {ArrowRight:1,ArrowLeft:-1,ArrowDown:6,ArrowUp:-6}[event.key];
++        if (!delta) return;
++        const buttons = Array.from(event.currentTarget.querySelectorAll('button'));
++        const index = buttons.indexOf(event.target as HTMLButtonElement);
++        if (index < 0) return;
++        event.preventDefault(); buttons[Math.max(0,Math.min(buttons.length-1,index+delta))]?.focus();
++      }}>
++        {names.map(name => <button type="button" key={name} title={name.replace(/_/g,' ')} aria-label={name.replace(/_/g,' ')} onKeyDown={event => { if (event.key === 'Enter' || event.key === ' ') { event.preventDefault(); event.stopPropagation(); this.props.onInsertEmoji(name); } }} onClick={() => this.props.onInsertEmoji(name)}><img src={getEmojiImagePath(name)} alt="" loading="lazy" /></button>)}
++      </div>
++      {!names.length && <p role="status">没有匹配的表情，试试其他英文名称。</p>}
++      <footer>方向键选择 · Enter 插入 · Esc 关闭</footer>
++    </div>;
++  }
++}

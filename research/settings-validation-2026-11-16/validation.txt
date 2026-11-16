@@ -1,0 +1,8 @@
+PASS actual Electron / CLI / MCP / native engine, loopback only
+Run: compose-handoff-9dvqy94n
+PASS signature rename, account default, create, delete cancel/confirm
+PASS emoji search, empty state, keyboard insert, Escape, persisted body
+SMTP submissions: 0
+PASS upstream TypeScript typecheck
+PASS 9 desktop patches in order; 34 source files byte-identical
+SHA256 0011: 91d6918ca179a402d6cb82aa23e53f63dcfb53c0e30820e97c3d2eb5c77825e1
