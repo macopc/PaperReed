@@ -1,0 +1,745 @@
+diff --git a/app/internal_packages/category-mapper/lib/category-selection.tsx b/app/internal_packages/category-mapper/lib/category-selection.tsx
+index 754f4c3..7376649 100644
+--- a/app/internal_packages/category-mapper/lib/category-selection.tsx
++++ b/app/internal_packages/category-mapper/lib/category-selection.tsx
+@@ -8,6 +8,7 @@ import {
+ import { localized, Label, Utils, imapUtf7 } from 'mailspring-exports';
+ 
+ interface CategorySelectionProps {
++  label?: string;
+   all: CategoryItem[];
+   current: CategoryItem;
+   onSelect: (item: CategoryItem) => void;
+@@ -88,6 +89,27 @@ export default class CategorySelection extends React.Component<
+   };
+ 
+   render() {
++    if (AppEnv.config.get('core.paperReed.enabled'))
++      return (
++        <select
++          aria-label={this.props.label || '选择文件夹'}
++          value={this.props.current?.path || ''}
++          onChange={(e) =>
++            this.props.onSelect(this.props.all.find((item) => item.path === e.target.value))
++          }
++        >
++          <option value="" disabled>
++            尚未指定
++          </option>
++          {[...this.props.all]
++            .sort((a, b) => imapUtf7.decode(a.path).localeCompare(imapUtf7.decode(b.path)))
++            .map((item) => (
++              <option key={item.path} value={item.path}>
++                {imapUtf7.decode(item.path)}
++              </option>
++            ))}
++        </select>
++      );
+     const placeholder = localized('Choose folder');
+ 
+     const headerComponents = [
+diff --git a/app/internal_packages/category-mapper/lib/preferences-category-mapper.tsx b/app/internal_packages/category-mapper/lib/preferences-category-mapper.tsx
+index 9cd77d0..17f2018 100644
+--- a/app/internal_packages/category-mapper/lib/preferences-category-mapper.tsx
++++ b/app/internal_packages/category-mapper/lib/preferences-category-mapper.tsx
+@@ -11,6 +11,15 @@ import {
+ 
+ import CategorySelection from './category-selection';
+ 
++const ROLE_NAMES = {
++  inbox: '收件箱',
++  sent: '已发送',
++  drafts: '草稿',
++  spam: '垃圾邮件',
++  archive: '归档',
++  trash: '废纸篓',
++};
++
+ const SELECTABLE_ROLES = ['inbox', 'sent', 'drafts', 'spam', 'archive', 'trash'];
+ 
+ // Gmail's system labels have fixed roles, which the sync engine sets again on every pass on any
+@@ -47,7 +56,10 @@ export default class PreferencesCategoryMapper extends React.Component<
+ 
+   componentDidMount() {
+     this._unlisten = CategoryStore.listen(() => {
+-      this.setState(this._getStateFromStores());
++      this.setState((state) => ({
++        ...this._getStateFromStores(),
++        containerFolderDefault: state.containerFolderDefault,
++      }));
+     });
+   }
+ 
+@@ -99,9 +111,14 @@ export default class PreferencesCategoryMapper extends React.Component<
+     }
+     return (
+       <div className="role-section" key={`${account.id}-${role}`}>
+-        <div className="col-left">{Category.LocalizedStringForRole[role]}:</div>
++        <div className="col-left">
++          {AppEnv.config.get('core.paperReed.enabled')
++            ? ROLE_NAMES[role]
++            : Category.LocalizedStringForRole[role]}
++        </div>
+         <div className="col-right">
+           <CategorySelection
++            label={`${ROLE_NAMES[role]}文件夹`}
+             all={this.state.all[account.id]}
+             current={assignments[role]}
+             onSelect={(category) => this._onCategorySelection(account, role, category)}
+@@ -115,6 +132,46 @@ export default class PreferencesCategoryMapper extends React.Component<
+     const accounts = AccountStore.accounts();
+     const mappableAccounts = accounts.filter((account) => !rolesAreFixedByServer(account));
+ 
++    if (AppEnv.config.get('core.paperReed.enabled'))
++      return (
++        <div className="category-mapper-container pr-folders">
++          <p className="pr-folder-intro">草稿、已发送与删除等操作会使用下方指定的位置。</p>
++          {accounts.length === 0 && (
++            <div className="pr-settings-empty">
++              <h2>还没有邮箱账号</h2>
++              <p>添加账号后，即可确认文件夹用途。</p>
++            </div>
++          )}
++          {accounts.map((account) => (
++            <section className="pr-settings-group" key={account.id}>
++              <h2>{account.label || account.emailAddress}</h2>
++              {account.label !== account.emailAddress && <p>{account.emailAddress}</p>}
++              {rolesAreFixedByServer(account) ? (
++                <p>此账号由 Gmail 管理系统标签，无需手动指定。</p>
++              ) : this.state.assignments[account.id] ? (
++                <div className="pr-folder-mappings">
++                  {SELECTABLE_ROLES.map((role) => this._renderRoleSection(account, role))}
++                </div>
++              ) : (
++                <p role="status">正在等待文件夹同步…</p>
++              )}
++            </section>
++          ))}
++          <details className="pr-settings-group">
++            <summary>新账号的默认父文件夹</summary>
++            <p>用于之后添加的账号，不移动现有邮件。留空使用邮箱服务商的默认位置。</p>
++            <label htmlFor="pr-container-folder">文件夹路径</label>
++            <input
++              id="pr-container-folder"
++              type="text"
++              placeholder="例如 Mail/Personal"
++              value={this.state.containerFolderDefault}
++              onChange={(e) => this.setState({ containerFolderDefault: e.target.value })}
++              onBlur={this._updateContainerFolderDefault}
++            />
++          </details>
++        </div>
++      );
+     return (
+       <div className="category-mapper-container">
+         <h6>{localized('Default Container Folder (folder/subfolder)')}</h6>
+diff --git a/app/internal_packages/paper-reed/styles/paper-reed.less b/app/internal_packages/paper-reed/styles/paper-reed.less
+index 824ce1d..1f2f6a8 100644
+--- a/app/internal_packages/paper-reed/styles/paper-reed.less
++++ b/app/internal_packages/paper-reed/styles/paper-reed.less
+@@ -379,3 +379,62 @@
+   input:not([type=checkbox]):not([type=radio]), select { box-sizing:border-box; }
+   .pr-keymaps .shortcut .col-left, .pr-keymaps .shortcut .col-right { min-width:0; overflow-wrap:anywhere; }
+ }
++
++.preferences-wrap.pr-preferences .pr-settings-page {
++  .pr-appearance, .pr-folders { width:100%; min-width:0; max-width:780px; margin:0; }
++  .pr-appearance .pr-settings-group p, .pr-folders p, .pr-rules p { color:#626b60; font-size:12px; line-height:20px; }
++  .pr-style-sample { border:1px solid #dfe2d9; border-radius:6px; padding:24px; background:#fffefa; }
++  .pr-style-paper { font:24px/32px 'Iowan Old Style',serif; }
++  .pr-style-paper > span { display:block; font:11px/20px -apple-system,sans-serif; color:#626b60; margin-top:4px; }
++  .pr-style-letter { display:flex; gap:12px; align-items:center; margin-top:24px; padding-top:20px; border-top:1px solid #dfe2d9; }
++  .pr-style-mark { width:32px; height:32px; border:2px solid #7d8976; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#4b634f; }
++  .pr-style-letter strong { font-weight:500; font-size:13px; } .pr-style-letter p { margin:4px 0 0; }
++  .pr-scale-control { display:grid; grid-template-columns:1fr auto; gap:12px 20px; align-items:center; }
++  .pr-scale-control input[type=range] { width:100%; min-width:0; accent-color:#4b634f; padding:0; border:0; background:transparent; }
++  .pr-scale-control output { text-align:right; color:#626b60; font-variant-numeric:tabular-nums; }
++  .pr-setting-row { display:flex; justify-content:space-between; align-items:center; gap:20px; }
++  .pr-setting-row select { max-width:65%; margin:0; }
++  .pr-folder-intro { margin:0 0 24px; }
++  .pr-folder-mappings { margin-top:20px; }
++  .pr-folders .role-section { display:grid; grid-template-columns:130px minmax(0,1fr); gap:24px; align-items:center; padding:12px 0; border-bottom:1px solid #eceee7; }
++  .pr-folders .role-section:last-child { border-bottom:0; }
++  .pr-folders .col-left { text-align:left; margin:0; color:#303730; font-size:13px; }
++  .pr-folders .col-right { min-width:0; margin:0; }
++  .pr-folders .col-right select { width:100%; margin:0; }
++  #pr-container-folder { display:block; width:100%; margin-top:8px; }
++  .pr-rules { max-width:none; margin:0; }
++  .pr-rule-toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:12px; }
++  .pr-rule-toolbar select { flex:1; min-width:0; } .pr-rule-toolbar .sr-only { position:absolute; }
++  .pr-rule-layout { display:grid; grid-template-columns:180px minmax(0,1fr); gap:28px; margin:28px 0; }
++  .pr-rule-sidebar { border-right:1px solid #dfe2d9; padding-right:16px; }
++  .pr-rule-sidebar nav button { width:100%; text-align:left; border:0; padding:10px; margin-bottom:4px; overflow-wrap:anywhere; }
++  .pr-rule-sidebar nav button[aria-current] { background:#e9eee5; color:#303730; }
++  .pr-rule-sidebar small { display:block; font-size:10px; color:#626b60; margin-top:4px; }
++  .pr-rule-order { display:flex; gap:8px; margin-top:16px; }
++  .pr-rule-editor { min-width:0; }
++  .pr-rule-editor > label:first-child { color:#626b60; font-size:11px; }
++  #pr-rule-name { display:block; width:100%; margin:8px 0 18px; }
++  .pr-rule-enabled { display:flex; align-items:center; gap:6px; margin-bottom:24px; }
++  .pr-rule-section-heading { display:flex; align-items:center; justify-content:space-between; gap:12px; }
++  .pr-rule-editor h2 { font-size:13px; font-weight:500; margin:16px 0; }
++  .pr-rule-section-heading select { margin:0; }
++  .pr-rule-editor .well { background:transparent; border:0; margin:4px 0 16px; padding:0; box-shadow:none; }
++  .pr-rule-editor .well-row { gap:8px; padding:12px 0; border-bottom:1px solid #eceee7; align-items:center; }
++  .pr-rule-editor .well-row > div:first-child { gap:8px; min-width:0; }
++  .pr-rule-editor .well-row select, .pr-rule-editor .well-row input { margin:0; min-width:0; max-width:100%; }
++  .pr-rule-editor .well-row input { flex:1 1 150px; width:150px; }
++  .pr-rule-editor .well-row .actions { display:flex; align-items:center; gap:4px; }
++  .pr-rule-editor .well-row .actions button { padding:4px 7px; min-width:28px; }
++  .pr-rule-footer { display:flex; gap:8px; align-items:center; border-top:1px solid #dfe2d9; padding-top:18px; font-size:11px; color:#626b60; }
++  .pr-rule-footer span { flex:1; }
++  .pr-rule-bulk { margin-top:32px; }
++  .pr-rule-run-confirm button + button { margin-left:8px; }
++  button:disabled { opacity:.45; cursor:default; }
++  @media(max-width:1100px) {
++    .pr-rule-layout { grid-template-columns:minmax(0,1fr); gap:20px; }
++    .pr-rule-sidebar { border-right:0; border-bottom:1px solid #dfe2d9; padding:0 0 16px; }
++    .pr-rule-sidebar nav { display:flex; gap:8px; overflow-x:auto; }
++    .pr-rule-sidebar nav button { min-width:140px; width:auto; }
++    .pr-folder-mappings .role-section { grid-template-columns:90px minmax(0,1fr); gap:12px; }
++  }
++}
+diff --git a/app/internal_packages/preferences/lib/preferences-root.tsx b/app/internal_packages/preferences/lib/preferences-root.tsx
+index 7089ea3..9627633 100644
+--- a/app/internal_packages/preferences/lib/preferences-root.tsx
++++ b/app/internal_packages/preferences/lib/preferences-root.tsx
+@@ -75,6 +75,9 @@ class PreferencesRoot extends React.Component<{ tab: any; tabs: any[]; selection
+     const page =
+       AppEnv.config.get('core.paperReed.enabled') &&
+       {
++        Appearance: ['外观', '调整界面大小与邮件正文的显示方式。'],
++        'Mail Rules': ['邮件规则', '为每个账号安排清楚、可控的自动处理。'],
++        Folders: ['文件夹', '确认常用邮件用途对应的实际文件夹。'],
+         General: ['通用', '让阅读、写信与提醒符合你的习惯。'],
+         Accounts: ['邮箱账号', '管理账号名称、辨识颜色与发件身份。'],
+         Shortcuts: ['快捷键', '找到常用操作，调整为熟悉的按键。'],
+diff --git a/app/internal_packages/preferences/lib/tabs/preferences-appearance.tsx b/app/internal_packages/preferences/lib/tabs/preferences-appearance.tsx
+index 6372aaa..fba43b8 100644
+--- a/app/internal_packages/preferences/lib/tabs/preferences-appearance.tsx
++++ b/app/internal_packages/preferences/lib/tabs/preferences-appearance.tsx
+@@ -26,6 +26,27 @@ class AppearanceScaleSlider extends React.Component<
+   }
+ 
+   render() {
++    if (AppEnv.config.get('core.paperReed.enabled'))
++      return (
++        <div className="pr-scale-control">
++          <label htmlFor="interface-zoom-slider">界面缩放</label>
++          <output htmlFor="interface-zoom-slider">
++            {Math.round(Number(this.state.value) * 100)}%
++          </output>
++          <input
++            id="interface-zoom-slider"
++            type="range"
++            min={0.8}
++            max={1.4}
++            step={0.05}
++            value={this.state.value}
++            onChange={(e) => this.props.config.set(this.kp, Number(e.target.value))}
++          />
++          <button type="button" onClick={() => this.props.config.set(this.kp, 1)}>
++            恢复 100%
++          </button>
++        </div>
++      );
+     return (
+       <div id={this.props.id} className="appearance-scale-slider">
+         <div className="ruler">
+@@ -343,6 +364,72 @@ class PreferencesAppearance extends React.Component<{ config: ConfigLike; config
+   };
+ 
+   render() {
++    if (AppEnv.config.get('core.paperReed.enabled'))
++      return (
++        <div className="container-appearance pr-appearance">
++          <section className="pr-settings-group">
++            <h2>当前样式</h2>
++            <div
++              className="pr-style-sample"
++              aria-label="Paper Reed 当前固定样式，纸白背景与苇绿强调色"
++            >
++              <div className="pr-style-paper">
++                Paper Reed<span>纸白 · 苇绿</span>
++              </div>
++              <div className="pr-style-letter">
++                <span className="pr-style-mark" aria-hidden="true">
++                  P
++                </span>
++                <div>
++                  <strong>留一点空间给思考</strong>
++                  <p>让邮件回到清晰、从容的节奏。</p>
++                </div>
++              </div>
++            </div>
++            <p>当前采用固定配色与布局。</p>
++          </section>
++          <section className="pr-settings-group">
++            <h2>界面大小</h2>
++            <AppearanceScaleSlider id="change-scale" config={this.props.config} />
++            <p>调整文字与控件的大小，不改变发出邮件的字号。</p>
++          </section>
++          <section className="pr-settings-group">
++            <h2>邮件正文</h2>
++            <label className="pr-setting-row" htmlFor="pr-message-appearance">
++              <span>阅读时的背景</span>
++              <select
++                id="pr-message-appearance"
++                value={this.props.config.get('core.reading.emailRenderMode')}
++                onChange={(e) =>
++                  this.props.config.set('core.reading.emailRenderMode', e.target.value)
++                }
++              >
++                <option value="light">浅色</option>
++                <option value="dark">深色</option>
++              </select>
++            </label>
++            <p>仅影响收到邮件的阅读区域，保留正文中的图片与格式。</p>
++          </section>
++          <section className="pr-settings-group">
++            <h2>菜单栏图标</h2>
++            <label className="pr-setting-row" htmlFor="pr-tray-style">
++              <span>未读邮件提示</span>
++              <select
++                id="pr-tray-style"
++                value={this.props.config.get('core.workspace.trayIconStyle') || 'blue'}
++                onChange={(e) =>
++                  this.props.config.set('core.workspace.trayIconStyle', e.target.value)
++                }
++              >
++                <option value="blue">蓝色表示未读</option>
++                <option value="red">红色表示新邮件，蓝色表示未读</option>
++                <option value="none">不显示未读状态</option>
++              </select>
++            </label>
++            <p>颜色用于系统菜单栏中的状态提示。</p>
++          </section>
++        </div>
++      );
+     return (
+       <div className="container-appearance">
+         <section>
+diff --git a/app/internal_packages/preferences/lib/tabs/preferences-mail-rules.tsx b/app/internal_packages/preferences/lib/tabs/preferences-mail-rules.tsx
+index 6e787e4..22ac9e4 100644
+--- a/app/internal_packages/preferences/lib/tabs/preferences-mail-rules.tsx
++++ b/app/internal_packages/preferences/lib/tabs/preferences-mail-rules.tsx
+@@ -22,6 +22,8 @@ import {
+ const { ActionTemplatesForAccount, ConditionTemplatesForAccount } = MailRulesTemplates;
+ 
+ interface PreferencesMailRulesState {
++  deleting?: boolean;
++  confirmingRun?: boolean;
+   accounts: Account[];
+   currentAccount: Account;
+   rules: ReturnType<typeof MailRulesStore.rulesForAccountId>;
+@@ -45,7 +47,10 @@ class PreferencesMailRules extends React.Component<
+   }
+ 
+   componentDidMount() {
+-    this._unsubscribers.push(MailRulesStore.listen(this._onRulesChanged));
++    this._unsubscribers.push(
++      MailRulesStore.listen(this._onRulesChanged),
++      AccountStore.listen(this._onRulesChanged)
++    );
+   }
+ 
+   componentWillUnmount() {
+@@ -56,14 +61,12 @@ class PreferencesMailRules extends React.Component<
+     const accounts = AccountStore.accounts();
+ 
+     let currentAccount = this.state ? this.state.currentAccount : null;
+-    if (!accounts.find((acct) => acct === currentAccount)) {
+-      currentAccount = accounts[0];
+-    }
++    currentAccount = accounts.find((acct) => acct.id === currentAccount?.id) || accounts[0];
+ 
+-    const rules = MailRulesStore.rulesForAccountId(currentAccount.id);
++    const rules = currentAccount ? MailRulesStore.rulesForAccountId(currentAccount.id) : [];
+     const selectedRule =
+       this.state && this.state.selectedRule
+-        ? rules.find((r) => r.id === this.state.selectedRule.id)
++        ? rules.find((r) => r.id === this.state.selectedRule.id) || rules[0]
+         : rules[0];
+ 
+     return {
+@@ -80,9 +83,12 @@ class PreferencesMailRules extends React.Component<
+   _onSelectAccount = (event: React.ChangeEvent<HTMLSelectElement>) => {
+     const accountId = event.target.value;
+     const currentAccount = this.state.accounts.find((acct) => acct.id === accountId);
+-    this.setState({ currentAccount: currentAccount }, () => {
+-      this.setState(this._getStateFromStores());
+-    });
++    this.setState(
++      { currentAccount, selectedRule: undefined, deleting: false, confirmingRun: false },
++      () => {
++        this.setState(this._getStateFromStores());
++      }
++    );
+   };
+ 
+   _onReprocessRules = () => {
+@@ -127,11 +133,15 @@ class PreferencesMailRules extends React.Component<
+   };
+ 
+   _onAddRule = () => {
+-    Actions.addMailRule({ accountId: this.state.currentAccount.id });
++    this.setState({ deleting: false });
++    Actions.addMailRule({
++      accountId: this.state.currentAccount.id,
++      ...(AppEnv.config.get('core.paperReed.enabled') ? { name: '新规则', disabled: true } : {}),
++    });
+   };
+ 
+   _onSelectRule = (rule: ReturnType<typeof MailRulesStore.rulesForAccountId>[0]) => {
+-    this.setState({ selectedRule: rule });
++    this.setState({ selectedRule: rule, deleting: false });
+   };
+ 
+   _onReorderRule = (
+@@ -139,7 +149,10 @@ class PreferencesMailRules extends React.Component<
+     startIdx: number,
+     endIdx: number
+   ) => {
+-    Actions.reorderMailRule(rule.id, endIdx);
++    // The visible list is account-scoped; the store's insertion index is global.
++    const target = this.state.rules[endIdx];
++    const globalIndex = MailRulesStore.rules().findIndex((item) => item.id === target.id);
++    Actions.reorderMailRule(rule.id, globalIndex);
+   };
+ 
+   _onDeleteRule = (rule: ReturnType<typeof MailRulesStore.rulesForAccountId>[0]) => {
+@@ -283,7 +296,11 @@ class PreferencesMailRules extends React.Component<
+   }
+ 
+   _renderDetailDisabledNotice() {
+-    if (!this.state.selectedRule.disabled) return false;
++    if (
++      !this.state.selectedRule.disabled ||
++      (AppEnv.config.get('core.paperReed.enabled') && !this.state.selectedRule.disabledReason)
++    )
++      return false;
+     return (
+       <div className="disabled-reason">
+         <button className="btn" onClick={this._onRuleEnabled}>
+@@ -329,7 +346,193 @@ class PreferencesMailRules extends React.Component<
+     );
+   }
+ 
++  _renderPaperReed() {
++    const {
++      currentAccount,
++      rules,
++      selectedRule: rule,
++      reprocessing,
++      deleting,
++      confirmingRun,
++    } = this.state;
++    if (!currentAccount)
++      return (
++        <div className="container-mail-rules pr-rules">
++          <div className="pr-settings-empty">
++            <h2>还没有邮箱账号</h2>
++            <p>添加账号后，就可以创建邮件规则。</p>
++          </div>
++        </div>
++      );
++    const index = rules.indexOf(rule);
++    return (
++      <div className="container-mail-rules pr-rules">
++        <div className="pr-rule-toolbar">
++          <label htmlFor="mail-rules-account">应用于</label>
++          {this._renderAccountPicker()}
++          <button type="button" onClick={this._onAddRule}>
++            新建规则
++          </button>
++        </div>
++        <p>规则仅作用于此账号。新规则先保存为暂停状态，确认后再启用。</p>
++        {rules.length === 0 ? (
++          <div className="pr-settings-empty">
++            <h2>让重复的整理自动完成</h2>
++            <p>从一个条件和一个动作开始。</p>
++            <button type="button" onClick={this._onAddRule}>
++              创建第一条规则
++            </button>
++          </div>
++        ) : (
++          <div className="pr-rule-layout">
++            <div className="pr-rule-sidebar">
++              <nav aria-label="已保存的邮件规则">
++                {rules.map((item) => (
++                  <button
++                    type="button"
++                    key={item.id}
++                    aria-current={item.id === rule?.id ? 'true' : undefined}
++                    onClick={() => this._onSelectRule(item)}
++                  >
++                    <span>{item.name || '未命名规则'}</span>
++                    <small>{item.disabled ? '已暂停' : '已启用'}</small>
++                  </button>
++                ))}
++              </nav>
++              <div className="pr-rule-order">
++                <button
++                  type="button"
++                  disabled={index <= 0}
++                  onClick={() => this._onReorderRule(rule, index, index - 1)}
++                >
++                  上移
++                </button>
++                <button
++                  type="button"
++                  disabled={index < 0 || index >= rules.length - 1}
++                  onClick={() => this._onReorderRule(rule, index, index + 1)}
++                >
++                  下移
++                </button>
++              </div>
++              <p>按列表顺序处理。</p>
++            </div>
++            {rule && (
++              <div className="pr-rule-editor">
++                <label htmlFor="pr-rule-name">规则名称</label>
++                <input
++                  id="pr-rule-name"
++                  value={rule.name}
++                  onChange={(e) => this._onRuleNameEdited(e.target.value, rule)}
++                />
++                <label className="pr-rule-enabled">
++                  <input
++                    type="checkbox"
++                    checked={!rule.disabled}
++                    onChange={(e) =>
++                      Actions.updateMailRule(rule.id, {
++                        disabled: !e.target.checked,
++                        disabledReason: null,
++                      })
++                    }
++                  />
++                  启用此规则
++                </label>
++                {this._renderDetailDisabledNotice()}
++                <section className="pr-rule-conditions">
++                  <div className="pr-rule-section-heading">
++                    <h2>当邮件符合</h2>
++                    <select
++                      aria-label="条件匹配方式"
++                      value={rule.conditionMode}
++                      onChange={this._onRuleConditionModeEdited}
++                    >
++                      <option value="all">全部条件</option>
++                      <option value="any">任一条件</option>
++                    </select>
++                  </div>
++                  <ScenarioEditor
++                    instances={rule.conditions}
++                    templates={this.state.conditionTemplates}
++                    onChange={(conditions) => Actions.updateMailRule(rule.id, { conditions })}
++                    className="well well-matchers"
++                  />
++                </section>
++                <section className="pr-rule-actions">
++                  <h2>执行动作</h2>
++                  <ScenarioEditor
++                    instances={rule.actions}
++                    templates={this.state.actionTemplates}
++                    onChange={(actions) => Actions.updateMailRule(rule.id, { actions })}
++                    className="well well-actions"
++                  />
++                </section>
++                <footer className="pr-rule-footer">
++                  {deleting ? (
++                    <>
++                      <span>删除这条规则？已有邮件不会恢复。</span>
++                      <button type="button" onClick={() => this.setState({ deleting: false })}>
++                        取消
++                      </button>
++                      <button
++                        type="button"
++                        onClick={() => {
++                          this._onDeleteRule(rule);
++                          this.setState({ deleting: false });
++                        }}
++                      >
++                        确认删除
++                      </button>
++                    </>
++                  ) : (
++                    <>
++                      <span>更改自动保存</span>
++                      <button type="button" onClick={() => this.setState({ deleting: true })}>
++                        删除规则
++                      </button>
++                    </>
++                  )}
++                </footer>
++              </div>
++            )}
++          </div>
++        )}
++        <details className="pr-settings-group pr-rule-bulk">
++          <summary>处理已有邮件</summary>
++          <p>启用的规则默认处理新收到的邮件。也可以手动应用到此账号的整个收件箱。</p>
++          {confirmingRun ? (
++            <div className="pr-rule-run-confirm">
++              <p>将按此账号已启用的规则处理收件箱。移动、删除等动作会影响已有邮件。</p>
++              <button type="button" onClick={() => this.setState({ confirmingRun: false })}>
++                取消
++              </button>
++              <button
++                type="button"
++                onClick={() => {
++                  this.setState({ confirmingRun: false });
++                  this._onReprocessRules();
++                }}
++              >
++                确认处理
++              </button>
++            </div>
++          ) : (
++            <button
++              type="button"
++              disabled={!rules.some((item) => !item.disabled) || !!reprocessing[currentAccount.id]}
++              onClick={() => this.setState({ confirmingRun: true })}
++            >
++              处理整个收件箱…
++            </button>
++          )}
++          {this._renderTasks()}
++        </details>
++      </div>
++    );
++  }
++
+   render() {
++    if (AppEnv.config.get('core.paperReed.enabled')) return this._renderPaperReed();
+     return (
+       <div className="container-mail-rules">
+         <section>
+diff --git a/app/src/components/scenario-editor-row.tsx b/app/src/components/scenario-editor-row.tsx
+index 0750628..9d65f1a 100644
+--- a/app/src/components/scenario-editor-row.tsx
++++ b/app/src/components/scenario-editor-row.tsx
+@@ -5,6 +5,36 @@ import { Flexbox, SVGIcons } from 'mailspring-component-kit';
+ import { Template } from './scenario-editor-models';
+ 
+ const SOURCE_SELECT_NULL = 'NULL';
++const PAPER_RULE_NAMES = {
++  from: '发件人',
++  to: '收件人',
++  cc: '抄送',
++  bcc: '密送',
++  anyRecipient: '任意收件人',
++  replyTo: '回复地址',
++  anyAttachmentName: '附件名称',
++  hasAttachment: '有附件',
++  starred: '已标星',
++  subject: '主题',
++  body: '正文',
++  markAsRead: '标为已读',
++  moveToTrash: '移至废纸篓',
++  star: '标星',
++  forward: '转发',
++  markAsImportant: '标为重要',
++  archive: '归档',
++  applyLabel: '添加标签',
++  moveToLabel: '移至标签',
++  changeFolder: '移动到文件夹',
++};
++const PAPER_COMPARATORS = {
++  contains: '包含',
++  doesNotContain: '不包含',
++  beginsWith: '开头是',
++  endsWith: '结尾是',
++  equals: '等于',
++  doesNotEqual: '不等于',
++};
+ 
+ interface Item {
+   value: string;
+@@ -79,7 +109,11 @@ class SourceSelect extends React.Component<SourceSelectProps, SourceSelectState>
+     // previous render. To work around this, we coerce null/undefined to SOURCE_SELECT_NULL.
+ 
+     return (
+-      <select value={this.props.value || SOURCE_SELECT_NULL} onChange={this._onChange}>
++      <select
++        aria-label={AppEnv.config.get('core.paperReed.enabled') ? '规则选项值' : undefined}
++        value={this.props.value || SOURCE_SELECT_NULL}
++        onChange={this._onChange}
++      >
+         <option key={SOURCE_SELECT_NULL} value={SOURCE_SELECT_NULL} />
+         {this.state.options.map(({ value, name }) => (
+           <option key={value} value={value}>
+@@ -138,11 +172,15 @@ export default class ScenarioEditorRow extends React.Component<ScenarioEditorRow
+   _renderTemplateSelect() {
+     const options = this.props.templates.map(({ key, name }) => (
+       <option value={key} key={key}>
+-        {name}
++        {(AppEnv.config.get('core.paperReed.enabled') && PAPER_RULE_NAMES[key]) || name}
+       </option>
+     ));
+     return (
+-      <select value={this.props.instance.templateKey} onChange={this._onChangeTemplate}>
++      <select
++        aria-label={AppEnv.config.get('core.paperReed.enabled') ? '条件或动作类型' : undefined}
++        value={this.props.instance.templateKey}
++        onChange={this._onChangeTemplate}
++      >
+         {options}
+       </select>
+     );
+@@ -151,14 +189,19 @@ export default class ScenarioEditorRow extends React.Component<ScenarioEditorRow
+   _renderComparator(template: Template) {
+     const options = Object.keys(template.comparators).map((key) => (
+       <option key={key} value={key}>
+-        {template.comparators[key].name}
++        {(AppEnv.config.get('core.paperReed.enabled') && PAPER_COMPARATORS[key]) ||
++          template.comparators[key].name}
+       </option>
+     ));
+     if (options.length === 0) {
+       return false;
+     }
+     return (
+-      <select value={this.props.instance.comparatorKey} onChange={this._onChangeComparator}>
++      <select
++        aria-label={AppEnv.config.get('core.paperReed.enabled') ? '比较方式' : undefined}
++        value={this.props.instance.comparatorKey}
++        onChange={this._onChangeComparator}
++      >
+         {options}
+       </select>
+     );
+@@ -176,12 +219,32 @@ export default class ScenarioEditorRow extends React.Component<ScenarioEditorRow
+     }
+ 
+     if (template.type === Template.Type.String || template.type === Template.Type.InputString) {
+-      return <input type="text" value={this.props.instance.value} onChange={this._onChangeValue} />;
++      return (
++        <input
++          aria-label={AppEnv.config.get('core.paperReed.enabled') ? '匹配内容' : undefined}
++          type="text"
++          value={this.props.instance.value}
++          onChange={this._onChangeValue}
++        />
++      );
+     }
+     return false;
+   }
+ 
+   _renderActions() {
++    if (AppEnv.config.get('core.paperReed.enabled'))
++      return (
++        <div className="actions">
++          {this.props.removable && (
++            <button type="button" aria-label="移除此行" onClick={this.props.onRemove}>
++              −
++            </button>
++          )}
++          <button type="button" aria-label="添加一行" onClick={this.props.onInsert}>
++            ＋
++          </button>
++        </div>
++      );
+     return (
+       <div className="actions">
+         {this.props.removable && (

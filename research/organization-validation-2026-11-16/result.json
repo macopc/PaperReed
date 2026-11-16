@@ -1,0 +1,18 @@
+{
+  "zoomConfigAndWindow": true,
+  "appearancePersisted": true,
+  "trayConfig": true,
+  "nativeFolderMapping": true,
+  "containerDefaultSaved": true,
+  "newRulePaused": true,
+  "ruleFieldsSaved": true,
+  "conditionAddRemove": true,
+  "ruleReorder": true,
+  "accountScopedRuleOrder": true,
+  "ruleDeleteCancelConfirm": true,
+  "bulkCancel": true,
+  "ruleAppliedToFixtureMessage": true,
+  "compactLayouts": true,
+  "expectedSMTPSubmissions": 0,
+  "observedSMTPSubmissions": 0
+}

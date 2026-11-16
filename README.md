@@ -31,6 +31,7 @@ Paper Reed 是一个面向 macOS 的开源邮件客户端探索：重视阅读�
 | 收件人、签名与格式工具 | [控件设计与验证](research/controls-validation-2026-11-16/README.md) |
 | 设置导航与签名版式 | [实际窗口与验证](research/navigation-validation-2026-11-16/README.md) |
 | 通用、邮箱账号与快捷键设置 | [前后对照与验证](research/subpages-validation-2026-11-16/README.md) |
+| 外观、邮件规则与文件夹设置 | [前后对照与验证](research/organization-validation-2026-11-16/README.md) |
 | 首版邮件核心设计（本轮方案） | [design/MAIL-CORE.md](design/MAIL-CORE.md) |
 | 邮件领域术语 | [GLOSSARY.md](GLOSSARY.md) |
 | 首版技术选型与验证条件 | [design/TECH-CHOICE.md](design/TECH-CHOICE.md) |

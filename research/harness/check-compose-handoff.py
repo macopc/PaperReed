@@ -19,6 +19,8 @@ try:
             server.append('INBOX',message(i+1,sender=(name,f'sender{i}@example.test'),subject=Header(subject,'utf-8').encode(),body=body))
     else:
         server.append('INBOX',message(1))
+    if os.environ.get('PAPER_REED_ORGANIZATION_CHECK'):
+        server.create_mailbox('Paper Reed Review')
     server.start()
     (work/'account.json').write_text(json.dumps(account_json(**server.account_kwargs())))
     run=subprocess.Popen(['node',str(Path(__file__).with_suffix('.cjs')),str(upstream),str(work),'controls' if a.controls else 'workspace' if a.workspace else 'audit' if a.audit else 'recover' if a.recover else 'conflict' if a.conflict else 'close-save' if a.close_save else 'handoff'],start_new_session=True)
@@ -31,12 +33,14 @@ try:
     sent=server.sent_messages()
     (work/'smtp-result.json').write_text(json.dumps({'submissions':len(sent),'subjects':[m.header('Subject') for m in sent]}))
     assert run.returncode==0
-    if a.controls and os.environ.get('PAPER_REED_CONTROLS_PHASE') != 'before' and os.environ.get('PAPER_REED_SUBPAGES_PHASE') != 'before':
+    if a.controls and os.environ.get('PAPER_REED_CONTROLS_PHASE') != 'before' and os.environ.get('PAPER_REED_SUBPAGES_PHASE') != 'before' and os.environ.get('PAPER_REED_ORGANIZATION_PHASE') != 'before':
         result_path=Path(__file__).resolve().parent.parent/('settings-validation-2026-11-16/result.json' if os.environ.get('PAPER_REED_SETTINGS_CHECK') else 'controls-validation-2026-11-16/result.json')
         if os.environ.get('PAPER_REED_SETTINGS_CHECK') and os.environ.get('PAPER_REED_SETTINGS_OUTPUT'):
             result_path=Path(os.environ['PAPER_REED_SETTINGS_OUTPUT'])/'result.json'
         if os.environ.get('PAPER_REED_SUBPAGES_CHECK'):
             result_path=Path(__file__).resolve().parent.parent/'subpages-validation-2026-11-16/result.json'
+        if os.environ.get('PAPER_REED_ORGANIZATION_CHECK'):
+            result_path=Path(__file__).resolve().parent.parent/'organization-validation-2026-11-16/result.json'
         result=json.loads(result_path.read_text());result['observedSMTPSubmissions']=len(sent)
         result_path.write_text(json.dumps(result,indent=2)+'\n')
     if a.conflict or a.close_save or a.recover or a.audit or a.controls:
