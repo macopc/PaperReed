@@ -1,6 +1,6 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 module.exports=async({main,cdp,work,account,cli,click,evaluate,until,draft})=>{
- const out=path.resolve(__dirname,'../settings-validation-2026-11-16');fs.mkdirSync(out,{recursive:true});
+ const out=path.resolve(process.env.PAPER_REED_SETTINGS_OUTPUT || path.join(__dirname,'../settings-validation-2026-11-16'));fs.mkdirSync(out,{recursive:true});
  const run=s=>evaluate(cdp,s);
  const action=async s=>{await main.locator(s).first().click();};
  const shot=async name=>{await run('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');const r=await cdp.send('Page.captureScreenshot',{format:'png',fromSurface:true});fs.writeFileSync(path.join(out,name+'.png'),Buffer.from(r.data,'base64'));};
@@ -31,6 +31,7 @@ module.exports=async({main,cdp,work,account,cli,click,evaluate,until,draft})=>{
  await action('.pr-signature-detail footer button');await until(()=>run('document.querySelector(".pr-signature-detail footer").innerText.includes("确认删除")'),'delete confirmation ready');await action('.pr-signature-detail footer button:last-of-type');
  await until(()=>run('Object.keys(AppEnv.config.get("signatures")).length===1'),'delete signature');
  await action('.pr-signature-settings header button');await until(()=>run('Object.keys(AppEnv.config.get("signatures")).length===2'),'new signature');await shot('signature-new');
- const result={emojiSearch:true,emojiEmptyState:true,emojiKeyboardInsert:true,emojiEscape:true,emojiSavedWithBody:true,signatureRename:true,signatureDefaultAccount:true,signatureDeleteCancel:true,signatureDeleteConfirm:true,signatureCreate:true,expectedSMTPSubmissions:0};
+ if (process.env.PAPER_REED_NAVIGATION_CHECK) await require('./check-settings-navigation.cjs')({main,cdp,run,action,shot,until,cli,account,draft});
+ const result={settingsNavigation:!!process.env.PAPER_REED_NAVIGATION_CHECK,emojiSearch:true,emojiEmptyState:true,emojiKeyboardInsert:true,emojiEscape:true,emojiSavedWithBody:true,signatureRename:true,signatureDefaultAccount:true,signatureDeleteCancel:true,signatureDeleteConfirm:true,signatureCreate:true,expectedSMTPSubmissions:0};
  fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(result,null,2)+'\n');console.log('PASS settings details',JSON.stringify(result));
 };

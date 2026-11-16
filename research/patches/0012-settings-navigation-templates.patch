@@ -1,0 +1,202 @@
+diff --git a/app/internal_packages/composer-signature/lib/signature-template-picker.tsx b/app/internal_packages/composer-signature/lib/signature-template-picker.tsx
+index 08f6620..04f5b3d 100644
+--- a/app/internal_packages/composer-signature/lib/signature-template-picker.tsx
++++ b/app/internal_packages/composer-signature/lib/signature-template-picker.tsx
+@@ -22,6 +22,7 @@ export default class SignatureTemplatePicker extends React.Component<{
+   }
+ 
+   ensureSelectionVisible() {
++    if (AppEnv.config.get('core.paperReed.enabled')) return;
+     const item = this._el.querySelector('.active') as HTMLElement;
+     if (item) {
+       const left = item.offsetLeft - 5;
+@@ -47,6 +48,54 @@ export default class SignatureTemplatePicker extends React.Component<{
+         title: localized('Job Title'),
+       };
+     }
++    if (AppEnv.config.get('core.paperReed.enabled'))
++      return (
++        <div
++          className="pr-signature-templates"
++          role="group"
++          aria-label="签名版式"
++          onKeyDown={(e) => {
++            if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
++          }}
++        >
++          <div className="pr-template-heading">
++            签名版式 <span>选择后可在上方查看实际效果</span>
++          </div>
++          <div className="pr-template-grid">
++            {Templates.map((template, index) => (
++              <button
++                type="button"
++                key={template.name}
++                data-template={template.name}
++                aria-pressed={template.name === resolvedData.templateName}
++                onClick={() =>
++                  this.props.onChange({ target: { id: 'templateName', value: template.name } })
++                }
++              >
++                <span
++                  className="pr-template-preview"
++                  aria-hidden="true"
++                  ref={(el) => el?.setAttribute('inert', '')}
++                >
++                  <span>{template(resolvedData)}</span>
++                </span>
++                <span className="pr-template-name">
++                  {['横线落款', '竖线名片', '并排名片', '纵向名片', '虚线落款'][index] ||
++                    `版式 ${index + 1}`}
++                </span>
++              </button>
++            ))}
++          </div>
++          <button
++            type="button"
++            className="pr-template-html"
++            aria-pressed={!resolvedData.templateName}
++            onClick={() => this.props.onChange({ target: { id: 'templateName', value: null } })}
++          >
++            自定义 HTML <span>保留已有签名的排版</span>
++          </button>
++        </div>
++      );
+     return (
+       <div ref={(el) => (this._el = el)} className="signature-template-picker">
+         {Templates.map((t, idx) => (
+diff --git a/app/internal_packages/paper-reed/styles/paper-reed.less b/app/internal_packages/paper-reed/styles/paper-reed.less
+index 4f69bb5..520d001 100644
+--- a/app/internal_packages/paper-reed/styles/paper-reed.less
++++ b/app/internal_packages/paper-reed/styles/paper-reed.less
+@@ -267,3 +267,33 @@
+   footer { font-size:10px; color:#626b60; border-top:1px solid #dfe2d9; padding-top:10px; margin-top:12px; }
+   p { color:#626b60; padding:20px 4px; }
+ }
++
++.preferences-wrap.pr-preferences { background:#faf9f6; color:#303730;
++  > .flexbox { min-width:0; }
++  .pr-preferences-nav { flex:0 0 180px; padding:24px 16px; border-right:1px solid #dfe2d9; overflow-y:auto; }
++  .pr-settings-brand { font:22px/30px 'Iowan Old Style',serif; margin:0 8px 24px; }
++  .pr-preferences-nav h2 { font-size:11px; font-weight:400; color:#626b60; margin:24px 10px 10px; }
++  .pr-preferences-nav button { display:block; width:100%; text-align:left; padding:9px 12px; margin:2px 0; background:transparent; color:#303730; border:0; border-radius:5px; font:12px/20px -apple-system,sans-serif; cursor:pointer; }
++  .pr-preferences-nav button:hover { background:#f2f1eb; }
++  .pr-preferences-nav button[aria-current] { background:#e9eee5; color:#4b634f; font-weight:500; }
++  .pr-preferences-nav button:focus-visible { outline:2px solid #4b634f; outline-offset:-2px; }
++  .pr-preferences-nav .pr-settings-back { color:#626b60; }
++  .preferences-content { flex:1; min-width:0; background:#faf9f6; }
++  .preferences-signatures-container.pr-signature-settings { max-width:1000px; padding:32px 36px; }
++}
++.preferences-signatures-container.pr-signature-settings {
++  .pr-signature-templates { padding:16px 0 4px; }
++  .signature-wrap > .section:has(.pr-signature-templates) { background:transparent; border:0; }
++  .pr-template-heading { font-size:12px; color:#303730; margin-bottom:10px; }
++  .pr-template-heading > span { color:#626b60; font-size:11px; margin-left:10px; }
++  .pr-template-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
++  .pr-template-grid button { min-width:0; padding:0; overflow:hidden; text-align:left; background:#fffefa; border:1px solid #dfe2d9; border-radius:5px; }
++  .pr-template-grid button[aria-pressed=true], .pr-template-html[aria-pressed=true] { border-color:#4b634f; box-shadow:inset 0 0 0 1px #4b634f; }
++  .pr-template-preview { display:block; height:88px; position:relative; overflow:hidden; pointer-events:none; }
++  .pr-template-preview > span { display:block; width:270px; position:absolute; left:12px; top:12px; transform:scale(.65); transform-origin:top left; }
++  .pr-template-name { display:block; padding:7px 10px; background:#f2f1eb; color:#303730; font-size:11px; border-top:1px solid #dfe2d9; }
++  .pr-template-grid button[aria-pressed=true] .pr-template-name { background:#e9eee5; color:#4b634f; }
++  .pr-template-html { margin-top:8px; width:100%; text-align:left; padding:10px; font-size:12px; background:transparent; }
++  .pr-template-html span { font-size:11px; color:#626b60; margin-left:10px; }
++  @media(max-width:1000px) { .pr-signature-layout { grid-template-columns:120px minmax(0,1fr); gap:18px; } .pr-template-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .pr-template-preview > span { transform:scale(.5); } }
++}
+diff --git a/app/internal_packages/preferences/lib/preferences-root.tsx b/app/internal_packages/preferences/lib/preferences-root.tsx
+index 355332b..1225777 100644
+--- a/app/internal_packages/preferences/lib/preferences-root.tsx
++++ b/app/internal_packages/preferences/lib/preferences-root.tsx
+@@ -52,7 +52,7 @@ class PreferencesRoot extends React.Component<{ tab: any; tabs: any[]; selection
+     if (oldProps.tab !== this.props.tab) {
+       const scrollRegion = document.querySelector('.preferences-content .scroll-region-content');
+       scrollRegion.scrollTop = 0;
+-      this._focusContent();
++      if (!document.activeElement?.closest('.pr-preferences-nav')) this._focusContent();
+     }
+   }
+ 
+@@ -74,11 +74,11 @@ class PreferencesRoot extends React.Component<{ tab: any; tabs: any[]; selection
+ 
+     return (
+       <KeyCommandsRegion
+-        className="preferences-wrap"
++        className={`preferences-wrap ${AppEnv.config.get('core.paperReed.enabled') ? 'pr-preferences' : ''}`}
+         tabIndex={0}
+         localHandlers={this._localHandlers}
+       >
+-        <Flexbox direction="column">
++        <Flexbox direction={AppEnv.config.get('core.paperReed.enabled') ? 'row' : 'column'}>
+           <PreferencesTabsBar tabs={tabs} selection={selection} />
+           <ScrollRegion className="preferences-content">
+             <ConfigPropContainer
+diff --git a/app/internal_packages/preferences/lib/preferences-tabs-bar.tsx b/app/internal_packages/preferences/lib/preferences-tabs-bar.tsx
+index ee35c35..f87f34a 100644
+--- a/app/internal_packages/preferences/lib/preferences-tabs-bar.tsx
++++ b/app/internal_packages/preferences/lib/preferences-tabs-bar.tsx
+@@ -3,7 +3,13 @@ import fs from 'fs';
+ import classNames from 'classnames';
+ 
+ import { RetinaImg } from 'mailspring-component-kit';
+-import { Actions, PreferencesUIStoreTab, Utils, localized } from 'mailspring-exports';
++import {
++  Actions,
++  WorkspaceStore,
++  PreferencesUIStoreTab,
++  Utils,
++  localized,
++} from 'mailspring-exports';
+ 
+ interface PreferencesTabItemProps {
+   selection: {
+@@ -113,6 +119,50 @@ class PreferencesTabsBar extends React.Component<PreferencesTabBarProps> {
+   }
+ 
+   render() {
++    if (AppEnv.config.get('core.paperReed.enabled')) {
++      const names = {
++        General: '通用',
++        Accounts: '邮箱账号',
++        Subscription: '订阅',
++        Appearance: '外观',
++        Shortcuts: '快捷键',
++        'Mail Rules': '邮件规则',
++        Folders: '文件夹',
++        Signatures: '邮件签名',
++        Templates: '邮件模板',
++        MCP: 'Agent 连接',
++      };
++      return (
++        <nav
++          className="pr-preferences-nav"
++          aria-label="设置导航"
++          onKeyDown={(e) => {
++            if (e.key === 'Enter' || e.key === ' ') e.stopPropagation();
++          }}
++        >
++          <div className="pr-settings-brand">Paper Reed</div>
++          <button
++            type="button"
++            className="pr-settings-back"
++            onClick={() => Actions.selectRootSheet(WorkspaceStore.Sheet.Threads)}
++          >
++            ‹ 返回邮件
++          </button>
++          <h2>设置</h2>
++          {this.props.tabs.map((tab) => (
++            <button
++              type="button"
++              key={tab.tabId}
++              data-settings-tab={tab.tabId}
++              aria-current={tab.tabId === this.props.selection.tabId ? 'page' : undefined}
++              onClick={() => Actions.switchPreferencesTab(tab.tabId)}
++            >
++              {names[tab.tabId] || tab.displayName}
++            </button>
++          ))}
++        </nav>
++      );
++    }
+     return (
+       <div className="container-preference-tabs">
+         <div
