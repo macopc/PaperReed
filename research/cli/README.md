@@ -1,31 +1,89 @@
-# 实验 CLI
+# Paper Reed CLI · 实验版
 
-这是 Paper Reed 共用接口实验，不是可独立安装的邮件客户端。需要运行应用了 0001–0003 补丁的 Mailspring 桌面实例，并启用其本机 MCP。SDK 使用该 checkout 的已有依赖。
+CLI 随实验桌面源码补丁提供，复用桌面内的运行环境与固定版本 MCP SDK，不需要另装 Node 或全局 npm 包。当前不是独立发布的安装包；先运行已应用 [补丁系列](../patches/README.md)（包括 0016）的实验桌面。
+
+## 从桌面接入
+
+1. 打开 **设置 → Agent 连接**，开启本机 Agent 连接，并选择允许的操作和邮箱范围。建议先从只读开始。
+2. 点击 **安装 CLI**。命令默认写入 `~/.local/bin/paper-reed`，连接文件写入当前桌面配置目录的 `paper-reed-cli/connection.json`。
+3. 点击 **检查连接**，看到“连接正常”后，点击 **复制接入说明**，粘贴到能够执行本机命令的 Agent 会话。
+
+写信、会话和列表页也可“复制给 Agent”，会携带当前邮件引用、读取命令和操作约束。CLI 调用始终使用设置中的实际权限；发送前应让 Agent 向用户确认。提示词中的确认要求不是额外的服务器审批机制，发送权限仍由当前 MCP 权限控制。
+
+连接文件权限为 `0600`，所在专用目录为 `0700`。安装不会改写 shell 启动文件或 Claude Code、Codex、OpenCode 的配置。已有其他同名命令或符号链接时拒绝覆盖。安装和检查连接均不发送邮件。
+
+本轮已在隔离 macOS Electron 实例中验证命令执行、读信、草稿交接和权限限制；尚未逐一完成第三方 Agent 客户端的交互验收。这里提供的是可粘贴给 Agent 的 CLI 任务，并非自动注册各客户端的 MCP 配置。
+
+## 在终端使用
+
+```sh
+"$HOME/.local/bin/paper-reed" doctor
+"$HOME/.local/bin/paper-reed" accounts
+"$HOME/.local/bin/paper-reed" --help
+```
+
+如果 `~/.local/bin` 已在 PATH 中，可直接使用 `paper-reed`。也可复制设置页提供的完整路径命令；不依赖 PATH。希望在当前终端添加 PATH 时，可以手动执行：
+
+```sh
+export PATH="$HOME/.local/bin:$PATH"
+```
+
+以下示例假设 PATH 已配置。JSON 通过 `--input` 或 stdin 传入，结果写入 stdout；失败退出码为 1。工具错误保留 JSON 结果；输入、连接和认证错误在 stderr 中提供 `error`、`code`、`hint`。CLI 只访问 `http://127.0.0.1:<port>/mcp`，不跟随重定向，不直接打开数据库。
+
+```sh
+paper-reed folders --input '{"accountId":"ACCOUNT_ID"}'
+paper-reed search --input '{"accountId":"ACCOUNT_ID","query":"in:inbox","limit":25}'
+paper-reed thread-get --input '{"threadId":"THREAD_ID"}'
+paper-reed draft-get --input '{"accountId":"ACCOUNT_ID","draftId":"DRAFT_ID"}'
+
+paper-reed draft-update <<'JSON'
+{"accountId":"ACCOUNT_ID","draftId":"DRAFT_ID","expectedRevision":3,"changes":{"body":"修改后的正文"}}
+JSON
+```
+
+| 命令 | 用途 |
+| --- | --- |
+| `doctor` | 检查本机连接、认证和可访问账号数；只读 |
+| `accounts` | 列出已授权账号 |
+| `folders` | 列出账号的文件夹；按 `role` 查找用途，不猜文件夹名称 |
+| `threads` | 按账号和文件夹列出会话，支持分页 |
+| `search` | 在显式账号范围搜索邮件，支持分页 |
+| `thread-get` | 读取会话正文，仍受账号／文件夹权限限制 |
+| `draft-get` / `draft-create` / `draft-update` | 读取、创建、更新共用草稿 |
+| `draft-send` | 提交发送请求，需要发送权限及用户明确授权 |
+| `operation-get` | 查询持久发送结果 |
+
+每个邮件命令都提供 `paper-reed <command> --help` 和输入示例。`draft-create` 要求显式 `accountId` 和 `to` 数组。正文遵循草稿的 `plaintext` 格式，不能通过正文更新切换格式；当前编辑接口只修改主题和正文，其余字段保留。
+
+`draft-send` 输入为 `{accountId,draftId,expectedRevision,requestId}`。重试间必须保持 `requestId` 不变。结果可能只是 `queued` 或 `pending-admission`，随后使用返回的 operation ID 查询 `operation-get`。结果未知、连接中断或超时时，不生成新请求 ID 重发；先检查操作状态或邮箱。详见 [共用接口记录](../shared-core-validation.md)。
+
+## 连接恢复和移除
+
+| 状况 | 下一步 |
+| --- | --- |
+| 找不到命令 | 用设置页复制的完整路径；或检查 PATH |
+| `not-connected` | 在 Agent 设置中重新安装／更新 CLI 连接 |
+| `authentication-failed` | 令牌可能已更换；点击“更新 CLI 连接”后再检查 |
+| `connection-unavailable` | 保持桌面运行，开启 Agent 连接；若端口改变，更新 CLI 连接 |
+| `Access denied` 或找不到对应草稿 | 检查允许的操作、账号和文件夹范围 |
+| 连接正常但账号数为 0 | 接入邮箱，或调整 Agent 的邮箱授权范围 |
+| 移动应用、切换实验 checkout、应用升级后命令失效 | 从当前应用重新安装 CLI，刷新运行路径 |
+
+“命令位置与终端使用”下可移除 CLI，确认后仅删除本次安装的命令和连接文件，保留邮件与 MCP 设置。再次安装即可恢复。更改令牌或端口后，界面会提示连接待更新，不会静默改写连接文件。
+
+连接文件含令牌，不提交到仓库、不粘贴给 Agent，也不要将令牌放入命令参数。复制的接入说明不含凭据。
+
+## 从研究源码运行（维护者）
+
+保留旧的开发环境变量方式，供隔离 harness 和源码维护使用：
 
 ```sh
 export PAPER_REED_UPSTREAM="/absolute/path/to/patched/Mailspring"
 export PAPER_REED_MCP_URL="http://127.0.0.1:2587/mcp"
-export PAPER_REED_TOKEN_FILE="/absolute/path/to/local-token-file"
+export PAPER_REED_TOKEN_FILE="/absolute/path/to/private-token-file"
+node research/cli/paper-reed.cjs doctor
 ```
 
-token 文件内容为桌面 MCP 设置中的令牌；建议文件权限为 `600`。不把令牌放到命令行或提交到仓库。本轮没有自动创建真实配置或读取用户现有令牌。
+token 文件只含桌面 MCP 令牌，使用 `0600` 权限。用户安装的 launcher 会忽略这三个旧变量，以本次安装的连接文件为准。`PAPER_REED_CLI_BIN_DIR` 可在启动实验桌面时覆盖安装目录，用于隔离测试；默认始终为用户的 `~/.local/bin`。
 
-从 Paper Reed 仓库运行，JSON 通过 stdin 传入，结果写 stdout；工具失败退出码为 1，客户端／连接错误写 stderr。只允许 `127.0.0.1` HTTP 端点，禁止跟随重定向。
-
-```sh
-node research/cli/paper-reed.cjs draft-get <<'JSON'
-{"accountId":"test-account","draftId":"draft-message-id@example.test"}
-JSON
-
-node research/cli/paper-reed.cjs draft-update <<'JSON'
-{"accountId":"test-account","draftId":"draft-message-id@example.test","expectedRevision":3,"changes":{"body":"修改后的正文"}}
-JSON
-
-node research/cli/paper-reed.cjs operation-get <<'JSON'
-{"accountId":"test-account","operationId":"pr-send-<returned-id>"}
-JSON
-```
-
-`draft-send` 输入为 `{accountId,draftId,expectedRevision,requestId}`。调用前需要发送权限；`requestId` 必须在重试间保持一致。结果可能只是 `queued` 或 `pending-admission`，随后查询 operation；看到 `unknown` 不自动换请求重发。`draft-create` 输入同现有 `create_draft` 工具，但 CLI 强制显式 `accountId`。
-
-正文沿用草稿的 `plaintext` 格式，不能用正文更新操作切换格式。当前编辑接口只修改主题和正文，其他字段保留。完整范围和已验证／未验证事项见 [共用接口记录](../shared-core-validation.md)。
+`paper-reed.cjs` 和 `install.cjs` 为 CLI 源文件，在 0016 中以完全相同的内容放入桌面 `internal_packages/mcp-server/bin/`。更新时同步导出补丁并检查两份文件一致，不新增 npm 安装步骤。已验证范围与实际窗口见 [安装与接入验证](../cli-onboarding-validation-2026-11-16/README.md)。

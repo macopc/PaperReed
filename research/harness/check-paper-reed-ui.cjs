@@ -98,10 +98,11 @@ module.exports=async({app,main,cdp,work,account,cli,click,evaluate,until,restart
  await action('[data-mailbox="drafts"]');
  await action(`[data-draft-id="${created.draftId}"]`);
  await until(()=>evaluate(cdp,'!!document.querySelector(".pr-editor [contenteditable=true]")'),'original restored');
+ await evaluate(cdp,`require(AppEnv.getLoadSettings().resourcePath+'/internal_packages/mcp-server/lib/paper-reed-cli').installCLI().then(()=>true)`);
  await action('.pr-agent-button');
  await action('.pr-agent-panel button');
 
- await until(async()=>(await text()).includes('已复制上下文'),'context copied');
+ await until(async()=>(await text()).includes('已复制任务'),'context copied');
  const context=await evaluate(cdp,'(async()=>JSON.parse(await require("@electron/remote").clipboard.readText()))()');
  assert.equal(context.context.draftId,created.draftId);assert.equal(context.context.revision,(await cli('draft-get',ref)).revision);
  await screenshot('agent-context');

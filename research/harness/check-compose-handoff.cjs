@@ -22,7 +22,7 @@ async function cli(command,input,expectError=false){
 }
 async function click(page,session,selector){const box=await evaluate(session,`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)return null;const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`);assert(box,selector);await page.mouse.click(box.x,box.y);}
 async function startDesktop(){
- const env={...process.env};delete env.PLAYWRIGHT;delete env.ELECTRON_RUN_AS_NODE;
+ const env={...process.env};env.PAPER_REED_CLI_BIN_DIR=path.join(work,"bin with space '");delete env.PLAYWRIGHT;delete env.ELECTRON_RUN_AS_NODE;
  app=await _electron.launch({executablePath:r('electron'),args:[path.join(upstream,'app'),'--dev','--no-sandbox','--config-dir-path',config],env,timeout:30000});
  app.process().stderr.on('data',b=>fs.appendFileSync(path.join(work,'electron.log'),b));
  main=await until(async()=>app.windows().find(w=>JSON.parse(new URL(w.url()).searchParams.get('loadSettings')||'{}').windowType==='default'),'main window');

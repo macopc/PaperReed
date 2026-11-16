@@ -80,3 +80,5 @@ python3 scripts/check.py
 Copyright (C) 2026 Paper Reed contributors. 本仓库原创内容采用 [GNU GPL v3.0 only](LICENSE)，不提供担保。上游源码、第三方素材与商标不因本仓库而改变其许可或归属，详见 [来源说明](THIRD_PARTY_NOTICES.md)。本项目与 Spark、Mailspring、Zero 及其维护方没有隶属或背书关系。
 
 邮件模板与 Agent 设置的实际窗口、CLI 权限验证和边界见 [本轮验证记录](research/template-agent-validation-2026-11-16/README.md)。
+
+CLI 安装、连接诊断和 Agent 交接见 [使用说明](research/cli/README.md) 与 [实际验证](research/cli-onboarding-validation-2026-11-16/README.md)。

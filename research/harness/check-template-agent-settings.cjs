@@ -226,7 +226,7 @@ module.exports = async ({
   await action(`input[data-folder-id="${draftsFolder}"]`);
   assert((await cli("draft-get", ref)).body.includes("请确认下一步安排"));
   await shot("agent-scope");
-  await action(".pr-agent-cli summary");
+  await action(".pr-cli-help summary");
   await shot("agent-connection");
   await action(".pr-agent-audit summary");
   await shot("agent-audit");

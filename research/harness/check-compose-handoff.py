@@ -43,6 +43,8 @@ try:
             result_path=Path(__file__).resolve().parent.parent/'organization-validation-2026-11-16/result.json'
         if os.environ.get('PAPER_REED_TEMPLATE_AGENT_CHECK'):
             result_path=Path(__file__).resolve().parent.parent/'template-agent-validation-2026-11-16/result.json'
+        if os.environ.get('PAPER_REED_CLI_ONBOARDING_CHECK'):
+            result_path=Path(__file__).resolve().parent.parent/'cli-onboarding-validation-2026-11-16/result.json'
         result=json.loads(result_path.read_text());result['observedSMTPSubmissions']=len(sent)
         result_path.write_text(json.dumps(result,indent=2)+'\n')
     if a.conflict or a.close_save or a.recover or a.audit or a.controls:
