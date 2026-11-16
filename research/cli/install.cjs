@@ -166,7 +166,11 @@ function handoff(p, context) {
   const invoke = (name, input) =>
     `${cmd} ${name}${input ? ' --input ' + quote(JSON.stringify(input)) : ''}`;
   let reads;
-  if (context.scope === 'draft')
+  if (context.scope === 'selection')
+    reads = context.targets.map((t) =>
+      invoke('thread-get', { threadId: t.threadId })
+    );
+  else if (context.scope === 'draft')
     reads = [
       invoke('draft-get', {
         accountId: context.accountId,
@@ -177,7 +181,11 @@ function handoff(p, context) {
     reads = [invoke('thread-get', { threadId: context.threadId })];
   else
     reads = (context.accountIds || []).map((accountId) =>
-      invoke('search', { accountId, query: 'in:' + context.mailbox, limit: 25 })
+      invoke('search', {
+        accountId,
+        query: context.query || 'in:' + context.mailbox,
+        limit: 25,
+      })
     );
   return JSON.stringify(
     {

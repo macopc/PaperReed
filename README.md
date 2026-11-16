@@ -82,3 +82,5 @@ Copyright (C) 2026 Paper Reed contributors. 本仓库原创内容采用 [GNU GPL
 邮件模板与 Agent 设置的实际窗口、CLI 权限验证和边界见 [本轮验证记录](research/template-agent-validation-2026-11-16/README.md)。
 
 CLI 安装、连接诊断和 Agent 交接见 [使用说明](research/cli/README.md) 与 [实际验证](research/cli-onboarding-validation-2026-11-16/README.md)。
+
+收件箱搜索、批量整理及共用 CLI 命令见 [实际窗口与验证](research/inbox-validation-2026-11-16/README.md)。

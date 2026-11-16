@@ -4,7 +4,20 @@ const fs = require('node:fs');
 const path = require('node:path');
 const { createRequire } = require('node:module');
 const VERSION = '0.1.0-experimental';
+const mailActions = {
+  'mark-read': 'read',
+  'mark-unread': 'unread',
+  archive: 'archive',
+  spam: 'spam',
+  trash: 'trash',
+  'restore-inbox': 'inbox',
+};
 const commands = {
+  ...Object.fromEntries(
+    Object.keys(mailActions).map((name) => [name, ['organize_mail', null]])
+  ),
+  'change-get': ['mail_task_status', 'accountId'],
+  undo: ['undo_mail_task', 'accountId'],
   accounts: ['list_accounts', null],
   folders: ['list_folders', 'accountId'],
   threads: ['list_threads', 'accountId'],
@@ -17,6 +30,17 @@ const commands = {
   'operation-get': ['get_operation', 'accountId'],
 };
 const examples = {
+  ...Object.fromEntries(
+    Object.keys(mailActions).map((name) => [
+      name,
+      {
+        targets: [{ accountId: 'ACCOUNT_ID', threadId: 'THREAD_ID' }],
+        requestId: 'UNIQUE_REQUEST_ID',
+      },
+    ])
+  ),
+  'change-get': { accountId: 'ACCOUNT_ID', taskId: 'TASK_ID' },
+  undo: { accountId: 'ACCOUNT_ID', taskId: 'TASK_ID' },
   accounts: {},
   folders: { accountId: 'ACCOUNT_ID' },
   threads: { accountId: 'ACCOUNT_ID', folderId: 'FOLDER_ID', limit: 25 },
@@ -158,8 +182,8 @@ function inputFor(command, args) {
 }
 function help(command) {
   if (commands[command])
-    return `paper-reed ${command} --input '${JSON.stringify(examples[command])}'\nOr pass the same JSON through stdin. Results are JSON; failures exit 1.\n${command === 'draft-send' ? 'Send only with explicit user approval. Keep requestId stable across retries; inspect operation-get after uncertain results.\n' : ''}`;
-  return `Paper Reed CLI ${VERSION}\n\nStart here:\n  paper-reed doctor             Check the local connection (read-only)\n  paper-reed accounts           List authorized accounts\n  paper-reed <command> --help   Show a JSON example\n\nRead: accounts, folders, threads, search, thread-get\nDrafts: draft-get, draft-create, draft-update, draft-send, operation-get\n\nJSON input: --input '{...}' or stdin. JSON output; errors exit 1.\nInstall/connect from Paper Reed → Settings → Agent. Keep the app running.\nNo mail is sent by installation or doctor. Sending requires permission and user approval.\n`;
+    return `paper-reed ${command} --input '${JSON.stringify(examples[command])}'\nOr pass the same JSON through stdin. Results are JSON; failures exit 1.\n${mailActions[command] ? 'Returns per-target task receipts. queued is not success; poll change-get. Reuse requestId only for the same targets/action while task history remains.\n' : ''}${command === 'draft-send' ? 'Send only with explicit user approval. Keep requestId stable across retries; inspect operation-get after uncertain results.\n' : ''}`;
+  return `Paper Reed CLI ${VERSION}\n\nStart here:\n  paper-reed doctor             Check the local connection (read-only)\n  paper-reed accounts           List authorized accounts\n  paper-reed <command> --help   Show a JSON example\n\nRead: accounts, folders, threads, search, thread-get\nDrafts: draft-get, draft-create, draft-update, draft-send, operation-get\nOrganize: mark-read, mark-unread, archive, spam, trash, restore-inbox, change-get, undo\n\nJSON input: --input '{...}' or stdin. JSON output; errors exit 1.\nInstall/connect from Paper Reed → Settings → Agent. Keep the app running.\nNo mail is sent by installation or doctor. Sending requires permission and user approval.\n`;
 }
 async function main() {
   const [command, ...args] = process.argv.slice(2);
@@ -182,6 +206,7 @@ async function main() {
     return;
   }
   const input = inputFor(command, args);
+  if (mailActions[command]) input.action = mailActions[command];
   const { endpoint, token } = connection();
   if (typeof token !== 'string' || !token.trim())
     throw fail(
@@ -248,6 +273,12 @@ async function main() {
       process.exitCode = 1;
       return;
     }
+    if (
+      output?.items?.some((item) =>
+        ['rejected', 'failed'].includes(item.status)
+      )
+    )
+      process.exitCode = 1;
     if (command === 'doctor')
       output = {
         ok: true,
