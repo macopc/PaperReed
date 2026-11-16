@@ -8,13 +8,13 @@ Paper Reed 是一个面向 macOS 的开源邮件客户端探索：重视阅读�
 
 ## 当前状态
 
-**当前界面暂作首版基线；整体架构和技术选型尚未最终确定。** 仓库公开保存研究与设计过程，正在设计邮件核心，不代表选定 Mailspring 底座或完成产品实现。
+**当前界面暂作首版基线；整体架构和技术选型尚未最终确定。** 仓库公开保存研究与设计过程，正在通过 Mailspring 源码补丁验证邮件核心和界面，不代表最终选定底座或完成产品实现。
 
 - 产品方向：美观、克制的 macOS 邮件客户端，支持多邮箱、统一收件箱、快捷键与邮件整理。
 - 能力优先级：优先支持外部 Agent，通过 CLI 等入口共用邮件能力；内置 AI 后续考虑。
-- UI：当前原型暂作首版基线，先推进邮件核心设计；真实数据、异常状态与可访问性仍需验证。历史版本仅供参考。
+- UI：HTML 原型暂作首版基线；实验客户端开始接通收件箱、会话／回复和写信，补充保存与冲突反馈。历史版本仅供参考。
 - 技术：Mailspring、Zero 的代码研究已保存；Electron / React / TypeScript 等仅为现有候选方案。
-- 实现：目前只有使用示例数据的 HTML 交互原型，没有可用的邮件客户端、真实 CLI、邮箱授权或同步服务。
+- 实现：已有自编译引擎、实验 CLI 与真实 Electron 窗口，使用隔离的本机 IMAP / SMTP 测试邮箱验证共享草稿、发送结果、冲突和恢复。尚无可日用的客户端，真实服务商与授权未验收。
 - 开源：采用 GPL-3.0-only；项目名称已确定为 **Paper Reed**。没有正式版本或可下载的客户端。
 
 ## 阅读入口
@@ -25,6 +25,8 @@ Paper Reed 是一个面向 macOS 的开源邮件客户端探索：重视阅读�
 | 独立页面目录 | [design/PAGES.md](design/PAGES.md) |
 | 界面探索与迭代说明 | [design/INTERFACE.md](design/INTERFACE.md) |
 | UI/UX 评审记录 | [design/UX-REVIEW.md](design/UX-REVIEW.md) |
+| 实验界面接入与验证 | [research/ui-validation-2026-11-16/README.md](research/ui-validation-2026-11-16/README.md) |
+| 编辑状态规格 | [design/EDITOR-STATES.md](design/EDITOR-STATES.md) |
 | 首版邮件核心设计（本轮方案） | [design/MAIL-CORE.md](design/MAIL-CORE.md) |
 | 邮件领域术语 | [GLOSSARY.md](GLOSSARY.md) |
 | 首版技术选型与验证条件 | [design/TECH-CHOICE.md](design/TECH-CHOICE.md) |

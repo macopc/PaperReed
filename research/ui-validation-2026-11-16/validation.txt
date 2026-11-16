@@ -1,0 +1,26 @@
+2026-11-16 / macOS arm64 / isolated loopback fixture
+Upstream desktop: 535f13dd463536f36728bce3efb4ae0d51ab3f19 + patches 0002-0007
+Native engine: 8681eae1d217d993e4d4dc7de17ae8b91fc3da49 + patch 0001
+
+PASS connected workspace with 8 inbox threads
+PASS 1440x900 and 900x700 rendering; compact subject width 664px
+PASS reading and composing columns both measured at 640px
+PASS real inline reply, save receipt, and CLI-created draft in GUI
+PASS persistent conflict; navigation blocked; Send control disabled
+PASS source unchanged; recovery copy preserves local input
+PASS subsequent edits require a new copy before reloading the source
+PASS explicit reload; context carries the saved draft revision
+PASS settings navigation returns to the same draft
+PASS GUI Send and persistent accepted/filed result
+PASS SMTP submissions=1, To/Cc/Bcc envelope preserved, no Bcc header
+
+PASS original popout conflict / recovery / restart workflow with flag disabled
+PASS both original and recovery copy reopen after desktop restart; SMTP submissions=0
+PASS narrow draft/recovery boundaries, including edits arriving during reload
+PASS npm run typecheck in complete upstream checkout
+PASS patches 0002-0007 apply in order; 22 files match running source byte for byte
+PASS root checks: 12 generated previews current, 32 JavaScript syntax checks, JSON and Markdown links
+PASS HTML presentation preview: 728px width, no console messages
+
+Not covered: real provider OAuth, multiple accounts, attachments, offline UI,
+unknown-send-result UI, VoiceOver, large mailboxes, signing or distribution.

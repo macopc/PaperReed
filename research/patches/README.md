@@ -10,10 +10,11 @@
 | `0004-desktop-mcp-csp.patch` | Mailspring 根目录，在 0003 后应用 | 同上，加 0002 / 0003 |
 | `0005-unsaved-draft-close.patch` | Mailspring 根目录，在 0004 后应用 | 同上，加 0002 / 0003 / 0004 |
 | `0006-conflict-recovery-copy.patch` | Mailspring 根目录，在 0005 后应用 | 同上，加 0002–0005 |
+| `0007-connected-workspace.patch` | Mailspring 根目录，在 0006 后应用 | 同上，加 0002–0006 |
 
-在干净的固定版本 checkout 中，使用补丁的绝对路径分别执行 `git apply --check <patch>`、`git apply <patch>`。0001 在子模块根目录应用；0002–0006 按顺序在桌面根目录应用。本轮已在临时目录恢复各文件的基线版本、实际应用补丁，并逐字节比对测试过的源码。
+在干净的固定版本 checkout 中，使用补丁的绝对路径分别执行 `git apply --check <patch>`、`git apply <patch>`。0001 在子模块根目录应用；0002–0007 按顺序在桌面根目录应用。本轮已在临时目录恢复各文件的基线版本、实际应用补丁，并逐字节比对测试过的源码。
 
-当前工作区的 `research/.local/Mailspring` 已应用六份补丁，**不要重复应用**。安装过程中产生的上游 `app/package-lock.json` 变化不在补丁内。
+当前工作区的 `research/.local/Mailspring` 已应用七份补丁，**不要重复应用**。安装过程中产生的上游 `app/package-lock.json` 变化不在补丁内。
 
 接入方式：新增一个 `MailMutationGuard.hpp`，只依赖现有 SQLiteCpp / nlohmann。它由 `TaskProcessor.cpp` 和 `MailStore.cpp` 直接包含，不新增构建目标、服务、数据库或任务调度器。迁移在原数据库中建立 `PaperReedSend` 表和活动草稿唯一索引；实验阶段不改变上游 `user_version`。正式分支需要接入自己的版本化迁移。
 
@@ -26,3 +27,5 @@
 0005 移除保存失败时仍关闭窗口的 700 毫秒兜底，保留未保存输入；复现与回归见 [未保存编辑冲突验证](../unsaved-conflict-validation.md)。
 
 0006 提供写信窗口冲突时“另存副本并关闭”，沿用共享保存服务；重启恢复和失败保留检查见 [副本恢复验证](../recovery-copy-validation.md)。
+
+0007 提供由 `core.paperReed.enabled: true` 开启的实验工作台：收件箱、会话／回复、写信、持续编辑状态和上下文交接。开关关闭时保留原有工作区；原有组件注册位置保留，正文继续使用上游隔离渲染器。启动前设置开关并重启，实验 harness 会自动配置独立目录。检查与限制见 [界面接入记录](../ui-validation-2026-11-16/README.md)。

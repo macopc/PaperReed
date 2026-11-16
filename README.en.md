@@ -4,7 +4,7 @@
 
 Paper Reed is an open-source macOS email client exploration focused on thoughtful reading, writing, and organization, with convenient access for external agents such as Claude Code, Codex, and OpenCode.
 
-**Early exploration: the current interface is the first-version baseline; architecture and technology choices remain undecided.** Mail core design is now in progress. There is no installable mail client or release yet. Mailspring is a candidate, not a selected foundation.
+**Early exploration: the current interface is the first-version baseline; architecture and technology choices remain undecided.** The mail core and a connected desktop UI are being validated through source patches. There is no installable mail client or release yet. Mailspring is a candidate, not a selected foundation.
 
 ## What is here
 
@@ -13,7 +13,8 @@ Paper Reed is an open-source macOS email client exploration focused on thoughtfu
 - Research into Mailspring and Zero, with pinned source provenance and isolated feasibility checks.
 - Candidate architecture and CLI / agent interactions; built-in AI is a later priority.
 - A proposed [first-version mail core](design/MAIL-CORE.md) and [domain glossary](GLOSSARY.md), covering shared UI / CLI state, drafts, account boundaries and operation results. These documents are in Chinese.
-- A [technology recommendation](design/TECH-CHOICE.md) with source evidence and validation criteria: investigate a Mailspring product fork first; complete builds and real mailbox integration remain unverified.
+- A [technology recommendation](design/TECH-CHOICE.md) with source evidence and validation criteria: investigate a Mailspring product fork first; the native engine now builds and passes loopback protocol checks, while real provider authentication remains unverified.
+- An experimental CLI and Electron UI using the same local mail core. The connected inbox, conversation/reply and composer are tested against local IMAP/SMTP fixtures, including conflicts and recovery. See the [UI integration record](research/ui-validation-2026-11-16/README.md). This is not an installable release or real-provider validation.
 
 ## Try the prototype
 

@@ -1,0 +1,676 @@
+diff --git a/app/internal_packages/composer/lib/composer-view.tsx b/app/internal_packages/composer/lib/composer-view.tsx
+index d01e831..fe2f7b3 100644
+--- a/app/internal_packages/composer/lib/composer-view.tsx
++++ b/app/internal_packages/composer/lib/composer-view.tsx
+@@ -1,3 +1,4 @@
++import PaperReedDraftStatus from '../../paper-reed/lib/draft-status';
+ import React from 'react';
+ import ReactDOM from 'react-dom';
+ import {
+@@ -529,6 +530,7 @@ export default class ComposerView extends React.Component<ComposerViewProps, Com
+               <DropToAttachCover visible={this.state.isDropping} />
+ 
+               <div className="composer-content-wrap">
++                {AppEnv.config.get('core.paperReed.enabled') && <PaperReedDraftStatus session={this.props.session} />}
+                 {AppEnv.isComposerWindow() ? (
+                   <ScrollRegion className="compose-body-scroll">
+                     {this._renderContent()}
+diff --git a/app/internal_packages/composer/lib/send-action-button.tsx b/app/internal_packages/composer/lib/send-action-button.tsx
+index b493845..3d64e91 100644
+--- a/app/internal_packages/composer/lib/send-action-button.tsx
++++ b/app/internal_packages/composer/lib/send-action-button.tsx
+@@ -3,6 +3,7 @@ import {
+   localized,
+   ISendAction,
+   Actions,
++  DraftStore,
+   SendActionsStore,
+   SoundRegistry,
+   Message,
+@@ -39,6 +40,12 @@ export class SendActionButton extends React.Component<
+   }
+ 
+   componentDidMount() {
++    const session = DraftStore._draftSessions[this.props.draft.headerMessageId];
++    if (AppEnv.config.get('core.paperReed.enabled') && session) {
++      const changed = () => this.forceUpdate();
++      session.changes.on('state', changed);
++      this._unlisteners.push(() => session.changes.removeListener('state', changed));
++    }
+     this._unlisteners.push(
+       SendActionsStore.listen(() => {
+         this.setState({
+@@ -80,7 +87,13 @@ export class SendActionButton extends React.Component<
+     this._onSendWithAction(this.state.sendActions[0]);
+   };
+ 
++  hasConflict() {
++    return AppEnv.config.get('core.paperReed.enabled') &&
++      DraftStore._draftSessions[this.props.draft.headerMessageId]?.changes.saveError?.message === 'draft-conflict';
++  }
++
+   _onSendWithAction = (sendAction: ISendAction) => {
++    if (this.hasConflict()) return;
+     if (this.props.isValidDraft()) {
+       if (AppEnv.config.get('core.sending.sounds')) {
+         SoundRegistry.playSound('hit-send');
+@@ -115,6 +128,7 @@ export class SendActionButton extends React.Component<
+   };
+ 
+   render() {
++    if (this.hasConflict()) return <button className="btn-send" disabled style={{ order: -100 }}>先处理草稿更新</button>;
+     return (
+       <ButtonDropdown
+         className={'btn-send btn-emphasis btn-text'}
+diff --git a/app/internal_packages/message-list/lib/email-frame.tsx b/app/internal_packages/message-list/lib/email-frame.tsx
+index 3728d94..10edf8a 100644
+--- a/app/internal_packages/message-list/lib/email-frame.tsx
++++ b/app/internal_packages/message-list/lib/email-frame.tsx
+@@ -123,6 +123,11 @@ export default class EmailFrame extends React.Component<EmailFrameProps> {
+       const plainWrapper = doc.getElementById('inbox-plain-wrapper');
+       plainWrapper.innerText = content;
+       plainWrapper.setAttribute('role', 'document');
++      if (AppEnv.config.get('core.paperReed.enabled')) {
++        plainWrapper.style.fontFamily = '-apple-system, BlinkMacSystemFont, sans-serif';
++        plainWrapper.style.fontSize = '15px';
++        plainWrapper.style.lineHeight = '28px';
++      }
+     } else {
+       doc.write(
+         `<!DOCTYPE html>` +
+diff --git a/app/internal_packages/paper-reed/lib/draft-status.tsx b/app/internal_packages/paper-reed/lib/draft-status.tsx
+new file mode 100644
+index 0000000..5684011
+--- /dev/null
++++ b/app/internal_packages/paper-reed/lib/draft-status.tsx
+@@ -0,0 +1,69 @@
++import React from 'react';
++import { Actions, DraftEditingSession, Message } from 'mailspring-exports';
++import { saveDraftCopy, desktopAccess } from '../../../src/services/mail-core';
++
++export default class PaperReedDraftStatus extends React.Component<{ session: DraftEditingSession }> {
++  state = { busy: false, copyId: '', copySnapshot: '', notice: '' };
++  mounted = false;
++  componentDidMount() {
++    this.mounted = true;
++    this.props.session.changes.on('state', this.changed);
++  }
++  componentWillUnmount() {
++    this.mounted = false;
++    this.props.session.changes.removeListener('state', this.changed);
++  }
++  changed = () => this.forceUpdate();
++  save = async () => {
++    try { await this.props.session.changes.commit(); } catch { /* State stays visible below. */ }
++  };
++  copy = async () => {
++    if (this.state.busy) return;
++    const snapshot = JSON.stringify(this.props.session.draft().toJSON());
++    if (snapshot === this.state.copySnapshot) {
++      Actions.composePopoutDraft(this.state.copyId);
++      return;
++    }
++    this.setState({ busy: true, notice: '' });
++    try {
++      const source = new Message({}).fromJSON(JSON.parse(snapshot));
++      const copy = await saveDraftCopy(source, desktopAccess);
++      if (this.mounted) this.setState({ copyId: copy.headerMessageId, copySnapshot: snapshot,
++        notice: '副本已保存到本机。原草稿和这里的编辑仍保留。' });
++    } catch (error) {
++      if (this.mounted) this.setState({ notice: this.props.session.draft().files.length
++        ? '含附件的副本暂未支持。请保留此窗口，附件和编辑都还在。'
++        : '副本尚未保存，请重试。你的编辑仍保留在这里。' });
++    } finally {
++      if (this.mounted) this.setState({ busy: false });
++    }
++  };
++  reload = async () => {
++    this.setState({ busy: true });
++    try {
++      await this.props.session.reloadAfterCopy(this.state.copySnapshot);
++      if (this.mounted) this.setState({ notice: '已载入原草稿的最新版本，你的编辑已保存在副本中。' });
++    } catch {
++      if (this.mounted) this.setState({ notice: '尚未切换版本。请先为最新编辑另存副本，再重试。' });
++    } finally {
++      if (this.mounted) this.setState({ busy: false });
++    }
++  };
++  render() {
++    const { changes } = this.props.session;
++    const conflict = changes.saveError?.message === 'draft-conflict';
++    const label = changes.saving ? '正在保存…' : conflict ? '草稿有更新'
++      : changes.saveError ? '尚未保存，请重试' : changes.isDirty() ? '尚未保存' : '已保存到本机';
++    const currentCopy = this.state.copyId && this.state.copySnapshot === JSON.stringify(this.props.session.draft().toJSON());
++    return <div className={`pr-draft-status ${changes.saveError ? 'needs-attention' : ''}`}>
++      <div className="pr-status-line"><span role="status" aria-live="polite">{label}</span>
++        {conflict ? <button type="button" disabled={this.state.busy || changes.saving} onClick={this.copy}>
++          {this.state.busy ? '正在保存副本…' : currentCopy ? '打开副本' : '另存副本'}
++        </button> : changes.isDirty() && <button type="button" onClick={this.save} disabled={changes.saving}>立即保存</button>}
++      </div>
++      {conflict && currentCopy && <button type="button" className="pr-reload-original" onClick={this.reload} disabled={this.state.busy}>保留副本，载入最新原稿</button>}
++      {conflict && <p>其他窗口或 Agent 更新了这封草稿。你的编辑仍保留在这里。</p>}
++      {this.state.notice && <p role="status">{this.state.notice}{this.state.copyId && !currentCopy && changes.isDirty() ? ' 此后你又修改了内容，可以再存一份。' : ''}</p>}
++    </div>;
++  }
++}
+diff --git a/app/internal_packages/paper-reed/lib/main.tsx b/app/internal_packages/paper-reed/lib/main.tsx
+new file mode 100644
+index 0000000..23e31fc
+--- /dev/null
++++ b/app/internal_packages/paper-reed/lib/main.tsx
+@@ -0,0 +1,11 @@
++import { ComponentRegistry, WorkspaceStore } from 'mailspring-exports';
++import PaperReedWorkspace from './workspace';
++export function activate() {
++  if (!AppEnv.config.get('core.paperReed.enabled')) return;
++  document.body.classList.add('paper-reed-enabled');
++  if (AppEnv.isMainWindow()) ComponentRegistry.register(PaperReedWorkspace, { location: WorkspaceStore.Location.PaperReed });
++}
++export function deactivate() {
++  ComponentRegistry.unregister(PaperReedWorkspace);
++  document.body.classList.remove('paper-reed-enabled');
++}
+diff --git a/app/internal_packages/paper-reed/lib/workspace.tsx b/app/internal_packages/paper-reed/lib/workspace.tsx
+new file mode 100644
+index 0000000..d040f1b
+--- /dev/null
++++ b/app/internal_packages/paper-reed/lib/workspace.tsx
+@@ -0,0 +1,201 @@
++import React from 'react';
++import { clipboard } from '@electron/remote';
++import { AccountStore, Actions, CategoryStore, DatabaseStore, DraftStore, Message, Thread,
++  MailboxPerspective, WorkspaceStore } from 'mailspring-exports';
++import MessageList from '../../message-list/lib/message-list';
++import ComposerView from '../../composer/lib/composer-view';
++import InflatesDraftClientId from '../../../src/decorators/inflates-draft-client-id';
++import DraftFactory from '../../../src/flux/stores/draft-factory';
++
++const Composer = InflatesDraftClientId(ComposerView);
++const folders = [['inbox', '收件箱'], ['drafts', '草稿'], ['sent', '已发送'], ['spam', '垃圾邮件'], ['trash', '废纸篓']];
++const sendLabel = (op: { phase: string; sentCopy: string }) => op.phase === 'accepted' ? `服务器已接受 · ${op.sentCopy === 'filed' ? '副本已归档' : '副本尚未归档'}` : op.phase === 'unknown' ? '发送结果待确认，请检查邮箱，勿重复发送' : op.phase === 'rejected' ? '未发送，请检查草稿' : '正在发送';
++const colors = ['#688177', '#a18265', '#78849a', '#957789'];
++
++interface State {
++  folder: string; accountId: string; route: 'list' | 'thread' | 'compose';
++  rows: (Thread | Message)[]; selected: Thread | Message | null;
++  snippets: Record<string, string>; loading: boolean; limit: number; more: boolean; notice: string; agent: boolean;
++  copied: boolean; operations: { accountId: string; requestId: string; phase: string; sentCopy: string; subject: string }[];
++}
++let lastLocation: Pick<State, 'folder' | 'accountId' | 'route' | 'selected'> | undefined;
++
++export default class PaperReedWorkspace extends React.Component<Record<string, never>, State> {
++  static displayName = 'PaperReedWorkspace';
++  static containerStyles = { minWidth: 700, flex: 1 };
++  state: State = { folder: 'inbox', accountId: '', route: 'list', rows: [], selected: null,
++    snippets: {}, loading: true, limit: 50, more: false, notice: '', agent: false, copied: false, operations: [], ...lastLocation };
++  unlisten: (() => void)[] = [];
++  generation = 0;
++  mounted = false;
++  refreshTimer: ReturnType<typeof setTimeout>;
++  operationTimer: ReturnType<typeof setInterval>;
++  moving = false;
++  componentDidMount() {
++    this.mounted = true;
++    this.unlisten = [DatabaseStore.listen(this.scheduleRefresh), CategoryStore.listen(this.scheduleRefresh),
++      AccountStore.listen(this.scheduleRefresh), WorkspaceStore.setSectionLeaveGuard(() => {
++        if (!this.dirtySessions().length) return true;
++        this.setState({ notice: '请先保存当前编辑，再离开邮件。' });
++        return false;
++      })];
++    this.unlisten.push(DraftStore.listen(() => this.forceUpdate()));
++    this.unlisten.push(Actions.draftDeliverySucceeded.listen(({ headerMessageId }) => {
++      if (this.state.route === 'compose' && this.state.selected instanceof Message && this.state.selected.headerMessageId === headerMessageId) {
++        this.setState({ route: 'list', folder: 'sent', selected: null, rows: [], loading: true }, this.refresh);
++      }
++      this.refreshOperations();
++    }));
++    this.refresh();
++    this.operationTimer = setInterval(this.refreshOperations, 2000);
++    this.refreshOperations();
++  }
++  componentWillUnmount() {
++    const { folder, accountId, route, selected } = this.state;
++    lastLocation = { folder, accountId, route, selected };
++    this.mounted = false; this.generation++;
++    this.unlisten.forEach(fn => fn());
++    clearTimeout(this.refreshTimer); clearInterval(this.operationTimer);
++  }
++  accountIds = () => this.state.accountId ? [this.state.accountId] : AccountStore.accountIds();
++  dirtySessions = () => Object.values(DraftStore._draftSessions).filter(s => !s._destroyed && s.changes.isDirty());
++  scheduleRefresh = () => {
++    clearTimeout(this.refreshTimer);
++    this.refreshTimer = setTimeout(this.refresh, 100);
++  };
++  refresh = async () => {
++    const generation = ++this.generation;
++    const { folder, limit } = this.state;
++    const ids = this.accountIds();
++    try {
++      let rows: (Thread | Message)[] = [];
++      if (folder === 'drafts') {
++        rows = await DatabaseStore.findAll<Message>(Message).where({ draft: true })
++          .where(Message.attributes.accountId.in(ids)).order(Message.attributes.date.descending()).limit(limit + 1);
++      } else {
++        const categories = CategoryStore.getCategoriesWithRoles(ids, folder);
++        if (categories.length) rows = await DatabaseStore.findAll<Thread>(Thread)
++          .where(Thread.attributes.categories.containsAny(categories.map(c => c.id)))
++          .order((folder === 'sent' ? Thread.attributes.lastMessageSentTimestamp : Thread.attributes.lastMessageReceivedTimestamp).descending())
++          .distinct().limit(limit + 1);
++      }
++      const snippets: Record<string, string> = {};
++      if (folder !== 'drafts') await Promise.all(rows.slice(0, limit).map(async row => {
++        const messages = await DatabaseStore.findAll<Message>(Message).where({ threadId: row.id, draft: false })
++          .order(Message.attributes.date.descending()).limit(1);
++        snippets[row.id] = messages[0]?.snippet || '';
++      }));
++      if (this.mounted && generation === this.generation) this.setState({ rows: rows.slice(0, limit), snippets, more: rows.length > limit, loading: false });
++    } catch {
++      if (this.mounted && generation === this.generation) this.setState({ loading: false, notice: '邮件暂时无法读取，请重试。' });
++    }
++  };
++  refreshOperations = async () => {
++    try {
++      const rows = await DatabaseStore._query('SELECT accountId, requestId, phase, sentCopy, payload FROM PaperReedSend ORDER BY rowid DESC LIMIT 10');
++      const ids = this.accountIds();
++      if (this.mounted) this.setState({ operations: rows.filter(r => ids.includes(r.accountId)).map(r => ({
++        accountId: r.accountId, requestId: r.requestId, phase: r.phase, sentCopy: r.sentCopy,
++        subject: JSON.parse(r.payload).draft.subject || '无主题',
++      })) });
++    } catch { /* Ledger may not yet exist before the engine opens the fixture. */ }
++  };
++  move = async (next: () => void | Promise<void>) => {
++    if (this.moving) return;
++    this.moving = true;
++    try {
++      for (const session of this.dirtySessions()) await session.changes.commit();
++      if (this.dirtySessions().length) {
++        this.setState({ notice: '保存期间又有新编辑，请完成编辑后再切换。' });
++        return;
++      }
++      this.setState({ notice: '', agent: false, copied: false });
++      await next();
++    } catch (error) {
++      console.error('Paper Reed action failed', error);
++      this.setState({ notice: '当前编辑尚未保存。请在编辑区处理后再切换。' });
++    } finally { this.moving = false; }
++  };
++  navigate = (folder: string, accountId = this.state.accountId) => this.move(() => {
++    Actions.setFocus({ collection: 'thread', item: null });
++    this.setState({ folder, accountId, route: 'list', selected: null, rows: [], loading: true, limit: 50 }, this.refresh);
++  });
++  open = (row: Thread | Message) => this.move(() => {
++    if (row instanceof Message) this.setState({ route: 'compose', selected: row });
++    else {
++      Actions.focusMailboxPerspective(MailboxPerspective.forStandardCategories(this.accountIds(), this.state.folder));
++      Actions.setFocus({ collection: 'thread', item: row });
++      this.setState({ route: 'thread', selected: row });
++    }
++  });
++  compose = () => this.move(async () => {
++    const account = AccountStore.accountForId(this.state.accountId) || AccountStore.accounts()[0];
++    if (!account) { this.setState({ notice: '请先在设置中连接邮箱。' }); return; }
++    const draft = await DraftFactory.createDraft({ accountId: account.id, from: [account.defaultMe()] });
++    await DraftStore._finalizeAndPersistNewMessage(draft);
++    this.setState({ route: 'compose', selected: draft });
++  });
++  copyContext = () => this.move(async () => {
++    const { selected, route, folder } = this.state;
++    let context: Record<string, unknown> = { scope: 'mailbox', accountIds: this.accountIds(), mailbox: folder };
++    if (route === 'compose' && selected instanceof Message) {
++      const session = await DraftStore.sessionForClientId(selected.headerMessageId);
++      context = { scope: 'draft', accountId: session.draft().accountId, draftId: session.headerMessageId, revision: session.draft().version };
++    } else if (route === 'thread' && selected) context = { scope: 'thread', accountId: selected.accountId, threadId: selected.id };
++    await clipboard.writeText(JSON.stringify({ product: 'Paper Reed', task: '请先阅读这份上下文。发送邮件前请向我确认。', context }, null, 2));
++    this.setState({ agent: true, copied: true });
++  });
++  preferences = () => this.move(() => { Actions.openPreferences(); });
++  agentPreferences = () => this.move(() => { Actions.switchPreferencesTab('MCP'); Actions.openPreferences(); });
++  renderRow = (row: Thread | Message) => {
++    const draft = row instanceof Message;
++    const contacts = draft ? row.to : row.participants;
++    const person = contacts?.find(c => c.email !== AccountStore.accountForId(row.accountId)?.emailAddress) || contacts?.[0];
++    const name = person?.displayName() || (draft ? '未填写收件人' : '未知发件人');
++    const date = draft ? row.date : row.lastMessageReceivedTimestamp;
++    const color = this.state.accountId ? '#c6cbc2' : colors[Math.max(0, AccountStore.accountIds().indexOf(row.accountId)) % colors.length];
++    return <button type="button" className={`pr-mail-row ${row.unread ? 'unread' : ''}`} key={row.id}
++      onClick={() => this.open(row)} aria-label={`${row.unread ? '未读，' : ''}${name}，${row.subject || '无主题'}`}>
++      <span className="pr-avatar" style={{ borderColor: color }} title={AccountStore.accountForId(row.accountId)?.emailAddress}><span>{Array.from(name)[0]}</span></span>
++      <span className="pr-sender">{name}</span>
++      <span className="pr-summary"><span className="pr-subject">{row.subject || '无主题'}</span><span className="pr-snippet">{this.state.snippets[row.id] || row.snippet || (draft ? '继续编辑这封草稿' : '')}</span></span>
++      <span className="pr-date">{row.unread && <span className="pr-unread" aria-hidden="true"/>}{date ? date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : ''}</span>
++    </button>;
++  };
++  render() {
++    const { route, folder, selected, rows, loading, agent } = this.state;
++    const title = route === 'compose' ? '写一封信' : folders.find(f => f[0] === folder)?.[1];
++    return <div className="pr-workspace">
++      <header className="pr-titlebar"><span className="pr-brand">Paper Reed</span><span className="pr-build-label">邮件工作台 · 实验版</span></header>
++      <div className="pr-layout"><aside className="pr-sidebar" aria-label="邮箱导航">
++        <button className="pr-compose-button" onClick={this.compose}>写邮件 <span>＋</span></button>
++        <label className="pr-account-label" htmlFor="pr-account">邮箱范围</label>
++        <select id="pr-account" value={this.state.accountId} onChange={e => this.navigate(folder, e.target.value)}>
++          <option value="">全部邮箱</option>{AccountStore.accounts().map(a => <option key={a.id} value={a.id}>{a.emailAddress}</option>)}
++        </select>
++        <nav>{folders.map(([id, label]) => <button key={id} data-mailbox={id} aria-current={folder === id ? 'page' : undefined} onClick={() => this.navigate(id)}>{label}</button>)}</nav>
++        <div className="pr-sidebar-bottom"><button onClick={this.preferences}>设置</button></div>
++      </aside><main className={`pr-main pr-route-${route}`}>
++        <div className="pr-page-head">
++          {route === 'list' ? <h1>{title}</h1> : <button className="pr-back" onClick={() => this.navigate(folder)}>‹ 返回{folders.find(f => f[0] === folder)?.[1]}</button>}
++          <button className="pr-agent-button" onClick={() => this.setState({ agent: !agent, copied: false })}>连接 Agent ↗</button>
++        </div>
++        {this.state.notice && <div className="pr-notice" role="alert">{this.state.notice}<button onClick={this.refresh}>重新读取</button></div>}
++        {agent && <section className="pr-agent-panel" aria-label="Agent 交接">
++          <strong>带上当前上下文</strong><p>先复制邮件或草稿引用，再到已配置的 Agent 中粘贴。复制前会保存当前编辑。</p>
++          <div><button onClick={this.copyContext}>{this.state.copied ? '已复制上下文' : '复制上下文'}</button><button onClick={this.agentPreferences}>打开连接设置</button></div>
++          <small>实验 CLI 尚未提供一键安装；这里不会自动启动 Agent 或发送邮件。</small>
++        </section>}
++        {route === 'list' ? <>
++          <p className="pr-list-caption">{this.state.accountId ? AccountStore.accountForId(this.state.accountId)?.emailAddress : '所有已连接邮箱'}<span>{rows.length}{this.state.more ? '+' : ''} 个{folder === 'drafts' ? '草稿' : '会话'}</span></p>
++          <div className="pr-mail-list" aria-label={title}>{rows.map(this.renderRow)}
++            {!rows.length && <p className="pr-empty">{loading ? '正在读取邮件…' : '这里还没有邮件'}</p>}
++            {this.state.more && <button className="pr-load-more" onClick={() => this.setState({ limit: this.state.limit + 50 }, this.refresh)}>加载更多</button>}
++          </div>
++        </> : route === 'thread' ? <div className="pr-reader"><MessageList /></div>
++          : selected instanceof Message && <div className="pr-editor"><h1>写一封信</h1>{DraftStore.isSendingDraft(selected.headerMessageId) ? <p role="status">正在发送，请等待服务器确认…</p> : <Composer headerMessageId={selected.headerMessageId} onDraftReady={() => {}} />}</div>}
++        {!!this.state.operations.length && <details className="pr-send-results"><summary>最近发送 · {sendLabel(this.state.operations[0])}</summary>{this.state.operations.map(op => <p key={op.requestId}><span>{op.subject}</span><strong>{sendLabel(op)}</strong></p>)}</details>}
++      </main></div>
++    </div>;
++  }
++}
+diff --git a/app/internal_packages/paper-reed/package.json b/app/internal_packages/paper-reed/package.json
+new file mode 100644
+index 0000000..ae2acd4
+--- /dev/null
++++ b/app/internal_packages/paper-reed/package.json
+@@ -0,0 +1 @@
++{"name":"paper-reed","version":"0.1.0","main":"./lib/main","license":"GPL-3.0","private":true,"syncInit":true,"engines":{"mailspring":"*"},"windowTypes":{"default":true,"composer":true,"thread-popout":true}}
+diff --git a/app/internal_packages/paper-reed/styles/paper-reed.less b/app/internal_packages/paper-reed/styles/paper-reed.less
+new file mode 100644
+index 0000000..2ceae4f
+--- /dev/null
++++ b/app/internal_packages/paper-reed/styles/paper-reed.less
+@@ -0,0 +1,107 @@
++.paper-reed-enabled {
++  --pr-paper: #faf9f6;
++  --pr-inset: #f2f1eb;
++  --pr-ink: #303730;
++  --pr-muted: #626b60;
++  --pr-reed: #4b634f;
++  --pr-line: rgba(63, 75, 60, .13);
++  .pr-workspace { height: 100%; display: flex; flex-direction: column; color: var(--pr-ink); background: var(--pr-paper); font: 13px/20px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif; }
++  .pr-workspace button, .pr-draft-status button { font: inherit; cursor: pointer; color: inherit; border: 0; background: transparent; border-radius: 5px; padding: 6px 10px; }
++  .pr-workspace button:hover, .pr-draft-status button:hover { background: var(--pr-inset); }
++  .pr-workspace button:focus-visible, .pr-workspace select:focus-visible, .pr-draft-status button:focus-visible { outline: 2px solid var(--pr-reed); outline-offset: 2px; }
++  .pr-workspace button:disabled, .pr-draft-status button:disabled { opacity: .5; cursor: wait; }
++  .pr-titlebar { height: 64px; flex-shrink: 0; display: flex; align-items: center; gap: 20px; padding: 0 36px 0 100px; -webkit-app-region: drag; border-bottom: 1px solid var(--pr-line); }
++  .pr-brand { font: 22px/32px 'Iowan Old Style', Palatino, Georgia, serif; letter-spacing: -.4px; }
++  .pr-build-label { margin-left: auto; color: var(--pr-muted); font-size: 11px; }
++  .pr-layout { display: flex; flex: 1; min-height: 0; }
++  .pr-sidebar { display: flex; flex-direction: column; width: 168px; flex-shrink: 0; padding: 24px 16px 20px; border-right: 1px solid var(--pr-line); }
++  .pr-sidebar .pr-compose-button { background: var(--pr-reed); color: #fffefa; display: flex; justify-content: space-between; margin-bottom: 28px; padding: 8px 12px; }
++  .pr-account-label { color: var(--pr-muted); font-size: 11px; margin: 0 8px 5px; }
++  .pr-sidebar select { width: 100%; min-width: 0; border: 0; border-radius: 4px; padding: 7px 4px; background: transparent; color: var(--pr-ink); font: inherit; margin-bottom: 24px; }
++  .pr-sidebar nav { display: flex; flex-direction: column; gap: 5px; }
++  .pr-sidebar nav button { text-align: left; padding: 8px 12px; }
++  .pr-sidebar nav button[aria-current] { color: var(--pr-reed); background: #e9eee5; font-weight: 600; }
++  .pr-sidebar-bottom { margin-top: auto; padding-top: 24px; display: flex; flex-direction: column; align-items: flex-start; gap: 8px; }
++  .pr-sidebar-bottom span { font-size: 11px; color: var(--pr-muted); padding-left: 10px; }
++  .pr-main { flex: 1; min-width: 0; padding: 24px 36px; overflow: auto; }
++  .pr-page-head { display: flex; align-items: center; justify-content: space-between; gap: 16px; margin-bottom: 8px; }
++  .pr-main h1 { margin: 0; font: 500 26px/38px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif; letter-spacing: -.4px; }
++  .pr-page-head .pr-agent-button { color: var(--pr-muted); font-size: 12px; }
++  .pr-page-head .pr-back { padding-left: 0; color: var(--pr-muted); }
++  .pr-list-caption { display: flex; justify-content: space-between; color: var(--pr-muted); font-size: 12px; margin: 0 0 24px; }
++  .pr-mail-list { border-top: 1px solid var(--pr-line); }
++  .pr-workspace .pr-mail-row { width: 100%; display: grid; grid-template-columns: 32px 148px minmax(0, 1fr) 78px; align-items: center; gap: 12px; min-height: 68px; padding: 12px 0; border-bottom: 1px solid var(--pr-line); border-radius: 0; text-align: left; }
++  .pr-avatar { width: 32px; height: 32px; border: 1.5px solid; border-radius: 50%; padding: 3px; box-sizing: border-box; }
++  .pr-avatar > span { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: var(--pr-inset); border-radius: 50%; color: var(--pr-muted); font-size: 11px; }
++  .pr-sender { align-self: start; padding-top: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++  .pr-summary { min-width: 0; display: flex; flex-direction: column; }
++  .pr-subject, .pr-snippet { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
++  .pr-snippet { font-size: 12px; color: var(--pr-muted); margin-top: 4px; }
++  .pr-date { align-self: start; text-align: right; color: var(--pr-muted); font-size: 11px; white-space: nowrap; }
++  .pr-unread { display: inline-block; width: 5px; height: 5px; background: var(--pr-reed); border-radius: 50%; margin-right: 7px; vertical-align: middle; }
++  .unread .pr-sender, .unread .pr-subject { font-weight: 600; }
++  .pr-empty { margin: 72px 0; text-align: center; color: var(--pr-muted); }
++  .pr-load-more { display: block; margin: 20px auto; }
++  .pr-notice, .pr-agent-panel { border-left: 2px solid var(--pr-reed); padding: 12px 16px; background: var(--pr-inset); margin: 12px 0 20px; }
++  .pr-notice button { margin-left: 12px; }
++  .pr-agent-panel strong { font-weight: 500; }
++  .pr-agent-panel p { margin: 6px 0 8px; color: var(--pr-muted); }
++  .pr-agent-panel small { display: block; margin-top: 8px; color: var(--pr-muted); }
++  .pr-editor, .pr-reader { max-width: 640px; margin: 28px auto 0; }
++  .pr-editor h1 { margin-bottom: 24px; }
++  .pr-reader { min-height: 400px; }
++  .pr-reader #message-list { height: auto; min-height: 400px; background: transparent; }
++  .pr-reader #message-list .messages-wrap { position: static; overflow: visible; height: auto; padding: 0; background: transparent; }
++  .pr-reader #message-list .message-item-wrap { padding: 0; margin-bottom: 24px; }
++  .pr-reader #message-list .message-item-white-wrap { background: transparent; border: none; box-shadow: none; }
++  .pr-reader .message-subject { font-size: 26px; line-height: 38px; }
++  .pr-reader .message-list .message-list-subject { padding: 0 0 20px; }
++  .pr-editor .composer-outer-wrap, .pr-reader .composer-outer-wrap { border: 0; box-shadow: none; background: transparent; }
++  .pr-editor .composer-inner-wrap, .pr-editor .composer-content-wrap { height: auto; }
++  .pr-editor .composer-centered, .pr-reader .composer-centered { padding: 0; max-width: 640px; }
++  .pr-editor .composer-body-wrap, .pr-reader .composer-body-wrap { min-height: 220px; }
++  .pr-editor .composer-action-bar-wrap, .pr-reader .composer-action-bar-wrap { background: transparent; border-top: 1px solid var(--pr-line); padding: 12px 0; }
++  .pr-editor .composer-header, .pr-reader .composer-header { padding-left: 0; padding-right: 0; }
++  .pr-editor .contenteditable, .pr-reader .contenteditable { font-size: 15px; line-height: 28px; }
++  .pr-draft-status { max-width: 640px; margin: 0 auto 16px; padding: 8px 0; font: 12px/20px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif; color: var(--pr-muted); border-bottom: 1px solid var(--pr-line); }
++  .pr-status-line { display: flex; align-items: center; justify-content: space-between; min-height: 32px; }
++  .pr-draft-status p { margin: 4px 0; }
++  .pr-draft-status.needs-attention { color: #795e3a; }
++  .pr-send-results { margin-top: 32px; border-top: 1px solid var(--pr-line); padding: 12px 0; color: var(--pr-muted); font-size: 12px; }
++  .pr-send-results summary { cursor: pointer; }
++  .pr-send-results p { display: flex; gap: 20px; justify-content: space-between; }
++  .pr-send-results strong { font-weight: 400; }
++  @media (min-width: 1400px) { .pr-sidebar { width: 188px; } .pr-main { padding: 24px 48px; } }
++  @media (max-width: 1000px) {
++    .pr-sidebar { width: 144px; padding-left: 12px; padding-right: 12px; }
++    .pr-main { padding-left: 24px; padding-right: 24px; }
++    .pr-workspace .pr-mail-row { grid-template-columns: 32px minmax(0, 1fr) 70px; gap: 0 12px; min-height: 88px; padding: 10px 0; }
++    .pr-avatar { grid-row: ~"1 / 3"; }
++    .pr-sender { grid-column: 2; }
++    .pr-date { grid-column: 3; grid-row: 1; }
++    .pr-summary { grid-column: ~"2 / 4"; grid-row: 2; }
++  }
++}
++.paper-reed-enabled {
++  .pr-reader #message-list .message-subject-wrap { padding: 0; margin: 0 0 24px; align-items: flex-start; }
++  .pr-reader #message-list .message-subject { font-size: 26px; line-height: 38px; color: var(--pr-ink); }
++  .pr-reader #message-list .messages-wrap > .scroll-region-content { position: relative; height: auto; overflow: visible; }
++  .pr-reader #message-list .messages-wrap .scroll-region-content-inner { padding: 0; transform: none; }
++  .pr-reader #message-list .messages-wrap > .scrollbar-track { display: none; }
++  .pr-reader #message-list .message-item-wrap .message-item-white-wrap.composer-outer-wrap { background: transparent; box-shadow: none; border: 0; }
++  .pr-reader #message-list .composer-inner-wrap, .pr-reader #message-list .composer-content-wrap { height: auto; }
++  .pr-reader #message-list .message-item-wrap .composer-outer-wrap .composer-action-bar-wrap { background: transparent; box-shadow: none; }
++  .pr-reader #message-list .footer-reply-area { background: var(--pr-inset); box-shadow: none; border: none; border-radius: 5px; }
++  .pr-reader #message-list .message-icons-wrap { display: none; }
++  .pr-editor .RichEditor-root, .pr-reader #message-list .RichEditor-root { padding-left: 0; padding-right: 0; }
++  .pr-editor [contenteditable], .pr-reader #message-list [contenteditable] { font-size: 15px; line-height: 28px; }
++  .pr-editor .composer-header .composer-fields, .pr-reader #message-list .composer-header .composer-fields { padding-left: 0; padding-right: 0; }
++  .pr-editor .btn-send, .pr-reader #message-list .btn-send { background: var(--pr-reed); border-color: var(--pr-reed); box-shadow: none; text-shadow: none; color: #fffefa; }
++  .pr-editor .btn-send .primary-item, .pr-reader #message-list .btn-send .primary-item { background: transparent; }
++}
++.paper-reed-enabled {
++  .pr-draft-status { width: 100%; box-sizing: border-box; }
++  .pr-reader #message-list .message-item-area { padding-left: 0; padding-right: 0; }
++  .pr-reader #message-list .message-header { padding-left: 0; padding-right: 0; }
++  .pr-editor .btn-send .secondary-picker, .pr-reader #message-list .btn-send .secondary-picker { background: var(--pr-reed); border-color: rgba(255,255,255,.25); box-shadow: none; }
++}
+diff --git a/app/src/decorators/inflates-draft-client-id.tsx b/app/src/decorators/inflates-draft-client-id.tsx
+index 6bec33a..8058091 100644
+--- a/app/src/decorators/inflates-draft-client-id.tsx
++++ b/app/src/decorators/inflates-draft-client-id.tsx
+@@ -96,7 +96,9 @@ function InflatesDraftClientId(
+ 
+     _teardownForDraft() {
+       if (this.state.session) {
+-        this.state.session.changes.commit();
++        this.state.session.changes.commit().catch((error) => {
++          if (!AppEnv.config.get('core.paperReed.enabled')) AppEnv.showErrorDialog(error.message);
++        });
+       }
+       if (this._sessionUnlisten) {
+         this._sessionUnlisten();
+diff --git a/app/src/flux/stores/draft-change-set.ts b/app/src/flux/stores/draft-change-set.ts
+index 6cec48b..1d95556 100644
+--- a/app/src/flux/stores/draft-change-set.ts
++++ b/app/src/flux/stores/draft-change-set.ts
+@@ -19,6 +19,8 @@ export class DraftChangeSet extends EventEmitter {
+     onAddChanges: null,
+     onCommit: null,
+   };
++  saveError: Error | null = null;
++  saving = false;
+   _timer = null;
+   _timerTime = null;
+   _timerStarted = null;
+@@ -58,6 +60,7 @@ export class DraftChangeSet extends EventEmitter {
+     }
+ 
+     this.callbacks.onAddChanges(changes);
++    this.emit('state');
+   }
+ 
+   addPluginMetadata(pluginId: string, metadata: unknown) {
+@@ -66,6 +69,15 @@ export class DraftChangeSet extends EventEmitter {
+     this.debounceCommit();
+   }
+ 
++  resetAfterReload() {
++    if (this.saving) throw new Error('draft-save-in-progress');
++    this.clearDelayedCommit();
++    this._lastModifiedTimes = {};
++    this._lastCommitTime = 0;
++    this.saveError = null;
++    this.emit('state');
++  }
++
+   isDirty() {
+     return this.dirtyFields().length > 0;
+   }
+@@ -88,7 +100,9 @@ export class DraftChangeSet extends EventEmitter {
+     this.clearDelayedCommit();
+     this._timerStarted = now;
+     this._timer = setTimeout(() => {
+-      this.commit().catch((error) => AppEnv.showErrorDialog(error.message));
++      this.commit().catch((error) => {
++        if (!AppEnv.config.get('core.paperReed.enabled')) AppEnv.showErrorDialog(error.message);
++      });
+     }, SaveAfterIdleMSec);
+   }
+ 
+@@ -107,12 +121,20 @@ export class DraftChangeSet extends EventEmitter {
+     if (this.dirtyFields().length > 0) {
+       this.clearDelayedCommit();
+       const committedThrough = performance.now();
++      this.saving = true;
++      this.emit('state');
+       this._commitPromise = Promise.resolve().then(() => this.callbacks.onCommit());
+       try {
+         await this._commitPromise;
+         this._lastCommitTime = committedThrough;
++        this.saveError = null;
++      } catch (error) {
++        this.saveError = error;
++        throw error;
+       } finally {
+         this._commitPromise = null;
++        this.saving = false;
++        this.emit('state');
+       }
+     }
+   }
+diff --git a/app/src/flux/stores/draft-editing-session.ts b/app/src/flux/stores/draft-editing-session.ts
+index 332120f..287055d 100644
+--- a/app/src/flux/stores/draft-editing-session.ts
++++ b/app/src/flux/stores/draft-editing-session.ts
+@@ -1,4 +1,4 @@
+-import { saveDraft, desktopAccess } from '../../services/mail-core';
++import { saveDraft, getDraft, desktopAccess } from '../../services/mail-core';
+ import * as Immutable from 'immutable';
+ import MailspringStore from 'mailspring-store';
+ import { Editor, Value, Block, Text } from 'slate';
+@@ -258,6 +258,16 @@ export class DraftEditingSession extends MailspringStore {
+     this._mountedEditor = null;
+   }
+ 
++  async reloadAfterCopy(expectedSnapshot: string) {
++    const unchanged = () => JSON.stringify(this._draft.toJSON()) === expectedSnapshot;
++    if (this.changes.saving || !unchanged()) throw new Error('draft-edited-after-copy');
++    const latest = await getDraft({ accountId: this._draft.accountId, draftId: this.headerMessageId }, desktopAccess);
++    if (this.changes.saving || !unchanged()) throw new Error('draft-edited-after-copy');
++    this._draft = hotwireDraftBodyState(latest, this);
++    this.changes.resetAfterReload();
++    this.trigger();
++  }
++
+   setMountedEditor(editor: Editor | null) {
+     this._mountedEditor = editor;
+   }
+diff --git a/app/src/flux/stores/signature-store.ts b/app/src/flux/stores/signature-store.ts
+index 6cf0e1c..51055c6 100644
+--- a/app/src/flux/stores/signature-store.ts
++++ b/app/src/flux/stores/signature-store.ts
+@@ -38,6 +38,7 @@ class _SignatureStore extends MailspringStore {
+ 
+     // If the user has no signatures (after a clean install or upgrade from 1.0.9),
+     // create a default one for them and apply it to all their accounts.
++    if (!this.signatures && AppEnv.config.get('core.paperReed.enabled')) this.signatures = {};
+     if (!this.signatures) {
+       const sentFrom = localized('Sent from Mailspring, the best free email app for work');
+       this.signatures = {
+diff --git a/app/src/flux/stores/workspace-store.ts b/app/src/flux/stores/workspace-store.ts
+index 5fdbb22..0c88c40 100644
+--- a/app/src/flux/stores/workspace-store.ts
++++ b/app/src/flux/stores/workspace-store.ts
+@@ -122,13 +122,14 @@ class WorkspaceStore extends MailspringStore {
+ 
+     if (AppEnv.isMainWindow()) {
+       this.defineSheet('Global');
++      for (const location of ['RootSidebar', 'ThreadList', 'MessageList', 'MessageListSidebar']) this.defineLocation(location);
+       this.defineSheet(
+         'Threads',
+         { root: true },
+         {
+-          list: ['RootSidebar', 'ThreadList'],
+-          split: ['RootSidebar', 'ThreadList', 'MessageList', 'MessageListSidebar'],
+-          splitVertical: ['RootSidebar', 'ThreadList', 'MessageListSidebar'],
++          list: AppEnv.config.get('core.paperReed.enabled') ? ['PaperReed'] : ['RootSidebar', 'ThreadList'],
++          split: AppEnv.config.get('core.paperReed.enabled') ? ['PaperReed'] : ['RootSidebar', 'ThreadList', 'MessageList', 'MessageListSidebar'],
++          splitVertical: AppEnv.config.get('core.paperReed.enabled') ? ['PaperReed'] : ['RootSidebar', 'ThreadList', 'MessageListSidebar'],
+         }
+       );
+       this.defineSheet('Thread', {}, { list: ['MessageList', 'MessageListSidebar'] });
+@@ -205,7 +206,7 @@ class WorkspaceStore extends MailspringStore {
+ 
+   _onSetFocus = ({ collection, item }) => {
+     if (collection === 'thread') {
+-      if (this.layoutMode() === 'list') {
++      if (this.layoutMode() === 'list' && !AppEnv.config.get('core.paperReed.enabled')) {
+         if (item && this.topSheet() !== Sheet.Thread) {
+           this.pushSheet(Sheet.Thread);
+         }
+diff --git a/app/src/sheet-container.tsx b/app/src/sheet-container.tsx
+index fd71b4e..083fa27 100644
+--- a/app/src/sheet-container.tsx
++++ b/app/src/sheet-container.tsx
+@@ -157,7 +157,8 @@ export default class SheetContainer extends React.Component<
+   render() {
+     const totalSheets = this.state.stack.length;
+     const topSheet = this.state.stack[totalSheets - 1];
+-    const hasNavRail = AppEnv.isMainWindow();
++    const paperReed = AppEnv.config.get('core.paperReed.enabled') && topSheet?.id === 'Threads';
++    const hasNavRail = AppEnv.isMainWindow() && !paperReed;
+ 
+     if (!topSheet) {
+       return <div />;
+@@ -178,7 +179,7 @@ export default class SheetContainer extends React.Component<
+         className={`layout-mode-${this.state.mode}`}
+         style={{ overflow: 'hidden' }}
+       >
+-        {this._toolbarContainerElement()}
++        {!paperReed && this._toolbarContainerElement()}
+ 
+         <Flexbox
+           direction="row"

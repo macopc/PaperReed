@@ -1,0 +1,19 @@
+{
+  "realInboxThreads": 8,
+  "compactSubjectWidth": 664,
+  "readingAndReply": true,
+  "readerWidth": 640,
+  "editorWidth": 640,
+  "conflictingSendDisabled": true,
+  "cliDraftOpened": true,
+  "conflictVisible": true,
+  "navigationBlocked": true,
+  "recoveryPreservesBoth": true,
+  "newEditsRequireFreshCopy": true,
+  "explicitReload": true,
+  "contextUsesSavedRevision": true,
+  "settingsReturnToDraft": true,
+  "sentResultVisible": true,
+  "expectedSMTPSubmissions": 1,
+  "observedSMTPSubmissions": 1
+}
