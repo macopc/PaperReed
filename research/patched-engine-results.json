@@ -1,0 +1,110 @@
+{
+  "date": "2026-11-16",
+  "engine_source_commit": "8681eae1d217d993e4d4dc7de17ae8b91fc3da49",
+  "desktop_source_commit": "535f13dd463536f36728bce3efb4ae0d51ab3f19",
+  "architecture": "arm64",
+  "build": "Xcode 26.6 (17F113), Release, ad-hoc signing",
+  "source_built": true,
+  "network": "loopback only; fake IMAP/SMTP; no real mailbox",
+  "native_patch_sha256": "939d6079de819f36ae5568e6760a39a4c8e410bfa0264848b87865425f7e943e",
+  "cases": [
+    {
+      "case": "stale-draft",
+      "mode": "regression",
+      "binary_sha256": "0209cb33ad90b19b7f5a7dd1a2d63bb128a103bab5d27b4e328cbbd1f4901b4c",
+      "observation_reproduced": false,
+      "paper_reed_contract_met": true,
+      "original_revision": 1,
+      "user_revision": 3,
+      "final_revision": 3,
+      "stale_write_accepted": false,
+      "user_edit_replaced": false
+    },
+    {
+      "case": "duplicate-send",
+      "mode": "regression",
+      "binary_sha256": "0209cb33ad90b19b7f5a7dd1a2d63bb128a103bab5d27b4e328cbbd1f4901b4c",
+      "observation_reproduced": false,
+      "paper_reed_contract_met": true,
+      "distinct_task_ids": 2,
+      "smtp_submissions": 1,
+      "same_message_id": false
+    },
+    {
+      "case": "crash-before-data",
+      "mode": "regression",
+      "binary_sha256": "0209cb33ad90b19b7f5a7dd1a2d63bb128a103bab5d27b4e328cbbd1f4901b4c",
+      "observation_reproduced": false,
+      "paper_reed_contract_met": true,
+      "killed_with": "SIGKILL",
+      "smtp_before_restart": 0,
+      "smtp_after_restart": 0,
+      "restored_status": "complete",
+      "restored_error": {
+        "debuginfo": "Delivery was not confirmed. This operation will not be resent.",
+        "key": "send-unknown",
+        "offline": false,
+        "retryable": false,
+        "what": "std::exception"
+      },
+      "automatic_resend": false
+    },
+    {
+      "case": "crash-after-data",
+      "mode": "regression",
+      "binary_sha256": "0209cb33ad90b19b7f5a7dd1a2d63bb128a103bab5d27b4e328cbbd1f4901b4c",
+      "observation_reproduced": false,
+      "paper_reed_contract_met": true,
+      "killed_with": "SIGKILL",
+      "smtp_before_restart": 1,
+      "smtp_after_restart": 1,
+      "restored_status": "complete",
+      "restored_error": {
+        "debuginfo": "Delivery was not confirmed. This operation will not be resent.",
+        "key": "send-unknown",
+        "offline": false,
+        "retryable": false,
+        "what": "std::exception"
+      },
+      "automatic_resend": false
+    },
+    {
+      "case": "accepted-before-copy",
+      "mode": "regression",
+      "binary_sha256": "0209cb33ad90b19b7f5a7dd1a2d63bb128a103bab5d27b4e328cbbd1f4901b4c",
+      "observation_reproduced": false,
+      "paper_reed_contract_met": true,
+      "send_outcome": "accepted",
+      "sent_copy": "pending",
+      "smtp_after_restart": 1,
+      "duplicate_after_restart_rejected": true,
+      "killed_with": "SIGKILL"
+    },
+    {
+      "case": "copy-failure",
+      "mode": "regression",
+      "binary_sha256": "0209cb33ad90b19b7f5a7dd1a2d63bb128a103bab5d27b4e328cbbd1f4901b4c",
+      "observation_reproduced": false,
+      "paper_reed_contract_met": true,
+      "send_outcome": "accepted",
+      "sent_copy": "failed",
+      "smtp_after_restart": 1,
+      "duplicate_after_restart_rejected": true,
+      "killed_with": null
+    }
+  ],
+  "baseline_regression": {
+    "passed": 4,
+    "skipped": 8,
+    "deselected": 187,
+    "seconds": 45.81,
+    "scenarios": [
+      "baseline-initial-sync",
+      "client-task-move"
+    ],
+    "profiles": [
+      "fake:dovecot",
+      "fake:plain"
+    ]
+  }
+}

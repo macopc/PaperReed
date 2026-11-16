@@ -1,0 +1,217 @@
+diff --git a/app/src/flux/stores/draft-change-set.ts b/app/src/flux/stores/draft-change-set.ts
+index acc77b7..6cec48b 100644
+--- a/app/src/flux/stores/draft-change-set.ts
++++ b/app/src/flux/stores/draft-change-set.ts
+@@ -87,7 +87,9 @@ export class DraftChangeSet extends EventEmitter {
+     }
+     this.clearDelayedCommit();
+     this._timerStarted = now;
+-    this._timer = setTimeout(() => this.commit(), SaveAfterIdleMSec);
++    this._timer = setTimeout(() => {
++      this.commit().catch((error) => AppEnv.showErrorDialog(error.message));
++    }, SaveAfterIdleMSec);
+   }
+ 
+   /*
+@@ -98,16 +100,20 @@ export class DraftChangeSet extends EventEmitter {
+     We may not need to save again, but we need to block until that save completes.
+   */
+   async commit() {
+-    if (this._commitPromise) {
++    while (this._commitPromise) {
+       await this._commitPromise;
+     }
+ 
+     if (this.dirtyFields().length > 0) {
+       this.clearDelayedCommit();
+-      this._lastCommitTime = performance.now();
+-      this._commitPromise = this.callbacks.onCommit();
+-      await this._commitPromise;
+-      this._commitPromise = null;
++      const committedThrough = performance.now();
++      this._commitPromise = Promise.resolve().then(() => this.callbacks.onCommit());
++      try {
++        await this._commitPromise;
++        this._lastCommitTime = committedThrough;
++      } finally {
++        this._commitPromise = null;
++      }
+     }
+   }
+ }
+diff --git a/app/src/flux/stores/draft-editing-session.ts b/app/src/flux/stores/draft-editing-session.ts
+index 7cd69e8..e43936c 100644
+--- a/app/src/flux/stores/draft-editing-session.ts
++++ b/app/src/flux/stores/draft-editing-session.ts
+@@ -459,7 +459,8 @@ export class DraftEditingSession extends MailspringStore {
+         });
+ 
+       Actions.queueTask(create);
+-      await TaskQueue.waitForPerformLocal(create);
++      const created = (await TaskQueue.waitForPerformLocal(create)).assertSaved();
++      this.acceptSaveReceipt(created);
+       if (destroy) Actions.queueTask(destroy);
+     }
+ 
+@@ -497,6 +498,9 @@ export class DraftEditingSession extends MailspringStore {
+     // be made through the editing session and we don't want to overwrite the user's
+     // work under any scenario.
+     const lockedFields = this.changes.dirtyFields();
++    // Adopting a newer revision while keeping our old dirty body would defeat
++    // the engine's compare-and-save check. Only our save receipt advances it.
++    if (lockedFields.length && nextDraft.version !== this._draft.version) return;
+     let changed = false;
+     for (const [key] of Object.entries(Message.attributes)) {
+       if (key === 'headerMessageId') continue;
+@@ -522,7 +526,17 @@ export class DraftEditingSession extends MailspringStore {
+     }
+     const task = new SyncbackDraftTask({ draft: this._draft });
+     Actions.queueTask(task);
+-    await TaskQueue.waitForPerformLocal(task);
++    this.acceptSaveReceipt((await TaskQueue.waitForPerformLocal(task)).assertSaved());
++  }
++
++  acceptSaveReceipt(saved: SyncbackDraftTask) {
++    saved.assertSaved();
++    if (this._draft && saved.savedDraftRevision !== undefined) {
++      this._draft = fastCloneDraft(this._draft);
++      this._draft.version = saved.savedDraftRevision;
++      this._draft.id = saved.savedDraftId;
++      this._draft.accountId = saved.draft.accountId;
++    }
+   }
+ 
+   changeSetApplyChanges = (changes: Record<string, unknown>) => {
+diff --git a/app/src/flux/stores/draft-store.ts b/app/src/flux/stores/draft-store.ts
+index 958f964..c30fa4f 100644
+--- a/app/src/flux/stores/draft-store.ts
++++ b/app/src/flux/stores/draft-store.ts
+@@ -212,7 +212,7 @@ class DraftStore extends MailspringStore {
+ 
+     const t = new SyncbackDraftTask({ draft });
+     Actions.queueTask(t);
+-    await TaskQueue.waitForPerformLocal(t);
++    (await TaskQueue.waitForPerformLocal(t)).assertSaved();
+     Actions.sendDraft(draft.headerMessageId);
+   };
+ 
+@@ -346,12 +346,12 @@ class DraftStore extends MailspringStore {
+ 
+     // Optimistically create a draft session and hand it the draft so that it
+     // doesn't need to do a query for it a second from now when the composer wants it.
+-    this._createSession(draft.headerMessageId, draft);
++    const session = this._createSession(draft.headerMessageId, draft);
+ 
+     const task = new SyncbackDraftTask({ draft });
+     Actions.queueTask(task);
+ 
+-    await TaskQueue.waitForPerformLocal(task);
++    session.acceptSaveReceipt((await TaskQueue.waitForPerformLocal(task)).assertSaved());
+     if (popout) {
+       this._onPopoutDraft(draft.headerMessageId);
+     }
+@@ -593,7 +593,14 @@ class DraftStore extends MailspringStore {
+ 
+     diagnostics.dirtyFieldsBeforeCommit = session.changes.dirtyFields();
+     diagnostics.commitPromiseInFlight = !!(session.changes as any)._commitPromise;
+-    await session.changes.commit();
++    try {
++      await session.changes.commit();
++    } catch (error) {
++      this._draftsSending[headerMessageId] = false;
++      this.trigger({ headerMessageId });
++      AppEnv.showErrorDialog(error.message);
++      return;
++    }
+     diagnostics.dirtyFieldsAfterCommit = session.changes.dirtyFields();
+     await session.teardown();
+ 
+diff --git a/app/src/flux/tasks/send-draft-task.ts b/app/src/flux/tasks/send-draft-task.ts
+index f65af3a..d64efd3 100644
+--- a/app/src/flux/tasks/send-draft-task.ts
++++ b/app/src/flux/tasks/send-draft-task.ts
+@@ -88,6 +88,8 @@ export class SendDraftTask extends Task {
+   static attributes = {
+     ...Task.attributes,
+ 
++    sendOutcome: Attributes.String({ modelKey: 'sendOutcome' }),
++    sentCopy: Attributes.String({ modelKey: 'sentCopy' }),
+     draft: Attributes.Obj({
+       modelKey: 'draft',
+       itemClass: Message,
+@@ -104,6 +106,8 @@ export class SendDraftTask extends Task {
+     }),
+   };
+ 
++  sendOutcome: string;
++  sentCopy: string;
+   draft: Message;
+   perRecipientBodies: { [email: string]: string };
+   silent: boolean;
+@@ -140,6 +144,13 @@ export class SendDraftTask extends Task {
+   }
+ 
+   onSuccess() {
++    if (this.sendOutcome !== 'accepted') {
++      this.onError({ key: 'send-unknown', debuginfo: '' });
++      return;
++    }
++    if (this.sentCopy === 'failed' || this.sentCopy === 'pending') {
++      AppEnv.showErrorDialog(localized('The server accepted this message, but its Sent copy is not confirmed. Do not resend it.'));
++    }
+     Actions.draftDeliverySucceeded({
+       headerMessageId: this.draft.headerMessageId,
+       accountId: this.draft.accountId,
+@@ -164,7 +175,15 @@ export class SendDraftTask extends Task {
+     let errorMessage = null;
+     let errorDetail = null;
+ 
+-    if (key === 'no-sent-folder') {
++    if (key === 'send-unknown') {
++      errorMessage = localized('The send result is unknown. The server may have accepted this message.');
++      errorDetail = localized('Check Sent before taking further action. Automatic resend is disabled.');
++    } else if (['draft-frozen', 'duplicate-send', 'request-conflict'].includes(key)) {
++      errorMessage = localized('This draft already has a send operation. It was not submitted again.');
++      errorDetail = localized('Check the original operation before taking further action.');
++    } else if (key === 'draft-conflict') {
++      errorMessage = localized('The draft changed before sending. Reload the latest draft and review it.');
++    } else if (key === 'no-sent-folder') {
+       errorMessage = localized(
+         'Your `Sent Mail` folder could not be automatically detected. Visit Preferences > Folders to choose a Sent folder and then try again.'
+       );
+diff --git a/app/src/flux/tasks/syncback-draft-task.ts b/app/src/flux/tasks/syncback-draft-task.ts
+index 603a7d9..93138bf 100644
+--- a/app/src/flux/tasks/syncback-draft-task.ts
++++ b/app/src/flux/tasks/syncback-draft-task.ts
+@@ -8,6 +8,8 @@ export class SyncbackDraftTask extends Task {
+   static attributes = {
+     ...Task.attributes,
+ 
++    savedDraftRevision: Attributes.Number({ modelKey: 'savedDraftRevision' }),
++    savedDraftId: Attributes.String({ modelKey: 'savedDraftId' }),
+     headerMessageId: Attributes.String({
+       modelKey: 'headerMessageId',
+     }),
+@@ -17,6 +19,8 @@ export class SyncbackDraftTask extends Task {
+     }),
+   };
+ 
++  savedDraftRevision: number;
++  savedDraftId: string;
+   draft: Message;
+   headerMessageId: string;
+ 
+@@ -27,6 +31,13 @@ export class SyncbackDraftTask extends Task {
+     this.headerMessageId = draft ? draft.headerMessageId : undefined;
+   }
+ 
++  assertSaved() {
++    if (this.error || this.status === Task.Status.Cancelled) {
++      throw new Error(localized('The draft was not saved. Keep your edits and reload the latest draft before sending.'));
++    }
++    return this;
++  }
++
+   onError({ key, debuginfo }: { key: string; debuginfo: string }) {
+     if (key === 'no-drafts-folder') {
+       AppEnv.showErrorDialog({

@@ -2,9 +2,9 @@
 
 2026-11-15 · 第一轮结论：推荐进入验证的路线，不是已完成邮箱集成或获准发布。行为依据为 [MAIL-CORE.md](MAIL-CORE.md)，不改变当前界面基线。
 
-后续进展见 [macOS 本机验证](../research/native-validation.md)：完整源码与依赖已准备，TS 检查通过；源码编译受本机 Xcode 组件阻塞。预编译引擎在仅本机网络下通过 8 个协议场景实例，支持无自建业务服务端的方向，尚不等于真实邮箱接入通过。
+最新进展见 [自编译引擎验证](../research/patched-engine-validation.md)：11 月 16 日 Xcode 阻塞解除，修改版原生引擎完整构建成功，六项草稿／发送正确性协议场景通过。此前 [macOS 本机验证](../research/native-validation.md) 支持无自建业务服务端的方向；这些均不等于真实邮箱与完整桌面接入通过。
 
-[进一步的真实引擎实验](../research/engine-contract-validation.md) 已复现草稿旧修订覆盖、同一草稿的两个任务产生两次 SMTP 提交，以及发送中断后 `complete` 无法表达真实结果。下文相关源码推断已有运行证据，现有上游不能原样作为首版核心；最小修正范围已记录，尚未实施。
+[进一步的真实引擎实验](../research/engine-contract-validation.md) 已复现草稿旧修订覆盖、同一草稿的两个任务产生两次 SMTP 提交，以及发送中断后 `complete` 无法表达真实结果。下文相关源码推断已有运行证据，现有上游不能原样作为首版核心。[后续修复实验](../research/engine-fix-validation.md) 已提供引擎与桌面源码补丁，关键事务和界面边界检查通过；修改版引擎也已通过上述六项协议回归，CLI / GUI 完整交接仍待实现与验收。
 
 **建议优先验证 Mailspring 产品分支，保留 Electron、React / TypeScript、C++ 同步引擎和 SQLite。** 重做 Paper Reed 的界面及共享操作入口，补齐草稿冲突与发送结果语义。Zero 用作接口和交互参考；不把其云端后端迁入桌面。若关键验证无法收敛，再转向 Electron + 自建小核心。
 

@@ -1,0 +1,404 @@
+diff --git a/MailSync/MailStore.cpp b/MailSync/MailStore.cpp
+index e295615..7ede1c0 100644
+--- a/MailSync/MailStore.cpp
++++ b/MailSync/MailStore.cpp
+@@ -10,6 +10,7 @@
+ //
+ 
+ #include "MailStore.hpp"
++#include "MailMutationGuard.hpp"
+ #include "MailUtils.hpp"
+ #include "MailStoreTransaction.hpp"
+ #include "SyncException.hpp"
+@@ -210,6 +211,7 @@ void MailStore::recomputeEventTimes() {
+ }
+ 
+ void MailStore::migrate() {
++    PaperReed::MailMutationGuard::migrate(_db);
+     SQLite::Statement uv(_db, "PRAGMA user_version");
+     uv.executeStep();
+     int version = uv.getColumn(0).getInt();
+diff --git a/MailSync/TaskProcessor.cpp b/MailSync/TaskProcessor.cpp
+index bdd1f8c..1feb431 100644
+--- a/MailSync/TaskProcessor.cpp
++++ b/MailSync/TaskProcessor.cpp
+@@ -12,6 +12,7 @@
+ #include "TaskProcessor.hpp"
+ #include "MailProcessor.hpp"
+ #include "MailStoreTransaction.hpp"
++#include "MailMutationGuard.hpp"
+ #include "MailUtils.hpp"
+ #include "Thread.hpp"
+ #include "Message.hpp"
+@@ -774,8 +775,17 @@ void TaskProcessor::performLocal(Task * task) {
+     
+     logger->info("[{}] Running {} performLocal:", task->id(), cname);
+ 
++    // An ingress retry must not overwrite a queued/completed operation. The
++    // durable send ledger also survives the normal Task history cleanup.
++    if (cname == "SendDraftTask") {
++        auto prior = store->find<Task>(Query().equal("id", task->id()));
++        if (prior) {
++            logger->info("[{}] Send request already exists; retaining original task", task->id());
++            return;
++        }
++    }
+     try {
+-        store->save(task);
++        if (cname != "SendDraftTask") store->save(task);
+     } catch (SQLite::Exception & ex) {
+         logger->error("[{}] -- Exception: Task could not be saved to the database. {}", task->id(), ex.what());
+         return;
+@@ -812,7 +822,8 @@ void TaskProcessor::performLocal(Task * task) {
+             // nothing
+ 
+         } else if (cname == "SendDraftTask") {
+-            // nothing
++            performLocalSendDraft(task);
++            return; // Already saved atomically; do not race the foreground worker.
+ 
+         } else if (cname == "SyncbackMetadataTask") {
+             performLocalSyncbackMetadata(task);
+@@ -863,6 +874,9 @@ void TaskProcessor::performLocal(Task * task) {
+         logger->info("[{}] -- Succeeded. Changing status to `remote`", task->id());
+         task->setStatus("remote");
+ 
++    } catch (PaperReed::Conflict & ex) {
++        task->setError(SyncException(ex.key, ex.what(), false).toJSON());
++        task->setStatus("complete");
+     } catch (SyncException & ex) {
+         logger->error("[{}] -- Failed ({}). Changing status to `complete`", task->id(), ex.toJSON().dump());
+         logger->flush();
+@@ -905,6 +919,19 @@ void TaskProcessor::performRemote(Task * task) {
+         if (task->accountId() != account->id()) {
+             throw SyncException("generic", "You must provide an account id.", false);
+         }
++        if (task->shouldCancel() && cname == "SendDraftTask") {
++            PaperReed::MailMutationGuard guard(store->db());
++            auto op = guard.request(account->id(), task->id());
++            if (!op.is_null() && op["phase"] == "queued") {
++                guard.transition(account->id(), task->id(), "queued", "rejected");
++                task->data()["sendOutcome"] = "rejected";
++                task->setStatus("cancelled");
++                store->save(task);
++                return;
++            }
++            // Recovery still has to report acceptance or uncertainty, not cancellation.
++            task->data().erase("should_cancel");
++        }
+         if (task->shouldCancel()) {
+             task->setStatus("cancelled");
+         } else {
+@@ -994,6 +1021,9 @@ void TaskProcessor::performRemote(Task * task) {
+                 task->setStatus("complete");
+             }
+         }
++    } catch (PaperReed::Conflict & ex) {
++        task->setError(SyncException(ex.key, ex.what(), false).toJSON());
++        task->setStatus("complete");
+     } catch (SyncException & ex) {
+         logger->error("[{}] -- Failed ({}). Changing status to `complete`", task->id(), ex.toJSON().dump());
+         logger->flush();
+@@ -1318,6 +1348,21 @@ string TaskProcessor::confirmPlacementChange(Message & msg, TaskPlacement & item
+     return displaced;
+ }
+ 
++void TaskProcessor::performLocalSendDraft(Task * task) {
++    MailStoreTransaction transaction{store, "performLocalSendDraft"};
++    PaperReed::MailMutationGuard guard(store->db());
++    auto & data = task->data();
++    // The ledger is engine-owned. Never trust caller-supplied execution markers.
++    data.erase("_performRemoteRan");
++    data.erase("sendOutcome");
++    data.erase("sentCopy");
++    json payload = {{"draft", data["draft"]}, {"perRecipientBodies", data["perRecipientBodies"]}};
++    guard.admit(account->id(), task->id(), data["draft"], payload);
++    task->setStatus("remote");
++    store->save(task);
++    transaction.commit();
++}
++
+ void TaskProcessor::performLocalSaveDraft(Task * task) {
+     json & draftJSON = task->data()["draft"];
+     
+@@ -1326,9 +1371,16 @@ void TaskProcessor::performLocalSaveDraft(Task * task) {
+ 
+         // If the draft already exists, we need to visibly change it's attributes
+         // to trigger the correct didSave hooks, etc. Find and update it.
++        PaperReed::MailMutationGuard guard(store->db());
++        string resolvedId = guard.checkRevision(account->id(), draftJSON, false);
++        guard.requireEditable(account->id(), draftJSON["hMsgId"].get<string>());
+         shared_ptr<Message> existing = nullptr;
+-        if (draftJSON.count("id")) {
+-            existing = store->find<Message>(Query().equal("id", draftJSON["id"].get<string>()));
++        if (!resolvedId.empty()) {
++            existing = store->find<Message>(Query().equal("id", resolvedId));
++            draftJSON["id"] = resolvedId;
++        } else {
++            // Never accept a caller-chosen id for a newly created draft.
++            draftJSON["id"] = MailUtils::idForDraftHeaderMessageId(account->id(), draftJSON["hMsgId"]);
+         }
+ 
+         Message draft = inflateClientDraftJSON(draftJSON, existing);
+@@ -1353,6 +1405,8 @@ void TaskProcessor::performLocalSaveDraft(Task * task) {
+             insert.bind(2, draftJSON["body"].get<string>());
+             insert.exec();
+         }
++        task->data()["savedDraftRevision"] = existing ? existing->version() : draft.version();
++        task->data()["savedDraftId"] = draft.id();
+         transaction.commit();
+     }
+ }
+@@ -1390,6 +1444,7 @@ void TaskProcessor::performLocalDestroyDraft(Task * task) {
+ 
+         auto drafts = store->findLargeSet<Message>("id", messageIds);
+         for (auto & draft : drafts) {
++            PaperReed::MailMutationGuard(store->db()).requireEditable(account->id(), draft->headerMessageId());
+             auto placements = store->placementsForMessage(draft->id());
+             store->remove(draft.get());
+             
+@@ -2402,14 +2457,34 @@ void TaskProcessor::performRemoteSendDraft(Task * task) {
+     AutoreleasePool pool;
+     ErrorCode err = ErrorNone;
+ 
+-    // We never intend for a send task to run more than once. We set this bit
+-    // to ensure that - even if we don't report failures properly - we never
+-    // get a send task "stuck" in the queue sending over and over. All retries
+-    // are user-triggered and create a new task.
+-    if (task->data().count("_performRemoteRan")) { return; }
+-    task->data()["_performRemoteRan"] = true;
+-    store->save(task);
+-
++    PaperReed::MailMutationGuard guard(store->db());
++    auto operation = guard.request(account->id(), task->id());
++    // Legacy in-flight tasks have no admission record. Never guess that they
++    // succeeded, or start network delivery again during an upgrade.
++    if (operation.is_null()) {
++        task->data()["sendOutcome"] = "unknown";
++        throw SyncException("send-unknown", "No durable admission record; check Sent before retrying.", false);
++    }
++    string phase = operation["phase"].get<string>();
++    if (phase == "accepted") {
++        task->data()["sendOutcome"] = "accepted";
++        task->data()["sentCopy"] = operation["sentCopy"];
++        return;
++    }
++    if (phase == "attempting") {
++        guard.transition(account->id(), task->id(), "attempting", "unknown");
++        phase = "unknown";
++    }
++    if (phase != "queued") {
++        task->data()["sendOutcome"] = phase;
++        throw SyncException(phase == "unknown" ? "send-unknown" : "send-rejected",
++                            "Delivery was not confirmed. This operation will not be resent.", false);
++    }
++    // Always use the immutable payload admitted by the local transaction.
++    auto frozen = json::parse(operation["payload"].get<string>());
++    task->data()["draft"] = frozen["draft"];
++    task->data()["perRecipientBodies"] = frozen["perRecipientBodies"];
++    try {
+     // load the draft and body from the task
+     json & draftJSON = task->data()["draft"];
+     json & perRecipientBodies = task->data()["perRecipientBodies"];
+@@ -2540,6 +2615,14 @@ void TaskProcessor::performRemoteSendDraft(Task * task) {
+     bool viaGraph = account->sendsViaGraph();
+     string sentMessageId = draft.headerMessageId();
+ 
++    // First version has one submission per operation; partial multi-send needs
++    // per-recipient receipts and is intentionally rejected before any network I/O.
++    if (multisend) throw SyncException("send-rejected", "Per-recipient bodies are not supported by this experiment.", false);
++    guard.transition(account->id(), task->id(), "queued", "attempting");
++    task->data()["_performRemoteRan"] = true;
++    task->data()["sendOutcome"] = "attempting";
++    store->save(task);
++
+     if (viaGraph) {
+         // Graph delivers to every To/Cc/Bcc in the MIME and has no separate envelope, so it
+         // cannot send each recipient their own body. The client does not ask it to.
+@@ -2548,12 +2631,20 @@ void TaskProcessor::performRemoteSendDraft(Task * task) {
+         }
+         logger->info("-- Sending through Microsoft Graph:");
+         string graphId = _sendViaGraph(account, builder);
++        guard.transition(account->id(), task->id(), "attempting", "accepted");
++        task->data()["sendOutcome"] = "accepted";
++        task->data()["sentCopy"] = "pending";
++        store->save(task);
+         string filedMessageId = _waitForGraphSentCopy(account, graphId);
+         if (filedMessageId != "") {
+             sentMessageId = filedMessageId;
+         }
+     } else {
+         _sendViaSMTP(account, builder, messageDataForSent, perRecipientBodies, plaintext, multisend);
++        guard.transition(account->id(), task->id(), "attempting", "accepted");
++        task->data()["sendOutcome"] = "accepted";
++        task->data()["sentCopy"] = "pending";
++        store->save(task);
+     }
+     
+     /* 
+@@ -2663,6 +2754,11 @@ void TaskProcessor::performRemoteSendDraft(Task * task) {
+         }
+     }
+ 
++    string copyState = sentFolderMessageUID != 0 ? "filed" : (viaGraph ? "pending" : "failed");
++    guard.setCopy(account->id(), task->id(), copyState);
++    task->data()["sentCopy"] = copyState;
++    store->save(task);
++
+     if (sentFolderMessageUID == 0) {
+         // If we still don't have a message in the sent folder, there's nothing we can do.
+         // Delete the draft and exit.
+@@ -2797,6 +2893,30 @@ void TaskProcessor::performRemoteSendDraft(Task * task) {
+             performLocal(&mTask); // will call save
+         }
+     }
++    } catch (SQLite::Exception &) {
++        // Leave the durable phase untouched if local persistence failed.
++        throw;
++    } catch (...) {
++        auto current = guard.request(account->id(), task->id());
++        string currentPhase = current["phase"].get<string>();
++        if (currentPhase == "accepted") {
++            // Delivery succeeded; a cleanup/copy failure must never invite resend.
++            task->data()["sendOutcome"] = "accepted";
++            task->data()["sentCopy"] = current["sentCopy"];
++            return;
++        }
++        if (currentPhase == "attempting") {
++            guard.transition(account->id(), task->id(), "attempting", "unknown");
++            task->data()["sendOutcome"] = "unknown";
++            throw SyncException("send-unknown", "The server may have accepted this message. Check Sent; do not resend automatically.", false);
++        }
++        if (currentPhase == "queued") {
++            guard.transition(account->id(), task->id(), "queued", "rejected");
++            task->data()["sendOutcome"] = "rejected";
++        }
++        throw;
++    }
++
+ }
+ 
+ void TaskProcessor::performRemoteSendFeatureUsageEvent(Task * task) {
+diff --git a/MailSync/TaskProcessor.hpp b/MailSync/TaskProcessor.hpp
+index 04621fa..757b921 100644
+--- a/MailSync/TaskProcessor.hpp
++++ b/MailSync/TaskProcessor.hpp
+@@ -80,6 +80,7 @@ private:
+     void performRemoteChangeOnMessages(Task * task, bool isMove, RemoteChangeFn applyInFolder);
+     string confirmPlacementChange(Message & msg, TaskPlacement & item, const vector<Placement> & rows);
+     void performLocalSaveDraft(Task * task);
++    void performLocalSendDraft(Task * task);
+     void performLocalDestroyDraft(Task * task);
+     void performRemoteDestroyDraft(Task * task);
+ 
+diff --git a/MailSync/MailMutationGuard.hpp b/MailSync/MailMutationGuard.hpp
+new file mode 100644
+index 0000000..77ae9ca
+--- /dev/null
++++ b/MailSync/MailMutationGuard.hpp
+@@ -0,0 +1,105 @@
++#pragma once
++
++#include <SQLiteCpp/SQLiteCpp.h>
++#include "json.hpp"
++#include <stdexcept>
++#include <string>
++
++// Paper Reed experiment. Uses the engine database and caller's write transaction;
++// it does not own a queue, connection, or network retry policy.
++namespace PaperReed {
++using nlohmann::json;
++
++struct Conflict : std::runtime_error {
++    std::string key;
++    Conflict(const std::string & key, const std::string & detail)
++        : std::runtime_error(detail), key(key) {}
++};
++
++class MailMutationGuard {
++    SQLite::Database & db;
++public:
++    explicit MailMutationGuard(SQLite::Database & db) : db(db) {}
++
++    static void migrate(SQLite::Database & db) {
++        db.exec("CREATE TABLE IF NOT EXISTS PaperReedSend ("
++                "accountId TEXT NOT NULL, requestId TEXT NOT NULL, draftId TEXT NOT NULL, "
++                "payload TEXT NOT NULL, phase TEXT NOT NULL, sentCopy TEXT NOT NULL DEFAULT 'pending', "
++                "PRIMARY KEY (accountId, requestId))");
++        db.exec("CREATE UNIQUE INDEX IF NOT EXISTS PaperReedSendActiveDraft "
++                "ON PaperReedSend(accountId, draftId) WHERE phase != 'rejected'");
++    }
++
++    json request(const std::string & account, const std::string & id) {
++        SQLite::Statement q(db, "SELECT draftId, payload, phase, sentCopy FROM PaperReedSend "
++                                "WHERE accountId = ? AND requestId = ?");
++        q.bind(1, account); q.bind(2, id);
++        if (!q.executeStep()) return nullptr;
++        return {{"draftId", q.getColumn(0).getString()}, {"payload", q.getColumn(1).getString()},
++                {"phase", q.getColumn(2).getString()}, {"sentCopy", q.getColumn(3).getString()}};
++    }
++
++    void requireEditable(const std::string & account, const std::string & header) {
++        SQLite::Statement q(db, "SELECT requestId FROM PaperReedSend "
++                                "WHERE accountId = ? AND draftId = ? AND phase != 'rejected'");
++        q.bind(1, account); q.bind(2, header);
++        if (q.executeStep()) throw Conflict("draft-frozen", q.getColumn(0).getString());
++    }
++
++    // Resolve by account + Message-ID, so omitting/changing the local id cannot
++    // turn a stale update into an insert. Return the authoritative local id.
++    std::string checkRevision(const std::string & account, const json & draft, bool requireExisting) {
++        if (draft.value("aid", std::string()) != account ||
++            !draft.count("hMsgId") || !draft["hMsgId"].is_string() ||
++            draft["hMsgId"].get<std::string>().empty() ||
++            !draft.count("v") || !draft["v"].is_number_integer()) {
++            throw Conflict("invalid-draft", "Account, Message-ID and revision are required.");
++        }
++        auto header = draft["hMsgId"].get<std::string>();
++        SQLite::Statement q(db, "SELECT id, data FROM Message WHERE accountId = ? AND headerMessageId = ?");
++        q.bind(1, account); q.bind(2, header);
++        if (!q.executeStep()) {
++            if (requireExisting || draft["v"].get<int>() != 0)
++                throw Conflict("draft-conflict", "The draft no longer exists.");
++            return "";
++        }
++        auto id = q.getColumn(0).getString();
++        auto current = json::parse(q.getColumn(1).getString());
++        if (!current.value("draft", false) || current["v"] != draft["v"] ||
++            (draft.count("id") && draft["id"] != id)) {
++            throw Conflict("draft-conflict", "Read the latest draft before saving or sending.");
++        }
++        return id;
++    }
++
++    // Call inside the same transaction as saving the remote-ready Task. A
++    // rejected preflight releases only the draft lock, never request history.
++    void admit(const std::string & account, const std::string & id, const json & draft, const json & payload) {
++        auto prior = request(account, id);
++        if (!prior.is_null()) {
++            throw Conflict(prior["payload"] == payload.dump() ? "duplicate-send" : "request-conflict", id);
++        }
++        checkRevision(account, draft, true);
++        auto header = draft["hMsgId"].get<std::string>();
++        requireEditable(account, header);
++        SQLite::Statement q(db, "INSERT INTO PaperReedSend(accountId, requestId, draftId, payload, phase) "
++                                "VALUES (?, ?, ?, ?, 'queued')");
++        q.bind(1, account); q.bind(2, id); q.bind(3, header); q.bind(4, payload.dump()); q.exec();
++    }
++
++    void transition(const std::string & account, const std::string & id,
++                    const std::string & from, const std::string & to) {
++        SQLite::Statement q(db, "UPDATE PaperReedSend SET phase = ? "
++                                "WHERE accountId = ? AND requestId = ? AND phase = ?");
++        q.bind(1, to); q.bind(2, account); q.bind(3, id); q.bind(4, from);
++        if (q.exec() != 1) throw Conflict("send-state-conflict", "Send phase changed; do not retry delivery.");
++    }
++
++    void setCopy(const std::string & account, const std::string & id, const std::string & state) {
++        SQLite::Statement q(db, "UPDATE PaperReedSend SET sentCopy = ? "
++                                "WHERE accountId = ? AND requestId = ? AND phase = 'accepted'");
++        q.bind(1, state); q.bind(2, account); q.bind(3, id);
++        if (q.exec() != 1) throw Conflict("send-state-conflict", "Delivery acceptance is not recorded.");
++    }
++};
++}

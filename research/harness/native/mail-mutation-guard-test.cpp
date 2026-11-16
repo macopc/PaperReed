@@ -1,0 +1,147 @@
+// Compiles the exact guard included by TaskProcessor, using upstream SQLiteCpp.
+// This does not replace a rebuilt engine's IMAP/SMTP integration tests.
+#include "MailMutationGuard.hpp"
+#include <cassert>
+#include <cstdio>
+#include <functional>
+#include <iostream>
+#include <signal.h>
+#include <sys/wait.h>
+#include <unistd.h>
+
+using namespace PaperReed;
+
+void conflict(const std::string & key, const std::function<void()> & work) {
+    bool caught = false;
+    try { work(); } catch (const Conflict & e) { caught = e.key == key; }
+    assert(caught);
+}
+
+json draft(const std::string & account = "a") {
+    return {{"aid", account}, {"hMsgId", "draft@example.test"}, {"id", account + "-draft"},
+            {"v", 1}, {"draft", true}, {"body", "user edit"}};
+}
+
+void seed(SQLite::Database & db, const json & d) {
+    SQLite::Statement q(db, "INSERT OR REPLACE INTO Message VALUES (?, ?, ?, ?)");
+    q.bind(1, d["id"].get<std::string>()); q.bind(2, d["aid"].get<std::string>());
+    q.bind(3, d["hMsgId"].get<std::string>()); q.bind(4, d.dump()); q.exec();
+}
+
+void transaction(SQLite::Database & db, const std::function<void()> & work) {
+    db.exec("BEGIN IMMEDIATE");
+    try { work(); db.exec("COMMIT"); } catch (...) { db.exec("ROLLBACK"); throw; }
+}
+
+int main(int argc, char ** argv) {
+    assert(argc == 2);
+    const std::string path = argv[1];
+    {
+        SQLite::Database db(path, SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE, 5000);
+        db.exec("PRAGMA journal_mode=WAL");
+        db.exec("CREATE TABLE Message(id TEXT PRIMARY KEY, accountId TEXT, headerMessageId TEXT, data TEXT)");
+        db.exec("CREATE TABLE Task(id TEXT PRIMARY KEY, status TEXT)");
+        MailMutationGuard::migrate(db);
+        MailMutationGuard::migrate(db); // restart/migration is repeatable
+        MailMutationGuard g(db);
+        auto old = draft(); seed(db, old);
+        auto latest = old; latest["v"] = 3;
+        transaction(db, [&] { assert(g.checkRevision("a", old, false) == "a-draft"); seed(db, latest); });
+        conflict("draft-conflict", [&] { transaction(db, [&] { g.checkRevision("a", old, false); seed(db, old); }); });
+        assert(g.checkRevision("a", latest, false) == "a-draft");
+        old.erase("id");
+        conflict("draft-conflict", [&] { g.checkRevision("a", old, false); });
+        auto wrong = latest; wrong["id"] = "another-draft";
+        conflict("draft-conflict", [&] { g.checkRevision("a", wrong, false); });
+        conflict("invalid-draft", [&] { g.checkRevision("b", latest, false); });
+        auto missing = latest; missing.erase("v");
+        conflict("invalid-draft", [&] { g.checkRevision("a", missing, false); });
+        std::cout << "PASS stale revision, omitted id, wrong id/account, missing revision\n";
+
+        // Failure after admission but before Task commit rolls back both rows.
+        try {
+            transaction(db, [&] {
+                g.admit("a", "rolled-back", latest, latest);
+                db.exec("INSERT INTO Task VALUES ('rolled-back', 'remote')");
+                throw std::runtime_error("injected failure");
+            });
+        } catch (const std::runtime_error &) {}
+        assert(g.request("a", "rolled-back").is_null());
+        assert(db.execAndGet("SELECT COUNT(*) FROM Task").getInt() == 0);
+        transaction(db, [&] {
+            g.admit("a", "send-1", latest, latest);
+            db.exec("INSERT INTO Task VALUES ('send-1', 'remote')");
+        });
+        conflict("duplicate-send", [&] { g.admit("a", "send-1", latest, latest); });
+        auto altered = latest; altered["body"] = "different";
+        conflict("request-conflict", [&] { g.admit("a", "send-1", latest, altered); });
+        conflict("draft-frozen", [&] { g.admit("a", "send-2", latest, latest); });
+        conflict("draft-frozen", [&] { g.requireEditable("a", "draft@example.test"); });
+        db.exec("DELETE FROM Task");
+        conflict("draft-frozen", [&] { g.admit("a", "after-cleanup", latest, latest); });
+        std::cout << "PASS atomic admission, request reuse, changed request, duplicate draft, history cleanup\n";
+
+        auto other = draft("b"); seed(db, other);
+        transaction(db, [&] { g.admit("b", "send-1", other, other); });
+        g.transition("b", "send-1", "queued", "rejected");
+        g.requireEditable("b", "draft@example.test");
+        transaction(db, [&] { g.admit("b", "send-2", other, other); });
+        conflict("duplicate-send", [&] { g.admit("b", "send-1", other, other); });
+        std::cout << "PASS account isolation and retry only after preflight rejection\n";
+    }
+
+    // Simulate process death after a durable attempt marker, not just reopening
+    // an in-memory object. The parent has closed all database connections.
+    pid_t child = fork(); assert(child >= 0);
+    if (child == 0) {
+        SQLite::Database db(path, SQLite::OPEN_READWRITE, 5000);
+        MailMutationGuard(db).transition("a", "send-1", "queued", "attempting");
+        kill(getpid(), SIGKILL);
+        _exit(99);
+    }
+    int status = 0; assert(waitpid(child, &status, 0) == child);
+    assert(WIFSIGNALED(status) && WTERMSIG(status) == SIGKILL);
+    {
+        SQLite::Database db(path, SQLite::OPEN_READWRITE, 5000);
+        MailMutationGuard g(db);
+        assert(g.request("a", "send-1")["phase"] == "attempting");
+        g.transition("a", "send-1", "attempting", "unknown");
+        conflict("send-state-conflict", [&] { g.transition("a", "send-1", "queued", "attempting"); });
+        conflict("draft-frozen", [&] { g.requireEditable("a", "draft@example.test"); });
+        g.transition("b", "send-2", "queued", "attempting");
+        g.transition("b", "send-2", "attempting", "accepted");
+        g.setCopy("b", "send-2", "failed");
+    }
+    {
+        SQLite::Database db(path, SQLite::OPEN_READWRITE, 5000);
+        MailMutationGuard g(db);
+        assert(g.request("a", "send-1")["phase"] == "unknown");
+        assert(g.request("b", "send-2")["phase"] == "accepted");
+        assert(g.request("b", "send-2")["sentCopy"] == "failed");
+        conflict("draft-frozen", [&] { g.requireEditable("b", "draft@example.test"); });
+        auto race = draft("race"); seed(db, race);
+    }
+    std::cout << "PASS SIGKILL/restart, unknown stays locked, accepted distinct from failed copy\n";
+
+    // Two processes contend for the same draft with different request ids.
+    pid_t racers[2];
+    for (int i = 0; i != 2; ++i) {
+        racers[i] = fork(); assert(racers[i] >= 0);
+        if (racers[i] == 0) {
+            SQLite::Database db(path, SQLite::OPEN_READWRITE, 5000);
+            MailMutationGuard g(db);
+            try {
+                transaction(db, [&] { g.admit("race", std::to_string(i), draft("race"), draft("race")); });
+                _exit(0);
+            } catch (const Conflict & e) { _exit(e.key == "draft-frozen" ? 10 : 99); }
+        }
+    }
+    int successes = 0, conflicts = 0;
+    for (auto pid : racers) {
+        assert(waitpid(pid, &status, 0) == pid && WIFEXITED(status));
+        successes += WEXITSTATUS(status) == 0;
+        conflicts += WEXITSTATUS(status) == 10;
+    }
+    assert(successes == 1 && conflicts == 1);
+    std::cout << "PASS concurrent admissions: exactly one winner\n";
+}
