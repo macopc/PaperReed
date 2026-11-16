@@ -1,6 +1,6 @@
 # Paper Reed CLI · 实验版
 
-CLI 随实验桌面源码补丁提供，复用桌面内的运行环境与固定版本 MCP SDK，不需要另装 Node 或全局 npm 包。当前不是独立发布的安装包；先运行已应用 [补丁系列](../patches/README.md)（包括 0017）的实验桌面。
+CLI 随实验桌面源码补丁提供，复用桌面内的运行环境与固定版本 MCP SDK，不需要另装 Node 或全局 npm 包。当前不是独立发布的安装包；先运行已应用 [补丁系列](../patches/README.md)（包括 0018）的实验桌面。
 
 ## 从桌面接入
 
@@ -79,6 +79,39 @@ paper-reed undo --input '{"accountId":"ACCOUNT_ID","taskId":"TASK_ID"}'
 
 **整理历史有界**：状态、重试识别和撤销依赖现有 Task 记录，历史清理后可能返回 `operation-not-found`；这不是失败证明，也没有跨清理周期的永久幂等保证。先检查邮件实际状态，不盲目生成新请求 ID 重试。`change-get` 查询整理任务，`operation-get` 查询持久发送结果，两者不可互换。详见 [整理与搜索验证](../inbox-validation-2026-11-16/README.md)。
 
+## 置顶、稍后与本机标签
+
+这些状态只属于当前设备的 Paper Reed，不修改服务商星标或创建服务商标签。GUI 与 CLI 使用相同本机状态。
+
+```sh
+paper-reed pin --input '{"targets":[{"accountId":"ACCOUNT_ID","threadId":"THREAD_ID"}]}'
+paper-reed unpin --input '{"targets":[{"accountId":"ACCOUNT_ID","threadId":"THREAD_ID"}]}'
+paper-reed snooze --input '{"targets":[{"accountId":"ACCOUNT_ID","threadId":"THREAD_ID"}],"until":"2027-01-01T09:00:00-05:00"}'
+paper-reed unsnooze --input '{"targets":[{"accountId":"ACCOUNT_ID","threadId":"THREAD_ID"}]}'
+paper-reed local-state --input '{"targets":[{"accountId":"ACCOUNT_ID","threadId":"THREAD_ID"}]}'
+paper-reed local-list --input '{"accountId":"ACCOUNT_ID","view":"pinned","limit":25}'
+paper-reed local-list --input '{"accountId":"ACCOUNT_ID","view":"snoozed","limit":25}'
+paper-reed local-list --input '{"accountId":"ACCOUNT_ID","folder":"inbox","limit":25}'
+
+paper-reed labels
+paper-reed label-create --input '{"name":"项目跟进","color":"#688177"}'
+paper-reed label-update --input '{"id":"LABEL_ID","name":"设计合作","color":"#957789"}'
+paper-reed label-add --input '{"targets":[{"accountId":"ACCOUNT_ID","threadId":"THREAD_ID"}],"labelId":"LABEL_ID"}'
+paper-reed local-list --input '{"accountId":"ACCOUNT_ID","view":"label:LABEL_ID","limit":25}'
+paper-reed label-remove --input '{"targets":[{"accountId":"ACCOUNT_ID","threadId":"THREAD_ID"}],"labelId":"LABEL_ID"}'
+paper-reed label-delete --input '{"id":"LABEL_ID"}'
+```
+
+`local-list` 返回会话摘要及 `local` 状态，支持 `limit`（1–100）、`offset`、`query`、`unread`。置顶与视图筛选在分页前执行。无搜索时，`folder: "inbox"` 隐藏稍后会话；普通 `search` 仍可找到它们。`local-state` 返回按会话 ID 索引的 `{pinned, snoozeUntil, labels}`；时间为 Unix 毫秒或 `null`。
+
+本机批量命令最多接收 100 项，返回逐项 `succeeded` / `rejected`；有拒绝项退出码为 1，其余结果仍保留。这里没有 `taskId`，不调用远端整理的 `change-get` / `undo`。重复设置／添加／移除不会产生额外标签关联；重复稍后会重新建立来信基准。它不是发送账本式的请求去重。
+
+`until` 必须是未来的 ISO 日期时间并带时区。稍后要求已同步且仍在收件箱的会话，到期或新外部回复解除；自己的回复、低 UID 历史补齐不会唤回。退出应用后没有后台计时进程，下次打开处理到期项。同步游标不可用时返回 `snooze-needs-synced-inbox`；垃圾邮件／废纸篓不能稍后，也不会被计时器移回。
+
+标签词汇在本机所有账号间共用，颜色是六位十六进制值，名称为 1–40 字符且不允许同名。只读 Agent 可列出词汇（没有成员计数）。创建、修改或删除全局标签需全部已连接账号和文件夹的写权限；为授权会话添加／移除已有标签只需该会话的写权限。`label-delete` 删除标签及本机关联，保留邮件。
+
+完整重启、IMAP 新回复、权限与当前边界见 [本机整理验证](../triage-validation-2026-11-16/README.md)。
+
 ## 连接恢复和移除
 
 | 状况 | 下一步 |
@@ -108,4 +141,4 @@ node research/cli/paper-reed.cjs doctor
 
 token 文件只含桌面 MCP 令牌，使用 `0600` 权限。用户安装的 launcher 会忽略这三个旧变量，以本次安装的连接文件为准。`PAPER_REED_CLI_BIN_DIR` 可在启动实验桌面时覆盖安装目录，用于隔离测试；默认始终为用户的 `~/.local/bin`。
 
-`paper-reed.cjs` 和 `install.cjs` 为 CLI 源文件，在 0016 中首次内置、0017 中同步更新，以完全相同的内容放入桌面 `internal_packages/mcp-server/bin/`。更新时同步导出补丁并检查两份文件一致，不新增 npm 安装步骤。已验证范围与实际窗口见 [安装与接入验证](../cli-onboarding-validation-2026-11-16/README.md)。
+`paper-reed.cjs` 和 `install.cjs` 为 CLI 源文件，在 0016 中首次内置、0017–0018 中同步更新，以完全相同的内容放入桌面 `internal_packages/mcp-server/bin/`。更新时同步导出补丁并检查两份文件一致，不新增 npm 安装步骤。已验证范围与实际窗口见 [安装与接入验证](../cli-onboarding-validation-2026-11-16/README.md)。

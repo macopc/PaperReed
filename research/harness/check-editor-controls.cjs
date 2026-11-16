@@ -1,5 +1,5 @@
 const assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path');
-module.exports = async ({ app, main, cdp, work, account, cli, click, evaluate, until }) => {
+module.exports = async ({ app, main, cdp, work, account, cli, click, evaluate, until, restartDesktop }) => {
   app.windows().forEach(page => page.on('dialog', () => {}));
   const phase = process.env.PAPER_REED_CONTROLS_PHASE || 'after';
   const out = path.resolve(__dirname, '../controls-validation-2026-11-16');
@@ -14,6 +14,7 @@ module.exports = async ({ app, main, cdp, work, account, cli, click, evaluate, u
   await cdp.send('Emulation.setDeviceMetricsOverride', { width: 1440, height: 900, deviceScaleFactor: 1, mobile: false });
   await until(() => run('document.querySelectorAll(".pr-mail-row").length===8'), 'synced fixture inbox');
   if (process.env.PAPER_REED_INBOX_CHECK) { await require('./check-inbox-operations.cjs')({main,cdp,account,cli,work,evaluate,until}); return; }
+  if (process.env.PAPER_REED_TRIAGE_CHECK) { await require('./check-local-triage.cjs')({app,main,cdp,account,cli,work,evaluate,until,restartDesktop}); return; }
   // Only the harness seeds the isolated contact fixture; the product uses its real search index.
   const contacts = await run(`['maya@studio.example.test','maya@personal.example.test'].map((email,i)=>new (require('mailspring-exports').Contact)({id:'pr-fixture-'+i,accountId:${JSON.stringify(account.id)},name:'Maya Chen',email,refs:10-i,hidden:false,source:'mail',version:1}).toJSON())`);
   require('node:child_process').execFileSync('/usr/bin/python3', ['-c', `

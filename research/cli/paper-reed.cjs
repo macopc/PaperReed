@@ -12,7 +12,27 @@ const mailActions = {
   trash: 'trash',
   'restore-inbox': 'inbox',
 };
+const localActions = {
+  pin: 'pin',
+  unpin: 'unpin',
+  snooze: 'snooze',
+  unsnooze: 'unsnooze',
+  'label-add': 'label-add',
+  'label-remove': 'label-remove',
+};
 const commands = {
+  ...Object.fromEntries(
+    Object.keys(localActions).map((name) => [
+      name,
+      ['local_mail_change', null],
+    ])
+  ),
+  'local-list': ['local_mail_list', 'accountId'],
+  'local-state': ['local_mail_state', null],
+  labels: ['local_labels', null],
+  'label-create': ['local_label_edit', null],
+  'label-update': ['local_label_edit', 'id'],
+  'label-delete': ['local_label_edit', 'id'],
   ...Object.fromEntries(
     Object.keys(mailActions).map((name) => [name, ['organize_mail', null]])
   ),
@@ -30,6 +50,26 @@ const commands = {
   'operation-get': ['get_operation', 'accountId'],
 };
 const examples = {
+  ...Object.fromEntries(
+    Object.keys(localActions).map((name) => [
+      name,
+      {
+        targets: [{ accountId: 'ACCOUNT_ID', threadId: 'THREAD_ID' }],
+        ...(name === 'snooze'
+          ? { until: '2027-01-01T09:00:00-05:00' }
+          : {}),
+        ...(name.startsWith('label-') ? { labelId: 'LABEL_ID' } : {}),
+      },
+    ])
+  ),
+  'local-list': { accountId: 'ACCOUNT_ID', view: 'pinned', limit: 25 },
+  'local-state': {
+    targets: [{ accountId: 'ACCOUNT_ID', threadId: 'THREAD_ID' }],
+  },
+  labels: {},
+  'label-create': { name: '项目', color: '#688177' },
+  'label-update': { id: 'LABEL_ID', name: '项目进展', color: '#78849a' },
+  'label-delete': { id: 'LABEL_ID' },
   ...Object.fromEntries(
     Object.keys(mailActions).map((name) => [
       name,
@@ -65,7 +105,10 @@ const examples = {
     expectedRevision: 1,
     requestId: 'STABLE_REQUEST_ID',
   },
-  'operation-get': { accountId: 'ACCOUNT_ID', operationId: 'OPERATION_ID' },
+  'operation-get': {
+    accountId: 'ACCOUNT_ID',
+    operationId: 'OPERATION_ID',
+  },
 };
 function fail(code, message, hint) {
   return Object.assign(new Error(message), { code, hint });
@@ -103,7 +146,9 @@ function connection() {
       endpoint: endpointURL(
         process.env.PAPER_REED_MCP_URL || 'http://127.0.0.1:2587/mcp'
       ),
-      token: fs.readFileSync(process.env.PAPER_REED_TOKEN_FILE, 'utf8').trim(),
+      token: fs
+        .readFileSync(process.env.PAPER_REED_TOKEN_FILE, 'utf8')
+        .trim(),
     };
   }
   const file = process.env.PAPER_REED_CLI_PROFILE;
@@ -133,7 +178,11 @@ function connection() {
   return { endpoint: endpointURL(data.endpoint), token: data.token };
 }
 function inputFor(command, args) {
-  if (command === 'doctor' || command === 'accounts') {
+  if (
+    command === 'doctor' ||
+    command === 'accounts' ||
+    command === 'labels'
+  ) {
     if (args.length)
       throw fail(
         'invalid-arguments',
@@ -183,7 +232,7 @@ function inputFor(command, args) {
 function help(command) {
   if (commands[command])
     return `paper-reed ${command} --input '${JSON.stringify(examples[command])}'\nOr pass the same JSON through stdin. Results are JSON; failures exit 1.\n${mailActions[command] ? 'Returns per-target task receipts. queued is not success; poll change-get. Reuse requestId only for the same targets/action while task history remains.\n' : ''}${command === 'draft-send' ? 'Send only with explicit user approval. Keep requestId stable across retries; inspect operation-get after uncertain results.\n' : ''}`;
-  return `Paper Reed CLI ${VERSION}\n\nStart here:\n  paper-reed doctor             Check the local connection (read-only)\n  paper-reed accounts           List authorized accounts\n  paper-reed <command> --help   Show a JSON example\n\nRead: accounts, folders, threads, search, thread-get\nDrafts: draft-get, draft-create, draft-update, draft-send, operation-get\nOrganize: mark-read, mark-unread, archive, spam, trash, restore-inbox, change-get, undo\n\nJSON input: --input '{...}' or stdin. JSON output; errors exit 1.\nInstall/connect from Paper Reed → Settings → Agent. Keep the app running.\nNo mail is sent by installation or doctor. Sending requires permission and user approval.\n`;
+  return `Paper Reed CLI ${VERSION}\n\nStart here:\n  paper-reed doctor             Check the local connection (read-only)\n  paper-reed accounts           List authorized accounts\n  paper-reed <command> --help   Show a JSON example\n\nRead: accounts, folders, threads, search, thread-get\nDrafts: draft-get, draft-create, draft-update, draft-send, operation-get\nLocal: pin, unpin, snooze, unsnooze, local-list, local-state, labels, label-create, label-update, label-delete, label-add, label-remove\nOrganize: mark-read, mark-unread, archive, spam, trash, restore-inbox, change-get, undo\n\nJSON input: --input '{...}' or stdin. JSON output; errors exit 1.\nInstall/connect from Paper Reed → Settings → Agent. Keep the app running.\nNo mail is sent by installation or doctor. Sending requires permission and user approval.\n`;
 }
 async function main() {
   const [command, ...args] = process.argv.slice(2);
@@ -207,6 +256,8 @@ async function main() {
   }
   const input = inputFor(command, args);
   if (mailActions[command]) input.action = mailActions[command];
+  if (localActions[command]) input.action = localActions[command];
+  if (command === 'label-delete') input.remove = true;
   const { endpoint, token } = connection();
   if (typeof token !== 'string' || !token.trim())
     throw fail(
@@ -243,7 +294,8 @@ async function main() {
     await client.connect(transport, { timeout: 10000 });
     const result = await client.callTool(
       {
-        name: command === 'doctor' ? 'list_accounts' : commands[command][0],
+        name:
+          command === 'doctor' ? 'list_accounts' : commands[command][0],
         arguments: input,
       },
       undefined,

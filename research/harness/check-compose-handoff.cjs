@@ -41,7 +41,7 @@ async function startDesktop(){
  configData['*'].core.mcp.port=port;configData['*'].core.mcp.token=token;fs.writeFileSync(path.join(config,'config.json'),JSON.stringify(configData));
  await startDesktop();
  if(mode==='controls') {
-   await require('./check-editor-controls.cjs')({app,main,cdp,work,account,cli,click,evaluate,until});
+   await require('./check-editor-controls.cjs')({app,main,cdp,work,account,cli,click,evaluate,until,restartDesktop:async(stoppedFor=0)=>{await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().forEach(w=>w.destroy()));await app.close();if(stoppedFor)await new Promise(r=>setTimeout(r,stoppedFor));await startDesktop();return {main,cdp};}});
    return;
  }
  if(mode==='workspace') {

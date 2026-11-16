@@ -179,6 +179,10 @@ function handoff(p, context) {
     ];
   else if (context.scope === 'thread')
     reads = [invoke('thread-get', { threadId: context.threadId })];
+  else if (context.localView && context.mailbox !== 'drafts')
+    reads = (context.accountIds || []).map((accountId) =>
+      invoke('local-list', { accountId, ...context.localView, limit: 25 })
+    );
   else
     reads = (context.accountIds || []).map((accountId) =>
       invoke('search', {

@@ -20,12 +20,12 @@
 | `0014-appearance-rules-folders.patch` | Mailspring 根目录，在 0013 后应用 | 桌面固定基线，加 0002–0007 / 0009–0013 |
 | `0015-template-agent-settings.patch` | Mailspring 根目录，在 0014 后应用 | 桌面固定基线，加 0002–0007 / 0009–0014 |
 | `0016-cli-agent-onboarding.patch` | Mailspring 根目录，在 0015 后应用 | 桌面固定基线，加 0002–0007 / 0009–0015 |
-
 | `0017-inbox-operations-search.patch` | Mailspring 根目录，在 0016 后应用 | 桌面固定基线，加 0002–0007 / 0009–0016 |
+| `0018-local-triage.patch` | Mailspring 根目录，在 0017 后应用 | 桌面固定基线，加 0002–0007 / 0009–0017 |
 
-在干净的固定版本 checkout 中，使用补丁的绝对路径分别执行 `git apply --check <patch>`、`git apply <patch>`。0001、0008 按顺序在子模块根目录应用；0002–0007、0009–0017 按顺序在桌面根目录应用。应用 0008 后重新构建引擎，并替换实验桌面 `app/mailsync`；0010 不要求额外原生构建。本轮已在临时目录恢复各文件的基线版本、实际应用补丁，并逐字节比对测试过的源码。
+在干净的固定版本 checkout 中，使用补丁的绝对路径分别执行 `git apply --check <patch>`、`git apply <patch>`。0001、0008 按顺序在子模块根目录应用；0002–0007、0009–0018 按顺序在桌面根目录应用。应用 0008 后重新构建引擎，并替换实验桌面 `app/mailsync`；0010 不要求额外原生构建。本轮已在临时目录恢复各文件的基线版本、实际应用补丁，并逐字节比对测试过的源码。
 
-当前工作区的 `research/.local/Mailspring` 已应用十七份补丁，**不要重复应用**。安装过程中产生的上游 `app/package-lock.json` 变化不在补丁内。
+当前工作区的 `research/.local/Mailspring` 已应用十八份补丁，**不要重复应用**。安装过程中产生的上游 `app/package-lock.json` 变化不在补丁内。
 
 接入方式：新增一个 `MailMutationGuard.hpp`，只依赖现有 SQLiteCpp / nlohmann。它由 `TaskProcessor.cpp` 和 `MailStore.cpp` 直接包含，不新增构建目标、服务、数据库或任务调度器。迁移在原数据库中建立 `PaperReedSend` 表和活动草稿唯一索引；实验阶段不改变上游 `user_version`。正式分支需要接入自己的版本化迁移。
 
@@ -58,3 +58,5 @@
 0016 提供用户级 CLI 安装、连接诊断、读取命令和带操作指令的 Agent 交接，不要求重编译引擎。见 [验证记录](../cli-onboarding-validation-2026-11-16/README.md)。
 
 0017 接通收件箱搜索、批量整理、逐项回执及精确撤销，并提供共用 CLI 命令，不要求重编译引擎。见 [验证记录](../inbox-validation-2026-11-16/README.md)。
+
+0018 提供本机置顶、稍后、标签管理及共用 CLI，使用现有数据库中的本机表，不要求重编译引擎。见 [验证记录](../triage-validation-2026-11-16/README.md)。

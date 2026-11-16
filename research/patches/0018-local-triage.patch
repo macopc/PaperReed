@@ -1,0 +1,1324 @@
+diff --git a/app/internal_packages/mcp-server/bin/install.cjs b/app/internal_packages/mcp-server/bin/install.cjs
+index 4e4e23a..0fcea19 100644
+--- a/app/internal_packages/mcp-server/bin/install.cjs
++++ b/app/internal_packages/mcp-server/bin/install.cjs
+@@ -179,6 +179,10 @@ function handoff(p, context) {
+     ];
+   else if (context.scope === 'thread')
+     reads = [invoke('thread-get', { threadId: context.threadId })];
++  else if (context.localView && context.mailbox !== 'drafts')
++    reads = (context.accountIds || []).map((accountId) =>
++      invoke('local-list', { accountId, ...context.localView, limit: 25 })
++    );
+   else
+     reads = (context.accountIds || []).map((accountId) =>
+       invoke('search', {
+diff --git a/app/internal_packages/mcp-server/bin/paper-reed.cjs b/app/internal_packages/mcp-server/bin/paper-reed.cjs
+index a35403e..8d37624 100644
+--- a/app/internal_packages/mcp-server/bin/paper-reed.cjs
++++ b/app/internal_packages/mcp-server/bin/paper-reed.cjs
+@@ -12,7 +12,27 @@ const mailActions = {
+   trash: 'trash',
+   'restore-inbox': 'inbox',
+ };
++const localActions = {
++  pin: 'pin',
++  unpin: 'unpin',
++  snooze: 'snooze',
++  unsnooze: 'unsnooze',
++  'label-add': 'label-add',
++  'label-remove': 'label-remove',
++};
+ const commands = {
++  ...Object.fromEntries(
++    Object.keys(localActions).map((name) => [
++      name,
++      ['local_mail_change', null],
++    ])
++  ),
++  'local-list': ['local_mail_list', 'accountId'],
++  'local-state': ['local_mail_state', null],
++  labels: ['local_labels', null],
++  'label-create': ['local_label_edit', null],
++  'label-update': ['local_label_edit', 'id'],
++  'label-delete': ['local_label_edit', 'id'],
+   ...Object.fromEntries(
+     Object.keys(mailActions).map((name) => [name, ['organize_mail', null]])
+   ),
+@@ -30,6 +50,26 @@ const commands = {
+   'operation-get': ['get_operation', 'accountId'],
+ };
+ const examples = {
++  ...Object.fromEntries(
++    Object.keys(localActions).map((name) => [
++      name,
++      {
++        targets: [{ accountId: 'ACCOUNT_ID', threadId: 'THREAD_ID' }],
++        ...(name === 'snooze'
++          ? { until: '2027-01-01T09:00:00-05:00' }
++          : {}),
++        ...(name.startsWith('label-') ? { labelId: 'LABEL_ID' } : {}),
++      },
++    ])
++  ),
++  'local-list': { accountId: 'ACCOUNT_ID', view: 'pinned', limit: 25 },
++  'local-state': {
++    targets: [{ accountId: 'ACCOUNT_ID', threadId: 'THREAD_ID' }],
++  },
++  labels: {},
++  'label-create': { name: '项目', color: '#688177' },
++  'label-update': { id: 'LABEL_ID', name: '项目进展', color: '#78849a' },
++  'label-delete': { id: 'LABEL_ID' },
+   ...Object.fromEntries(
+     Object.keys(mailActions).map((name) => [
+       name,
+@@ -65,7 +105,10 @@ const examples = {
+     expectedRevision: 1,
+     requestId: 'STABLE_REQUEST_ID',
+   },
+-  'operation-get': { accountId: 'ACCOUNT_ID', operationId: 'OPERATION_ID' },
++  'operation-get': {
++    accountId: 'ACCOUNT_ID',
++    operationId: 'OPERATION_ID',
++  },
+ };
+ function fail(code, message, hint) {
+   return Object.assign(new Error(message), { code, hint });
+@@ -103,7 +146,9 @@ function connection() {
+       endpoint: endpointURL(
+         process.env.PAPER_REED_MCP_URL || 'http://127.0.0.1:2587/mcp'
+       ),
+-      token: fs.readFileSync(process.env.PAPER_REED_TOKEN_FILE, 'utf8').trim(),
++      token: fs
++        .readFileSync(process.env.PAPER_REED_TOKEN_FILE, 'utf8')
++        .trim(),
+     };
+   }
+   const file = process.env.PAPER_REED_CLI_PROFILE;
+@@ -133,7 +178,11 @@ function connection() {
+   return { endpoint: endpointURL(data.endpoint), token: data.token };
+ }
+ function inputFor(command, args) {
+-  if (command === 'doctor' || command === 'accounts') {
++  if (
++    command === 'doctor' ||
++    command === 'accounts' ||
++    command === 'labels'
++  ) {
+     if (args.length)
+       throw fail(
+         'invalid-arguments',
+@@ -183,7 +232,7 @@ function inputFor(command, args) {
+ function help(command) {
+   if (commands[command])
+     return `paper-reed ${command} --input '${JSON.stringify(examples[command])}'\nOr pass the same JSON through stdin. Results are JSON; failures exit 1.\n${mailActions[command] ? 'Returns per-target task receipts. queued is not success; poll change-get. Reuse requestId only for the same targets/action while task history remains.\n' : ''}${command === 'draft-send' ? 'Send only with explicit user approval. Keep requestId stable across retries; inspect operation-get after uncertain results.\n' : ''}`;
+-  return `Paper Reed CLI ${VERSION}\n\nStart here:\n  paper-reed doctor             Check the local connection (read-only)\n  paper-reed accounts           List authorized accounts\n  paper-reed <command> --help   Show a JSON example\n\nRead: accounts, folders, threads, search, thread-get\nDrafts: draft-get, draft-create, draft-update, draft-send, operation-get\nOrganize: mark-read, mark-unread, archive, spam, trash, restore-inbox, change-get, undo\n\nJSON input: --input '{...}' or stdin. JSON output; errors exit 1.\nInstall/connect from Paper Reed → Settings → Agent. Keep the app running.\nNo mail is sent by installation or doctor. Sending requires permission and user approval.\n`;
++  return `Paper Reed CLI ${VERSION}\n\nStart here:\n  paper-reed doctor             Check the local connection (read-only)\n  paper-reed accounts           List authorized accounts\n  paper-reed <command> --help   Show a JSON example\n\nRead: accounts, folders, threads, search, thread-get\nDrafts: draft-get, draft-create, draft-update, draft-send, operation-get\nLocal: pin, unpin, snooze, unsnooze, local-list, local-state, labels, label-create, label-update, label-delete, label-add, label-remove\nOrganize: mark-read, mark-unread, archive, spam, trash, restore-inbox, change-get, undo\n\nJSON input: --input '{...}' or stdin. JSON output; errors exit 1.\nInstall/connect from Paper Reed → Settings → Agent. Keep the app running.\nNo mail is sent by installation or doctor. Sending requires permission and user approval.\n`;
+ }
+ async function main() {
+   const [command, ...args] = process.argv.slice(2);
+@@ -207,6 +256,8 @@ async function main() {
+   }
+   const input = inputFor(command, args);
+   if (mailActions[command]) input.action = mailActions[command];
++  if (localActions[command]) input.action = localActions[command];
++  if (command === 'label-delete') input.remove = true;
+   const { endpoint, token } = connection();
+   if (typeof token !== 'string' || !token.trim())
+     throw fail(
+@@ -243,7 +294,8 @@ async function main() {
+     await client.connect(transport, { timeout: 10000 });
+     const result = await client.callTool(
+       {
+-        name: command === 'doctor' ? 'list_accounts' : commands[command][0],
++        name:
++          command === 'doctor' ? 'list_accounts' : commands[command][0],
+         arguments: input,
+       },
+       undefined,
+diff --git a/app/internal_packages/mcp-server/lib/mcp-tools.ts b/app/internal_packages/mcp-server/lib/mcp-tools.ts
+index bd2dfd0..8336db6 100644
+--- a/app/internal_packages/mcp-server/lib/mcp-tools.ts
++++ b/app/internal_packages/mcp-server/lib/mcp-tools.ts
+@@ -1,3 +1,9 @@
++import {
++  localLabels,
++  editLocalLabel,
++  changeLocalMail,
++  localStates,
++} from '../../../src/services/mail-core/local-triage';
+ import {
+   queryInbox,
+   organizeMail,
+@@ -1158,6 +1164,93 @@ export function registerTools(server: McpServer) {
+     async (input) => textResult(await undoMail(input, inboxAccess))
+   );
+ 
++  defineTool(
++    server,
++    'local_mail_change',
++    'Pin, snooze or label explicit threads on this device only. No provider star, folder or label changes. until requires ISO time with timezone.',
++    {
++      action: z.enum(['pin', 'unpin', 'snooze', 'unsnooze', 'label-add', 'label-remove']),
++      targets: z
++        .array(z.object({ accountId: z.string().min(1), threadId: z.string().min(1) }))
++        .min(1)
++        .max(100),
++      until: z.string().optional(),
++      labelId: z.string().optional(),
++    },
++    'write',
++    async (input) => textResult(await changeLocalMail(input, inboxAccess))
++  );
++  defineTool(
++    server,
++    'local_mail_state',
++    'Read local pin, snooze and label state for explicit threads.',
++    {
++      targets: z
++        .array(z.object({ accountId: z.string().min(1), threadId: z.string().min(1) }))
++        .min(1)
++        .max(100),
++    },
++    'read',
++    async ({ targets }) => textResult(await localStates(targets, inboxAccess))
++  );
++  defineTool(
++    server,
++    'local_labels',
++    'List the shared on-device label vocabulary. No mail contents or membership counts.',
++    {},
++    'read',
++    async () => textResult(await localLabels())
++  );
++  defineTool(
++    server,
++    'local_label_edit',
++    'Create, rename, recolor or delete a global local label. Editing definitions requires write access to all accounts and folders; deleting never deletes mail.',
++    {
++      id: z.string().optional(),
++      name: z.string().optional(),
++      color: z.string().optional(),
++      remove: z.boolean().optional(),
++    },
++    'write',
++    async (input) => textResult(await editLocalLabel(input, inboxAccess))
++  );
++  defineTool(
++    server,
++    'local_mail_list',
++    'Query Paper Reed local views. folder inbox hides snoozed threads; view pinned, snoozed or label:ID. Query searches cached mail; results include local state.',
++    {
++      accountId: z.string().min(1),
++      view: z
++        .string()
++        .regex(/^(pinned|snoozed|label:.+)$/)
++        .optional(),
++      folder: z.enum(['inbox', 'sent', 'archive', 'spam', 'trash']).optional(),
++      query: z.string().optional(),
++      unread: z.boolean().optional(),
++      limit: z.number().int().min(1).max(100).default(50),
++      offset: z.number().int().min(0).default(0),
++    },
++    'read',
++    async ({ accountId, view, ...input }) => {
++      const rows = await queryInbox(
++        { ...input, accountIds: [accountId], localView: view, pinFirst: true },
++        inboxAccess
++      );
++      const states = await localStates(
++        rows.map((t) => ({ accountId: t.accountId, threadId: t.id })),
++        inboxAccess
++      );
++      return textResult(
++        rows
++          .map((t) => {
++            const summary = serializeThreadSummary(t);
++            return summary ? { ...summary, local: states[t.id] } : null;
++          })
++          .filter(Boolean)
++      );
++    }
++  );
++
+   // ── Write Tools ──
+ 
+   defineTool(
+diff --git a/app/internal_packages/paper-reed/lib/main.tsx b/app/internal_packages/paper-reed/lib/main.tsx
+index 23e31fc..9731491 100644
+--- a/app/internal_packages/paper-reed/lib/main.tsx
++++ b/app/internal_packages/paper-reed/lib/main.tsx
+@@ -1,11 +1,23 @@
++import { reconcileLocalSnoozes } from '../../../src/services/mail-core/local-triage';
++let timer: ReturnType<typeof setInterval>;
++const reconcile = () =>
++  reconcileLocalSnoozes().catch((error) => console.error('Paper Reed snooze:', error.message));
+ import { ComponentRegistry, WorkspaceStore } from 'mailspring-exports';
+ import PaperReedWorkspace from './workspace';
+ export function activate() {
+   if (!AppEnv.config.get('core.paperReed.enabled')) return;
++  if (AppEnv.isMainWindow()) {
++    timer = setInterval(reconcile, 15000);
++    window.addEventListener('focus', reconcile);
++    reconcile();
++  }
+   document.body.classList.add('paper-reed-enabled');
+-  if (AppEnv.isMainWindow()) ComponentRegistry.register(PaperReedWorkspace, { location: WorkspaceStore.Location.PaperReed });
++  if (AppEnv.isMainWindow())
++    ComponentRegistry.register(PaperReedWorkspace, { location: WorkspaceStore.Location.PaperReed });
+ }
+ export function deactivate() {
++  clearInterval(timer);
++  window.removeEventListener('focus', reconcile);
+   ComponentRegistry.unregister(PaperReedWorkspace);
+   document.body.classList.remove('paper-reed-enabled');
+ }
+diff --git a/app/internal_packages/paper-reed/lib/triage-controls.tsx b/app/internal_packages/paper-reed/lib/triage-controls.tsx
+new file mode 100644
+index 0000000..2b5a508
+--- /dev/null
++++ b/app/internal_packages/paper-reed/lib/triage-controls.tsx
+@@ -0,0 +1,336 @@
++import React, { useState, useRef } from 'react';
++import {
++  changeLocalMail,
++  editLocalLabel,
++  LocalChange,
++  LocalLabel,
++  LocalState,
++} from '../../../src/services/mail-core/local-triage';
++import { inboxDesktopAccess, MailTarget } from '../../../src/services/mail-core/inbox';
++
++export const triageError = (message: string) =>
++  ({
++    'invalid-snooze-time': '请选择未来的时间。',
++    'snooze-requires-inbox': '只能稍后处理收件箱中的邮件。',
++    'snooze-needs-synced-inbox': '请等待收件箱同步完成后重试。',
++    'duplicate-label-name': '已有同名标签，请换一个名称。',
++    'invalid-label-name': '标签名称需为 1–40 个字符。',
++    'label-not-found': '这个标签已被删除，请重新选择。',
++  })[message] || message;
++export const localTime = (time: number) =>
++  new Date(time).toLocaleString(undefined, {
++    month: 'short',
++    day: 'numeric',
++    hour: '2-digit',
++    minute: '2-digit',
++  });
++export function PinMark() {
++  return (
++    <svg className="pr-pin-mark" viewBox="0 0 16 16" width="12" height="12" aria-label="已置顶">
++      <path
++        d="M6 2h4m-3 0v4l-3 4h8l-3-4V2M8 10v4"
++        fill="none"
++        stroke="currentColor"
++        strokeWidth="1.2"
++        strokeLinecap="round"
++        strokeLinejoin="round"
++      />
++    </svg>
++  );
++}
++export function TriageControls({
++  targets,
++  states,
++  labels,
++  busy,
++  onBusy,
++  onDone,
++}: {
++  targets: MailTarget[];
++  states: Record<string, LocalState>;
++  labels: LocalLabel[];
++  busy: boolean;
++  onBusy: (busy: boolean) => void;
++  onDone: () => void;
++}) {
++  const [panel, setPanel] = useState('');
++  const [error, setError] = useState('');
++  const [date, setDate] = useState('');
++  const trigger = useRef<HTMLButtonElement>(null);
++  const labelTrigger = useRef<HTMLButtonElement>(null);
++  const restoreFocus = () => (panel === 'labels' ? labelTrigger : trigger).current?.focus();
++  const pinned = targets.every((t) => states[t.threadId]?.pinned);
++  const snoozed = targets.some((t) => states[t.threadId]?.snoozeUntil);
++  const run = async (change: Omit<LocalChange, 'targets'>) => {
++    onBusy(true);
++    setError('');
++    try {
++      const result = await changeLocalMail({ ...change, targets }, inboxDesktopAccess);
++      const failed = result.items.filter((i) => i.status === 'rejected');
++      if (failed.length)
++        setError(
++          `${result.items.length - failed.length} / ${result.items.length} 完成 · ${triageError(failed[0].error)}`
++        );
++      else {
++        setPanel('');
++        restoreFocus();
++      }
++      onDone();
++    } catch (e) {
++      setError(triageError(e.message));
++    } finally {
++      onBusy(false);
++    }
++  };
++  const later = (tomorrow = false) => {
++    const d = new Date(tomorrow ? Date.now() : Date.now() + 3 * 60 * 60 * 1000);
++    if (tomorrow) {
++      d.setDate(d.getDate() + 1);
++      d.setHours(9, 0, 0, 0);
++    }
++    return d.toISOString();
++  };
++  return (
++    <section
++      className="pr-local-controls"
++      aria-label="本机整理"
++      onKeyDown={(e) => {
++        if (e.key === 'Escape') {
++          setPanel('');
++          restoreFocus();
++          e.stopPropagation();
++        }
++      }}
++    >
++      <div className="pr-local-buttons">
++        <button
++          disabled={busy}
++          data-local-action={pinned ? 'unpin' : 'pin'}
++          onClick={() => run({ action: pinned ? 'unpin' : 'pin' })}
++        >
++          {pinned ? '取消置顶' : '置顶'}
++        </button>
++        <button
++          disabled={busy}
++          ref={trigger}
++          data-local-panel="snooze"
++          aria-expanded={panel === 'snooze'}
++          onClick={() => {
++            setPanel(panel === 'snooze' ? '' : 'snooze');
++            setError('');
++          }}
++        >
++          稍后处理
++        </button>
++        {snoozed && (
++          <button
++            disabled={busy}
++            data-local-action="unsnooze"
++            onClick={() => run({ action: 'unsnooze' })}
++          >
++            结束稍后
++          </button>
++        )}
++        <button
++          disabled={busy}
++          ref={labelTrigger}
++          data-local-panel="labels"
++          aria-expanded={panel === 'labels'}
++          onClick={() => {
++            setPanel(panel === 'labels' ? '' : 'labels');
++            setError('');
++          }}
++        >
++          标签
++        </button>
++        <span>仅在本机</span>
++      </div>
++      {panel === 'snooze' && (
++        <div className="pr-local-panel" aria-label="稍后时间">
++          <div className="pr-snooze-presets">
++            <button disabled={busy} onClick={() => run({ action: 'snooze', until: later() })}>
++              3 小时后
++            </button>
++            <button disabled={busy} onClick={() => run({ action: 'snooze', until: later(true) })}>
++              明天 09:00
++            </button>
++          </div>
++          <form
++            onSubmit={(e) => {
++              e.preventDefault();
++              const time = new Date(date).getTime();
++              if (!Number.isFinite(time)) {
++                setError('请选择有效的时间。');
++                return;
++              }
++              run({ action: 'snooze', until: new Date(time).toISOString() });
++            }}
++          >
++            <label>
++              自定时间
++              <input
++                autoFocus
++                type="datetime-local"
++                value={date}
++                onChange={(e) => setDate(e.target.value)}
++                required
++              />
++            </label>
++            <button disabled={busy} type="submit">
++              设定
++            </button>
++          </form>
++          <small>按系统时区显示 · 到期或有新来信时回到列表；退出后将在下次打开时恢复。</small>
++        </div>
++      )}
++      {panel === 'labels' && (
++        <div className="pr-local-panel pr-label-picker" aria-label="选择本机标签">
++          {!labels.length && <p>还没有标签，请从左侧“标签 · 管理”创建。</p>}
++          {labels.map((l) => {
++            const n = targets.filter((t) =>
++              states[t.threadId]?.labels.some((x) => x.id === l.id)
++            ).length;
++            return (
++              <label key={l.id}>
++                <input
++                  type="checkbox"
++                  disabled={busy}
++                  checked={n === targets.length}
++                  ref={(el) => {
++                    if (el) el.indeterminate = n > 0 && n < targets.length;
++                  }}
++                  onChange={(e) =>
++                    run({ action: e.target.checked ? 'label-add' : 'label-remove', labelId: l.id })
++                  }
++                />
++                <i className="pr-label-dot" style={{ backgroundColor: l.color }} />
++                {l.name}
++                {n > 0 && n < targets.length && <small>部分已添加</small>}
++              </label>
++            );
++          })}
++        </div>
++      )}
++      {error && (
++        <p className="pr-local-error" role="alert">
++          {error}
++        </p>
++      )}
++    </section>
++  );
++}
++export function LabelManager({
++  labels,
++  onDone,
++  onClose,
++}: {
++  labels: LocalLabel[];
++  onDone: () => void;
++  onClose: () => void;
++}) {
++  const [id, setId] = useState('');
++  const [name, setName] = useState('');
++  const [color, setColor] = useState('#688177');
++  const [error, setError] = useState('');
++  const [busy, setBusy] = useState(false);
++  const [confirm, setConfirm] = useState(false);
++  const choose = (id: string) => {
++    const label = labels.find((l) => l.id === id);
++    setId(id);
++    setName(label?.name || '');
++    setColor(label?.color || '#688177');
++    setConfirm(false);
++    setError('');
++  };
++  const save = async (remove = false) => {
++    setBusy(true);
++    setError('');
++    try {
++      await editLocalLabel({ id: id || undefined, name, color, remove }, inboxDesktopAccess);
++      choose('');
++      onDone();
++    } catch (e) {
++      setError(triageError(e.message));
++    } finally {
++      setBusy(false);
++    }
++  };
++  return (
++    <section className="pr-label-manager pr-local-panel" aria-label="管理本机标签">
++      <header>
++        <strong>本机标签</strong>
++        <button onClick={onClose} aria-label="关闭标签管理">
++          关闭
++        </button>
++      </header>
++      <p>名称与颜色在所有邮箱中共用。</p>
++      <form
++        onSubmit={(e) => {
++          e.preventDefault();
++          save();
++        }}
++      >
++        <label>
++          标签
++          <select
++            aria-label="编辑标签"
++            value={id}
++            onChange={(e) => choose(e.target.value)}
++            disabled={busy}
++          >
++            <option value="">新建标签</option>
++            {labels.map((l) => (
++              <option key={l.id} value={l.id}>
++                {l.name}
++              </option>
++            ))}
++          </select>
++        </label>
++        <label>
++          名称
++          <input
++            autoFocus
++            aria-label="标签名称"
++            value={name}
++            maxLength={40}
++            onChange={(e) => setName(e.target.value)}
++            disabled={busy}
++            required
++          />
++        </label>
++        <label>
++          颜色
++          <input
++            type="color"
++            aria-label="标签颜色"
++            value={color}
++            onChange={(e) => setColor(e.target.value)}
++            disabled={busy}
++          />
++        </label>
++        <button type="submit" disabled={busy}>
++          {id ? '保存' : '创建'}
++        </button>
++        {id && (
++          <button type="button" disabled={busy} onClick={() => setConfirm(true)}>
++            删除标签
++          </button>
++        )}
++      </form>
++      {confirm && (
++        <div role="alert">
++          <p>删除“{labels.find((l) => l.id === id)?.name}”及其本机标记？邮件会保留。</p>
++          <button disabled={busy} onClick={() => save(true)}>
++            确认删除
++          </button>
++          <button onClick={() => setConfirm(false)}>取消</button>
++        </div>
++      )}
++      {error && (
++        <p className="pr-local-error" role="alert">
++          {error}
++        </p>
++      )}
++    </section>
++  );
++}
+diff --git a/app/internal_packages/paper-reed/lib/workspace.tsx b/app/internal_packages/paper-reed/lib/workspace.tsx
+index f96834c..98e79a0 100644
+--- a/app/internal_packages/paper-reed/lib/workspace.tsx
++++ b/app/internal_packages/paper-reed/lib/workspace.tsx
+@@ -1,3 +1,11 @@
++import {
++  localLabels,
++  localStates,
++  onLocalTriageChanged,
++  LocalLabel,
++  LocalState,
++} from '../../../src/services/mail-core/local-triage';
++import { TriageControls, LabelManager, PinMark, localTime } from './triage-controls';
+ import { randomUUID } from 'crypto';
+ import {
+   queryInbox,
+@@ -32,6 +40,8 @@ import DraftFactory from '../../../src/flux/stores/draft-factory';
+ const Composer = InflatesDraftClientId(ComposerView);
+ const folders = [
+   ['inbox', '收件箱'],
++  ['pinned', '置顶'],
++  ['snoozed', '稍后'],
+   ['drafts', '草稿'],
+   ['sent', '已发送'],
+   ['archive', '归档'],
+@@ -49,6 +59,9 @@ const sendLabel = (op: { phase: string; sentCopy: string }) =>
+ const colors = ['#688177', '#a18265', '#78849a', '#957789'];
+ 
+ interface State {
++  labels: LocalLabel[];
++  local: Record<string, LocalState>;
++  labelManager: boolean;
+   folder: string;
+   accountId: string;
+   route: 'list' | 'thread' | 'compose';
+@@ -88,6 +101,9 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   static displayName = 'PaperReedWorkspace';
+   static containerStyles = { minWidth: 700, flex: 1 };
+   state: State = {
++    labels: [],
++    local: {},
++    labelManager: false,
+     folder: 'inbox',
+     accountId: '',
+     route: 'list',
+@@ -122,6 +138,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     this.mounted = true;
+     this.unlisten = [
+       DatabaseStore.listen(this.scheduleRefresh),
++      onLocalTriageChanged(this.scheduleRefresh),
+       CategoryStore.listen(this.scheduleRefresh),
+       AccountStore.listen(this.scheduleRefresh),
+       WorkspaceStore.setSectionLeaveGuard(() => {
+@@ -185,13 +202,33 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+           {
+             accountIds: ids,
+             query,
+-            folder: query ? undefined : folder,
++            folder:
++              query || ['pinned', 'snoozed'].includes(folder) || folder.startsWith('label:')
++                ? undefined
++                : folder,
++            localView:
++              !query && (['pinned', 'snoozed'].includes(folder) || folder.startsWith('label:'))
++                ? folder
++                : undefined,
++            pinFirst: true,
+             unread: unreadOnly,
+             limit: limit + 1,
+           },
+           inboxDesktopAccess
+         );
+       }
++      const labels = await localLabels();
++      const stateRows = rows.filter((r): r is Thread => r instanceof Thread);
++      if (
++        this.state.route === 'thread' &&
++        this.state.selected instanceof Thread &&
++        !stateRows.some((t) => t.id === this.state.selected.id)
++      )
++        stateRows.push(this.state.selected);
++      const local = await localStates(
++        stateRows.map((r) => ({ accountId: r.accountId, threadId: r.id })),
++        inboxDesktopAccess
++      );
+       const recovery =
+         folder === 'drafts' && !query ? await desktopDraftRecoveryInfo(rows as Message[]) : [];
+       const snippets: Record<string, string> = {};
+@@ -208,6 +245,8 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       if (this.mounted && generation === this.generation)
+         this.setState({
+           rows: rows.slice(0, limit),
++          labels,
++          local,
+           recovery,
+           snippets,
+           more: rows.length > limit,
+@@ -295,7 +334,13 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       if (row instanceof Message) this.setState({ route: 'compose', selected: row });
+       else {
+         Actions.focusMailboxPerspective(
+-          MailboxPerspective.forStandardCategories(this.accountIds(), this.state.folder)
++          MailboxPerspective.forStandardCategories(
++            this.accountIds(),
++            folders.slice(3).some((f) => f[0] === this.state.folder) ||
++              this.state.folder === 'inbox'
++              ? this.state.folder
++              : 'all'
++          )
+         );
+         Actions.setFocus({ collection: 'thread', item: row });
+         this.setState({ route: 'thread', selected: row });
+@@ -334,6 +379,13 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+               : this.state.query
+             : `in:${folder}${this.state.unreadOnly ? ' is:unread' : ''}`,
+         };
++      if (route === 'list' && !this.state.checked.length && !this.state.query)
++        context.localView = {
++          ...(['pinned', 'snoozed'].includes(folder) || folder.startsWith('label:')
++            ? { view: folder }
++            : { folder }),
++          unread: this.state.unreadOnly,
++        };
+       if (route === 'compose' && selected instanceof Message) {
+         const session = await DraftStore.sessionForClientId(selected.headerMessageId);
+         context = {
+@@ -458,7 +510,9 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       return;
+     }
+     if (
+-      target.closest('input,textarea,select,[contenteditable=true],summary') ||
++      target.closest(
++        'input,textarea,select,[contenteditable=true],summary,.pr-local-controls,.pr-label-manager'
++      ) ||
+       event.altKey ||
+       event.metaKey ||
+       event.ctrlKey
+@@ -489,6 +543,25 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       this.setState({ checked: [] });
+     }
+   };
++  renderLocalControls(targets = this.selectedTargets()) {
++    return (
++      !!targets.length && (
++        <TriageControls
++          key={targets.map((t) => t.threadId).join(',')}
++          targets={targets}
++          labels={this.state.labels}
++          states={this.state.local}
++          busy={this.state.busy}
++          onBusy={(busy) => this.setState({ busy })}
++          onDone={this.refresh}
++        />
++      )
++    );
++  }
++  locationTitle = () =>
++    this.state.folder.startsWith('label:')
++      ? this.state.labels.find((l) => l.id === this.state.folder.slice(6))?.name || '标签已删除'
++      : folders.find((f) => f[0] === this.state.folder)?.[1];
+   renderListTools() {
+     const rows = this.state.rows.filter((r) => r instanceof Thread);
+     const selected = this.selectedTargets();
+@@ -569,6 +642,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+             </label>
+           )}
+         </div>
++        {this.renderLocalControls()}
+         {!!selected.length && (
+           <div className="pr-selection-actions" role="group" aria-label="所选邮件操作">
+             {actions
+@@ -711,6 +785,28 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+         <span className="pr-sender">{name}</span>
+         <span className="pr-summary">
+           <span className="pr-subject">{row.subject || '无主题'}</span>
++          {!draft &&
++            (this.state.local[row.id]?.labels.length > 0 ||
++              this.state.local[row.id]?.snoozeUntil) && (
++              <span className="pr-local-marks">
++                {this.state.local[row.id]?.labels.slice(0, 2).map((l) => (
++                  <span key={l.id} className="pr-local-label" title={l.name}>
++                    <i className="pr-label-dot" style={{ backgroundColor: l.color }} />
++                    <span>{l.name}</span>
++                  </span>
++                ))}
++                {this.state.local[row.id]?.labels.length > 2 && (
++                  <span title={this.state.local[row.id].labels.map((l) => l.name).join('、')}>
++                    +{this.state.local[row.id].labels.length - 2}
++                  </span>
++                )}
++                {this.state.local[row.id]?.snoozeUntil && (
++                  <time dateTime={new Date(this.state.local[row.id].snoozeUntil).toISOString()}>
++                    稍后 · {localTime(this.state.local[row.id].snoozeUntil)}
++                  </time>
++                )}
++              </span>
++            )}
+           <span className="pr-snippet">
+             {recovery ? (
+               <>
+@@ -737,6 +833,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+           </span>
+         </span>
+         <span className="pr-date">
++          {!draft && this.state.local[row.id]?.pinned && <PinMark />}
+           {row.unread && <span className="pr-unread" aria-hidden="true" />}
+           {date ? date.toLocaleDateString(undefined, { month: 'short', day: 'numeric' }) : ''}
+         </span>
+@@ -763,11 +860,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   render() {
+     const { route, folder, selected, rows, loading, agent } = this.state;
+     const title =
+-      route === 'compose'
+-        ? '写一封信'
+-        : this.state.query
+-          ? '搜索结果'
+-          : folders.find((f) => f[0] === folder)?.[1];
++      route === 'compose' ? '写一封信' : this.state.query ? '搜索结果' : this.locationTitle();
+     return (
+       <div className="pr-workspace">
+         <header className="pr-titlebar">
+@@ -806,6 +899,31 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                 </button>
+               ))}
+             </nav>
++            <div className="pr-local-label-heading">
++              <span>标签</span>
++              <button
++                onClick={() => this.setState({ labelManager: !this.state.labelManager })}
++                aria-expanded={this.state.labelManager}
++              >
++                管理
++              </button>
++            </div>
++            <nav className="pr-label-nav" aria-label="本机标签">
++              {this.state.labels.map((l) => (
++                <button
++                  key={l.id}
++                  data-label-id={l.id}
++                  aria-current={
++                    !this.state.query && folder === `label:${l.id}` ? 'page' : undefined
++                  }
++                  onClick={() => this.navigate(`label:${l.id}`)}
++                  title={l.name}
++                >
++                  <i className="pr-label-dot" style={{ backgroundColor: l.color }} />
++                  <span>{l.name}</span>
++                </button>
++              ))}
++            </nav>
+             <div className="pr-sidebar-bottom">
+               <button onClick={this.preferences}>设置</button>
+             </div>
+@@ -824,7 +942,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                     })
+                   }
+                 >
+-                  ‹ 返回{this.state.query ? '搜索结果' : folders.find((f) => f[0] === folder)?.[1]}
++                  ‹ 返回{this.state.query ? '搜索结果' : this.locationTitle()}
+                 </button>
+               )}
+               <button
+@@ -834,6 +952,16 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                 {cliStatus().ready ? '交给 Agent ↗' : '连接 Agent ↗'}
+               </button>
+             </div>
++            {this.state.labelManager && (
++              <LabelManager
++                labels={this.state.labels}
++                onDone={this.refresh}
++                onClose={() => this.setState({ labelManager: false })}
++              />
++            )}
++            {route === 'thread' &&
++              selected &&
++              this.renderLocalControls([{ accountId: selected.accountId, threadId: selected.id }])}
+             {this.renderMailReceipt()}
+             {this.state.notice && (
+               <div className="pr-notice" role="alert">
+diff --git a/app/internal_packages/paper-reed/styles/paper-reed.less b/app/internal_packages/paper-reed/styles/paper-reed.less
+index 690a362..254a27f 100644
+--- a/app/internal_packages/paper-reed/styles/paper-reed.less
++++ b/app/internal_packages/paper-reed/styles/paper-reed.less
+@@ -550,3 +550,42 @@
+   .pr-mail-receipt > button:last-of-type { margin-left:auto; } .pr-mail-receipt details { width:100%; color:#9a433e; }
+   .pr-mail-receipt details p { overflow-wrap:anywhere; }
+ }
++
++.paper-reed-enabled .pr-workspace {
++  .pr-sidebar { overflow-y:auto; }
++  .pr-local-label-heading { display:flex; align-items:center; justify-content:space-between; margin:28px 8px 8px; color:#626b60; font-size:11px; }
++  .pr-local-label-heading button { border:0; padding:4px; font-size:11px; background:transparent; color:#626b60; }
++  .pr-label-nav button { display:flex; gap:8px; align-items:center; }
++  .pr-label-nav button span { overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
++  .pr-label-dot { display:inline-block; width:6px; height:6px; border-radius:50%; flex-shrink:0; }
++  .pr-local-marks { display:flex; flex-wrap:wrap; align-items:center; gap:6px 12px; margin:3px 0; font-size:10px; font-weight:400; line-height:16px; color:#626b60; }
++  .pr-local-label { display:inline-flex; align-items:center; gap:5px; max-width:150px; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
++  .pr-pin-mark { color:#4b634f; flex-shrink:0; }
++  .pr-local-controls { margin:0 0 4px; }
++  .pr-local-buttons { display:flex; flex-wrap:wrap; align-items:center; gap:4px 14px; padding:4px 0; }
++  .pr-local-buttons button { border:0; background:transparent; padding:6px 10px; color:#4b634f; font-size:12px; }
++  .pr-local-buttons button[aria-expanded=true] { background:#e9eee5; border-radius:4px; }
++  .pr-local-buttons > span { font-size:10px; color:#626b60; margin-left:auto; }
++  .pr-local-panel { border:1px solid #dfe2d9; border-radius:5px; background:#f5f5ef; padding:16px; margin:8px 0 16px; font-size:12px; }
++  .pr-local-panel header { display:flex; justify-content:space-between; align-items:center; }
++  .pr-local-panel button { padding:5px 10px; border:1px solid #dfe2d9; border-radius:4px; background:#fffefa; color:#4b634f; font-size:12px; }
++  .pr-local-panel form { display:flex; flex-wrap:wrap; gap:12px; align-items:end; }
++  .pr-local-panel form label { display:flex; flex-direction:column; gap:6px; color:#626b60; }
++  .pr-local-panel input:not([type=checkbox]), .pr-local-panel select { border:1px solid #c6cbc2; border-radius:4px; background:#fffefa; padding:5px 8px; height:32px; margin:0; font-size:12px; color:#303730; }
++  .pr-local-panel input[type=color] { width:42px; padding:4px; }
++  .pr-local-panel small { display:block; color:#626b60; line-height:18px; margin-top:12px; }
++  .pr-snooze-presets { display:flex; gap:8px; margin-bottom:16px; }
++  .pr-label-picker { display:flex; flex-wrap:wrap; gap:12px 20px; }
++  .pr-label-picker label { display:flex; align-items:center; gap:6px; cursor:pointer; }
++  .pr-label-picker small { margin:0; }
++  .pr-local-error { color:#9a433e; font-size:12px; line-height:20px; }
++}
++
++.paper-reed-enabled .pr-workspace {
++  .pr-summary { display:block; }
++  .pr-subject, .pr-snippet { display:block; }
++  .pr-local-marks { float:right; max-width:55%; margin:4px 0 0 12px; flex-wrap:nowrap; white-space:nowrap; overflow:hidden; }
++  .pr-local-label { min-width:0; }
++  .pr-local-label > span { overflow:hidden; text-overflow:ellipsis; }
++  .pr-date .pr-pin-mark { margin-right:6px; vertical-align:-1px; }
++}
+diff --git a/app/src/services/mail-access/queries.ts b/app/src/services/mail-access/queries.ts
+index 2763028..2760bab 100644
+--- a/app/src/services/mail-access/queries.ts
++++ b/app/src/services/mail-access/queries.ts
+@@ -26,6 +26,8 @@ export interface MailQuery {
+   /** Only models carrying metadata under this plugin id. */
+   metadataPluginId?: string;
+   order?: 'newest' | 'oldest';
++  /** Host-owned priority ordering; never supplied by MCP input. */
++  priorityOrder?: import('../../flux/attributes/sort-order').SortOrder;
+   limit: number;
+   offset?: number;
+   /**
+@@ -106,6 +108,7 @@ export function threadQuery(grant: Grant, q: MailQuery) {
+     });
+     query = query.where(new FilterMatcher(sql) as any);
+   }
++  if (q.priorityOrder) query = query.order(q.priorityOrder);
+   const date = Thread.attributes.lastMessageReceivedTimestamp;
+   query = query
+     .order(q.order === 'oldest' ? date.ascending() : date.descending())
+diff --git a/app/src/services/mail-core/inbox.ts b/app/src/services/mail-core/inbox.ts
+index 7619709..8700952 100644
+--- a/app/src/services/mail-core/inbox.ts
++++ b/app/src/services/mail-core/inbox.ts
+@@ -1,3 +1,10 @@
++import {
++  ensureLocalTriage,
++  reconcileLocalSnoozes,
++  localViewSQL,
++  localPinOrder,
++} from './local-triage';
++import { FilterMatcher } from '../mail-access/filter';
+ import { createHash } from 'crypto';
+ import {
+   AccountStore,
+@@ -46,12 +53,16 @@ export async function queryInbox(
+     accountIds: string[];
+     query?: string;
+     folder?: string;
++    localView?: string;
++    pinFirst?: boolean;
+     unread?: boolean;
+     limit: number;
+     offset?: number;
+   },
+   access: InboxAccess
+ ) {
++  await ensureLocalTriage();
++  await reconcileLocalSnoozes();
+   const grant = access.grant();
+   input.accountIds.forEach((id) => access.check(id, false));
+   const ids = input.accountIds.filter(
+@@ -64,12 +75,19 @@ export async function queryInbox(
+     { ...grant, accountIds: ids },
+     {
+       search: input.query,
++      priorityOrder: input.pinFirst ? (localPinOrder as any) : undefined,
+       filter: clauses.length ? { and: clauses } : undefined,
+       limit: Math.min(input.limit, 201),
+       offset: input.offset || 0,
+       background: true,
+     }
+   );
++  query.where(
++    new FilterMatcher(
++      localViewSQL(input.localView, input.folder === 'inbox' && !input.query)
++    ) as any
++  );
++  query.order(Thread.attributes.id.ascending());
+   const rows = await query;
+   input.accountIds.forEach((id) => access.check(id, false));
+   return rows.filter((t) => isThreadAllowed(access.grant(), t));
+diff --git a/app/src/services/mail-core/local-triage.ts b/app/src/services/mail-core/local-triage.ts
+new file mode 100644
+index 0000000..3da3171
+--- /dev/null
++++ b/app/src/services/mail-core/local-triage.ts
+@@ -0,0 +1,302 @@
++import Sqlite3 from 'better-sqlite3';
++import { z } from 'zod';
++import { randomUUID } from 'crypto';
++import { AccountStore, DatabaseStore, Message, Thread } from 'mailspring-exports';
++import type { InboxAccess, MailTarget } from './inbox';
++import { isThreadAllowed } from '../mail-access/grant';
++
++export type LocalLabel = { id: string; name: string; color: string };
++export type LocalState = { pinned: boolean; snoozeUntil: number | null; labels: LocalLabel[] };
++export type LocalChange = {
++  action: 'pin' | 'unpin' | 'snooze' | 'unsnooze' | 'label-add' | 'label-remove';
++  targets: MailTarget[];
++  until?: string;
++  labelId?: string;
++};
++const listeners = new Set<() => void>();
++export function onLocalTriageChanged(fn: () => void) {
++  listeners.add(fn);
++  return () => {
++    listeners.delete(fn);
++  };
++}
++function changed() {
++  listeners.forEach((fn) => fn());
++}
++// The upstream renderer connection is read-only. One local writer uses the same database,
++// and writes only our three local tables; mail mutations stay with the native engine.
++let writer: Sqlite3.Database;
++const sql = async (query: string, values: any[] = []): Promise<any[]> => {
++  const statement = writer.prepare(query);
++  return statement.reader ? statement.all(values) : (statement.run(values), []);
++};
++let ready: Promise<void>;
++export function ensureLocalTriage() {
++  if (!ready)
++    ready = (async () => {
++      await DatabaseStore._query('SELECT 1');
++      if (!AppEnv.isMainWindow()) throw new Error('local-triage-requires-main-window');
++      writer = new Sqlite3(DatabaseStore._databasePath, { fileMustExist: true, timeout: 10000 });
++      await sql(
++        'CREATE TABLE IF NOT EXISTS PaperReedLocalThread (accountId TEXT NOT NULL, threadId TEXT NOT NULL, pinned INTEGER NOT NULL DEFAULT 0, snoozeUntil INTEGER, baseline TEXT, PRIMARY KEY(accountId, threadId))'
++      );
++      await sql(
++        'CREATE TABLE IF NOT EXISTS PaperReedLocalLabel (id TEXT PRIMARY KEY, name TEXT NOT NULL, nameKey TEXT NOT NULL UNIQUE, color TEXT NOT NULL)'
++      );
++      await sql(
++        'CREATE TABLE IF NOT EXISTS PaperReedLocalThreadLabel (accountId TEXT NOT NULL, threadId TEXT NOT NULL, labelId TEXT NOT NULL, PRIMARY KEY(accountId, threadId, labelId))'
++      );
++    })().catch((error) => {
++      writer?.close();
++      writer = undefined;
++      ready = undefined;
++      throw error;
++    });
++  return ready;
++}
++let writes: Promise<unknown> = Promise.resolve();
++function serial<T>(fn: () => Promise<T>): Promise<T> {
++  const result = writes.then(async () => {
++    await ensureLocalTriage();
++    return fn();
++  });
++  writes = result.catch(() => {});
++  return result;
++}
++async function allowed(ref: MailTarget, access: InboxAccess, write: boolean) {
++  access.check(ref.accountId, write);
++  const thread = await DatabaseStore.find<Thread>(Thread, ref.threadId);
++  access.check(ref.accountId, write);
++  if (!thread || thread.accountId !== ref.accountId || !isThreadAllowed(access.grant(), thread))
++    throw new Error('thread-not-found');
++  return thread;
++}
++export async function localLabels(): Promise<LocalLabel[]> {
++  await ensureLocalTriage();
++  return sql('SELECT id, name, color FROM PaperReedLocalLabel ORDER BY nameKey');
++}
++function globalLabelAccess(access: InboxAccess) {
++  const ids = AccountStore.accountIds();
++  if (!ids.length) throw new Error('account-not-found');
++  ids.forEach((id) => access.check(id, true));
++  if (Object.values(access.grant().excludedFolderIds).some((ids) => ids.length))
++    throw new Error('Access denied: global labels require all mailbox access');
++}
++export function editLocalLabel(
++  input: { id?: string; name?: string; color?: string; remove?: boolean },
++  access: InboxAccess
++) {
++  return serial(async () => {
++    globalLabelAccess(access);
++    const labels = await localLabels();
++    const old = input.id && labels.find((l) => l.id === input.id);
++    if (input.id && !old) throw new Error('label-not-found');
++    if (input.remove) {
++      if (!old) throw new Error('label-not-found');
++      globalLabelAccess(access);
++      writer.transaction(() => {
++        writer.prepare('DELETE FROM PaperReedLocalLabel WHERE id = ?').run(input.id);
++        writer.prepare('DELETE FROM PaperReedLocalThreadLabel WHERE labelId = ?').run(input.id);
++      })();
++      changed();
++      return { id: input.id, deleted: true };
++    }
++    const name = (input.name ?? (old ? old.name : '')).trim().normalize('NFC');
++    const color = input.color ?? (old ? old.color : '#688177');
++    if (!name || name.length > 40 || /[\u0000-\u001f\u007f]/.test(name))
++      throw new Error('invalid-label-name');
++    if (!/^#[a-fA-F0-9]{6}$/.test(color)) throw new Error('invalid-label-color');
++    if (labels.some((l) => l.id !== input.id && l.name.toLowerCase() === name.toLowerCase()))
++      throw new Error('duplicate-label-name');
++    const id = input.id || randomUUID();
++    globalLabelAccess(access);
++    await sql(
++      'INSERT INTO PaperReedLocalLabel (id,name,nameKey,color) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,nameKey=excluded.nameKey,color=excluded.color',
++      [id, name, name.toLowerCase(), color]
++    );
++    changed();
++    return { id, name, color };
++  });
++}
++export async function localStates(
++  targets: MailTarget[],
++  access: InboxAccess
++): Promise<Record<string, LocalState>> {
++  await ensureLocalTriage();
++  const result: Record<string, LocalState> = {};
++  for (const target of targets) {
++    await allowed(target, access, false);
++    const [state] = await sql(
++      'SELECT pinned,snoozeUntil FROM PaperReedLocalThread WHERE accountId=? AND threadId=?',
++      [target.accountId, target.threadId]
++    );
++    const labels = await sql(
++      'SELECT l.id,l.name,l.color FROM PaperReedLocalLabel l JOIN PaperReedLocalThreadLabel t ON t.labelId=l.id WHERE t.accountId=? AND t.threadId=? ORDER BY l.nameKey',
++      [target.accountId, target.threadId]
++    );
++    await allowed(target, access, false);
++    result[target.threadId] = {
++      pinned: !!state?.pinned,
++      snoozeUntil: state?.snoozeUntil || null,
++      labels,
++    };
++  }
++  return result;
++}
++async function inboxBaseline(accountId: string) {
++  const rows = await sql(
++    "SELECT id,data FROM Folder WHERE accountId=? AND json_extract(data,'$.role')='inbox'",
++    [accountId]
++  );
++  const folder = rows[0];
++  const status = folder && JSON.parse(folder.data).localStatus;
++  if (!status?.uidvalidity || !status?.uidnext) throw new Error('snooze-needs-synced-inbox');
++  const [max] = await sql(
++    'SELECT MAX(remoteUID) AS uid FROM MessageFolder WHERE accountId=? AND folderId=?',
++    [accountId, folder.id]
++  );
++  return {
++    folderId: folder.id,
++    validity: status.uidvalidity,
++    nextUID: Math.max(status.uidnext, (max?.uid || 0) + 1),
++  };
++}
++export function changeLocalMail(input: LocalChange, access: InboxAccess) {
++  return serial(async () => {
++    if (!input.targets.length || input.targets.length > 100) throw new Error('invalid-targets');
++    if (!['pin', 'unpin', 'snooze', 'unsnooze', 'label-add', 'label-remove'].includes(input.action))
++      throw new Error('invalid-action');
++    const until = input.until ? Date.parse(input.until) : NaN;
++    if (
++      input.action === 'snooze' &&
++      (!z.string().datetime({ offset: true }).safeParse(input.until).success ||
++        !Number.isFinite(until) ||
++        until <= Date.now())
++    )
++      throw new Error('invalid-snooze-time');
++    const items = [];
++    for (const target of input.targets) {
++      try {
++        const thread = await allowed(target, access, true);
++        let baseline: string = null;
++        if (input.action === 'snooze') {
++          if (
++            !thread.categories.some((c) => c.role === 'inbox') ||
++            thread.categories.some((c) => ['spam', 'trash'].includes(c.role))
++          )
++            throw new Error('snooze-requires-inbox');
++          const cursor = await inboxBaseline(target.accountId);
++          const known = await DatabaseStore.findAll<Message>(Message).where({
++            accountId: target.accountId,
++            threadId: target.threadId,
++            draft: false,
++          });
++          baseline = JSON.stringify({ ...cursor, knownIds: known.map((m) => m.id) });
++        }
++        if (
++          input.action.startsWith('label-') &&
++          !(await localLabels()).some((l) => l.id === input.labelId)
++        )
++          throw new Error('label-not-found');
++        await allowed(target, access, true);
++        const args = [target.accountId, target.threadId];
++        if (input.action === 'pin' || input.action === 'unpin')
++          await sql(
++            'INSERT INTO PaperReedLocalThread (accountId,threadId,pinned) VALUES (?,?,?) ON CONFLICT(accountId,threadId) DO UPDATE SET pinned=excluded.pinned',
++            [...args, input.action === 'pin' ? 1 : 0]
++          );
++        else if (input.action === 'snooze' || input.action === 'unsnooze')
++          await sql(
++            'INSERT INTO PaperReedLocalThread (accountId,threadId,snoozeUntil,baseline) VALUES (?,?,?,?) ON CONFLICT(accountId,threadId) DO UPDATE SET snoozeUntil=excluded.snoozeUntil,baseline=excluded.baseline',
++            [...args, input.action === 'snooze' ? until : null, baseline]
++          );
++        else if (input.action === 'label-add')
++          await sql(
++            'INSERT OR IGNORE INTO PaperReedLocalThreadLabel (accountId,threadId,labelId) VALUES (?,?,?)',
++            [...args, input.labelId]
++          );
++        else
++          await sql(
++            'DELETE FROM PaperReedLocalThreadLabel WHERE accountId=? AND threadId=? AND labelId=?',
++            [...args, input.labelId]
++          );
++        items.push({ ...target, status: 'succeeded' });
++      } catch (error) {
++        items.push({ ...target, status: 'rejected', error: error.message });
++      }
++    }
++    changed();
++    return { items };
++  });
++}
++// UID baseline rejects historical backfill even when its Date header is newer. No remote move.
++export function reconcileLocalSnoozes() {
++  return serial(async () => {
++    const rows = await sql(
++      'SELECT accountId,threadId,snoozeUntil,baseline FROM PaperReedLocalThread WHERE snoozeUntil IS NOT NULL'
++    );
++    let count = 0;
++    for (const row of rows) {
++      if (!AccountStore.accountForId(row.accountId)) continue;
++      let wake = row.snoozeUntil <= Date.now();
++      const thread = await DatabaseStore.find<Thread>(Thread, row.threadId);
++      if (!thread) continue;
++      if (
++        thread.categories.some((c) => ['spam', 'trash'].includes(c.role)) ||
++        !thread.categories.some((c) => c.role === 'inbox')
++      )
++        wake = true;
++      if (!wake) {
++        const baseline = JSON.parse(row.baseline);
++        const [folder] = await sql('SELECT data FROM Folder WHERE id=? AND accountId=?', [
++          baseline.folderId,
++          row.accountId,
++        ]);
++        const status = folder && JSON.parse(folder.data).localStatus;
++        // A UIDVALIDITY reset invalidates new-mail evidence; retain the timer, never guess.
++        if (status?.uidvalidity === baseline.validity) {
++          const candidates = await sql(
++            'SELECT m.id FROM Message m JOIN MessageFolder p ON p.messageId=m.id WHERE m.accountId=? AND m.threadId=? AND m.draft=0 AND p.folderId=? AND p.remoteUID>=?',
++            [row.accountId, row.threadId, baseline.folderId, baseline.nextUID]
++          );
++          for (const c of candidates) {
++            if (baseline.knownIds.includes(c.id)) continue;
++            const message = await DatabaseStore.find<Message>(Message, c.id);
++            if (message?.from.length && !message.isFromMe()) {
++              wake = true;
++              break;
++            }
++          }
++        }
++      }
++      if (wake) {
++        await sql(
++          'UPDATE PaperReedLocalThread SET snoozeUntil=NULL,baseline=NULL WHERE accountId=? AND threadId=?',
++          [row.accountId, row.threadId]
++        );
++        count++;
++      }
++    }
++    if (count) changed();
++    return count;
++  });
++}
++// Only fixed SQL and escaped label IDs enter the query builder; filters run before pagination.
++export function localViewSQL(view?: string, hideSnoozed = false) {
++  const state = 's.accountId=Thread.accountId AND s.threadId=Thread.id';
++  if (view === 'pinned')
++    return `EXISTS (SELECT 1 FROM PaperReedLocalThread s WHERE ${state} AND s.pinned=1)`;
++  if (view === 'snoozed')
++    return `EXISTS (SELECT 1 FROM PaperReedLocalThread s WHERE ${state} AND s.snoozeUntil IS NOT NULL)`;
++  if (view?.startsWith('label:'))
++    return `EXISTS (SELECT 1 FROM PaperReedLocalThreadLabel t JOIN PaperReedLocalLabel l ON l.id=t.labelId WHERE t.accountId=Thread.accountId AND t.threadId=Thread.id AND l.id='${view.slice(6).replace(/'/g, "''")}')`;
++  return hideSnoozed
++    ? `NOT EXISTS (SELECT 1 FROM PaperReedLocalThread s WHERE ${state} AND s.snoozeUntil IS NOT NULL)`
++    : '1';
++}
++export const localPinOrder = {
++  attr: Thread.attributes.lastMessageReceivedTimestamp,
++  attribute: () => Thread.attributes.lastMessageReceivedTimestamp,
++  orderBySQL: () =>
++    'COALESCE((SELECT pinned FROM PaperReedLocalThread s WHERE s.accountId=Thread.accountId AND s.threadId=Thread.id),0) DESC',
++};
