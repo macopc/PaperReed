@@ -1,0 +1,174 @@
+Use Mailspring as default mail client
+Launch on system start
+Show icon in menu bar / system tray
+Show Gmail-style important markers (Gmail Only)
+Show unread counts for all folders / labels
+Use 24-hour clock
+Interface Language
+Interface Language
+Automatic (English)
+Contributed:
+English
+German
+Spanish
+Spanish - Latin America
+French
+Korean
+Polish
+Japanese
+Chinese - Simplified
+Chinese - Taiwan
+Portuguese
+Brazilian Portuguese
+Galician
+Turkish
+Russian
+Czech
+Ukrainian
+Hungarian
+Hebrew
+Experimental:
+Afrikaans
+Amharic
+Aragonese
+Arabic
+Asturian
+Azerbaijani
+Belarusian
+Bulgarian
+Bengali
+Breton
+Bosnian
+Catalan
+Kaqchikel
+Cebuano
+Corsican
+Welsh
+Danish
+Lower Sorbian
+Greek
+en-gb
+Esperanto
+Estonian
+Basque
+Persian
+Finnish
+Western Frisian
+Irish
+Gaelic
+Gujarati
+Hausa
+Hawaiian
+Hindi
+Hmong
+Croatian
+Upper Sorbian
+Haitian
+Armenian
+Indonesian
+Igbo
+Icelandic
+Italian
+Georgian
+Kabyle
+Kazakh
+Central Khmer
+Kannada
+Kurdish
+Kirghiz
+Luxembourgish
+Lao
+Lithuanian
+Latvian
+Malagasy
+Maori
+Macedonian
+Mongolian
+Malay
+Maltese
+Burmese
+Norwegian Bokmål
+Nepali
+Dutch
+Ndebele
+Northern Sotho
+Occitan
+Punjabi
+Romansh
+Romanian
+Sinhala
+Slovak
+Slovenian
+Samoan
+Somali
+Albanian
+Serbian
+Swati
+Southern Sotho
+Swedish
+Tamil
+Thai
+Tswana
+Tsonga
+Uzbek
+Venda
+Vietnamese
+Xhosa
+Cantonese
+Chinese - Hong Kong
+Chinese
+Zulu
+Reading
+When reading messages, mark as read:
+Instantly
+After 0.5 Seconds
+After 2 Seconds
+Manually
+Automatically load images in viewed messages
+Show full message headers by default
+Show first and last names of all recipients
+Restrict width of messages to maximize readability
+Move to trash (not archive) on swipe / backspace
+Disable swipe gestures on the thread list
+Display conversations in descending chronological order
+Email body appearance:
+Light email mode
+Dark email mode
+Sending
+Message Sent Sound
+Default send behavior:
+Send
+Send and Archive
+Default reply behavior:
+Reply
+Reply All
+After sending, enable undo for:
+5 seconds
+15 seconds
+30 seconds
+60 seconds
+Disable
+Send new messages from:
+Selected Account
+Harness Test <test@example.test>
+Reset Emails that Ignore Warnings
+Composing
+Enable rich text and advanced editor features
+Many features are unavailable in plain-text mode. To create a single plain-text draft, hold Alt or Option while clicking Compose or Reply.
+Check messages for spelling
+Check messages for grammar
+Notifications
+Show notifications for new unread messages
+Show notifications for repeated opens / clicks
+Play sound when receiving new mail
+Resurface messages to the top of the inbox when unsnoozing
+Show badge on the app icon:
+Hide Badge
+Show Unread Count
+Show Total Count
+Count unread messages in all accounts, not just the selected folder
+Attachments
+Open containing folder after downloading attachment
+Display thumbnail previews for attachments when available.
+Local Data
+Reset CacheReset Accounts and Settings

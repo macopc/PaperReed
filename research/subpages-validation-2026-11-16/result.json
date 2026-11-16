@@ -1,0 +1,16 @@
+{
+  "generalKeyboardToggle": true,
+  "generalFocusRetained": true,
+  "readingSelectSaved": true,
+  "accountLabelSaved": true,
+  "accountColorSaved": true,
+  "accountColorPreview": true,
+  "shortcutPresetSaved": true,
+  "shortcutSearch": true,
+  "shortcutEmptyState": true,
+  "shortcutKeyboardCancel": true,
+  "shortcutKeyboardSaved": true,
+  "compactLayouts": true,
+  "expectedSMTPSubmissions": 0,
+  "observedSMTPSubmissions": 0
+}

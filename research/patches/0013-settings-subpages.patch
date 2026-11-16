@@ -1,0 +1,761 @@
+diff --git a/app/internal_packages/paper-reed/styles/paper-reed.less b/app/internal_packages/paper-reed/styles/paper-reed.less
+index 520d001..824ce1d 100644
+--- a/app/internal_packages/paper-reed/styles/paper-reed.less
++++ b/app/internal_packages/paper-reed/styles/paper-reed.less
+@@ -297,3 +297,85 @@
+   .pr-template-html span { font-size:11px; color:#626b60; margin-left:10px; }
+   @media(max-width:1000px) { .pr-signature-layout { grid-template-columns:120px minmax(0,1fr); gap:18px; } .pr-template-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .pr-template-preview > span { transform:scale(.5); } }
+ }
++
++.preferences-wrap.pr-preferences {
++  .pr-settings-page { max-width:1000px; margin:0 auto; padding:32px 36px; color:#303730; font-size:13px; line-height:1.6; }
++  .pr-settings-heading { margin-bottom:32px; }
++  .pr-settings-heading h1 { margin:0; font-size:24px; font-weight:500; line-height:34px; }
++  .pr-settings-heading p { margin:6px 0 0; color:#626b60; font-size:12px; }
++  .pr-settings-page .container-general, .pr-settings-page .container-keymaps, .pr-settings-page .container-accounts { width:100%; min-width:0; max-width:none; }
++  .pr-settings-page h6 { font-size:12px; font-weight:500; color:#626b60; margin:22px 0 8px; }
++  .pr-settings-page button, .pr-settings-page .btn { background:transparent; border:1px solid #dfe2d9; border-radius:5px; box-shadow:none; color:#4b634f; padding:6px 11px; font:12px/20px -apple-system,sans-serif; cursor:pointer; height:auto; }
++  .pr-settings-page button:hover, .pr-settings-page .btn:hover { background:#e9eee5; }
++  .pr-settings-page input:not([type=checkbox]):not([type=color]):not([type=radio]), .pr-settings-page select { border:1px solid #dfe2d9; border-radius:4px; background:#fffefa; color:#303730; font:12px/20px -apple-system,sans-serif; padding:6px 8px; box-shadow:none; max-width:100%; }
++  .pr-settings-page input[type=checkbox], .pr-settings-page input[type=radio] { accent-color:#4b634f; }
++  .pr-settings-page input:focus-visible, .pr-settings-page select:focus-visible, .pr-settings-page button:focus-visible, .pr-settings-page summary:focus-visible, .pr-settings-page [role=button]:focus-visible { outline:2px solid #4b634f; outline-offset:2px; }
++  .pr-settings-page .platform-note { padding:0; margin:8px 0 12px; border:0; background:transparent; color:#626b60; font-size:11px; line-height:18px; }
++  .pr-settings-page .platform-note:before { content:none; }
++  .pr-settings-group { border:0; border-top:1px solid #dfe2d9; padding:18px 0; }
++  .pr-settings-group:first-child { border-top:0; padding-top:0; }
++  .pr-settings-group > h2, .pr-settings-group > summary { color:#303730; font-size:14px; font-weight:500; line-height:22px; margin:0; }
++  .pr-settings-group > summary { cursor:pointer; }
++  .pr-settings-group[open] > summary, .pr-settings-group > h2 { margin-bottom:14px; }
++  .pr-settings-group > section { padding:0; }
++  .pr-general .pr-settings-group > section > h6 { display:none; }
++  .pr-general .item { padding:8px 0; line-height:22px; }
++  .pr-general .item:has(select) { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
++  .pr-general .item:has(select) > label { flex:1; }
++  .pr-general .item:has(select) > select { margin:0; max-width:60%; }
++  .pr-general .item .platform-note { margin-left:20px; }
++  .pr-local-data button + button { margin-left:8px; }
++  .pr-settings-page .accounts-content { display:grid; grid-template-columns:220px minmax(0,1fr); gap:28px; }
++  .pr-settings-page .accounts-content .account-list { width:auto; min-width:0; border:0; background:transparent; }
++  .pr-settings-page .accounts-content .account-details { width:auto; min-width:0; padding:0 0 0 28px; border:0; border-left:1px solid #dfe2d9; background:transparent; }
++  .pr-settings-page .account-list .list-item.selected { color:#303730; background:#e9eee5; border-radius:5px; }
++  .pr-settings-page .account-list .account.pr-settings-account { padding:12px 8px; border:0; display:flex; align-items:flex-start; gap:10px; }
++  .pr-account-monogram { display:flex; align-items:center; justify-content:center; flex:0 0 28px; height:28px; border:2px solid; border-radius:50%; font:13px/1 'Iowan Old Style',serif; background:#faf9f6; margin-top:2px; }
++  .pr-settings-account > div { min-width:0; }
++  .pr-settings-page .account-list .account-name { font-size:12px; line-height:20px; white-space:normal; overflow-wrap:anywhere; }
++  .pr-settings-page .account-list .account-subtext, .pr-account-provider { font-size:11px; line-height:18px; color:#626b60; overflow-wrap:anywhere; }
++  .pr-account-detail-heading { display:flex; flex-direction:column; gap:4px; margin-bottom:24px; overflow-wrap:anywhere; }
++  .pr-account-detail-heading strong { font-weight:500; font-size:16px; }
++  .pr-account-detail-heading span { color:#626b60; font-size:11px; }
++  .pr-settings-page .account-details input[type=color] { height:32px; width:36px; padding:2px; border:1px solid #dfe2d9; border-radius:4px; background:#fffefa; }
++  .pr-keymap-preset { display:flex; align-items:center; flex-wrap:wrap; gap:12px; }
++  .pr-keymap-preset select { flex:1; margin:0; }
++  #pr-shortcut-search { width:100%; margin:16px 0 6px; }
++  .pr-settings-page .pr-keymaps .shortcut-section-title { font-size:12px; font-weight:500; color:#626b60; margin:24px 0 8px; border:0; }
++  .pr-settings-page .pr-keymaps .shortcut { padding:10px 8px; min-height:40px; border-bottom:1px solid #eceee7; border-radius:3px; color:#303730; cursor:pointer; gap:20px; }
++  .pr-settings-page .pr-keymaps .shortcut:hover { background:#f2f1eb; }
++  .pr-settings-page .pr-keymaps .shortcut .col-left { text-align:left; margin:0; }
++  .pr-settings-page .pr-keymaps .shortcut .col-right { text-align:right; }
++  .pr-settings-page .pr-keymaps .shortcut .values { font-size:12px; font-weight:400; padding:0; color:#4b634f; }
++  .pr-settings-page .pr-keymaps .shortcut.editing { background:#e9eee5; }
++  .pr-settings-empty { padding:32px 0; text-align:center; }
++  @media(max-width:1100px) {
++    .pr-settings-page .accounts-content { grid-template-columns:minmax(0,1fr); gap:24px; }
++    .pr-settings-page .accounts-content .account-details { border-left:0; border-top:1px solid #dfe2d9; padding:24px 0 0; }
++    .pr-settings-page .account-list .items-wrapper { max-height:180px; }
++  }
++}
++.preferences-wrap.pr-preferences {
++  .pr-settings-group > summary { display:flex; align-items:center; justify-content:space-between; }
++  .pr-settings-group > summary::after { content:'＋'; color:#626b60; font-size:13px; font-weight:400; }
++  .pr-settings-group[open] > summary::after { content:'−'; }
++  .pr-settings-group > summary::-webkit-details-marker { display:none; }
++  .pr-settings-page .accounts-content .account-list { align-self:start; }
++  .pr-settings-page .accounts-content .account-list .items-wrapper { flex:initial; height:auto; min-height:0; border:0; background:transparent; }
++  .pr-settings-page .account-list .scroll-region-content { position:relative; }
++  .pr-settings-page .account-list .buttons-wrapper { margin-top:12px; border:0; background:transparent; }
++}
++.preferences-wrap.pr-preferences {
++  .pr-account-list-wrap { align-self:start; min-width:0; }
++  .pr-account-list-wrap .account-list > .buttons-wrapper { display:none; }
++  .pr-account-list-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:16px; }
++  .pr-settings-page .account-details .nylas-editable-list .items-wrapper { border:1px solid #dfe2d9; background:#fffefa; border-radius:4px 4px 0 0; }
++  .pr-settings-page .account-details .pr-aliases-empty .items-wrapper { height:56px; }
++  .pr-aliases-empty .items-wrapper:not(:has(input))::after { content:'尚未添加别名'; position:absolute; padding:16px 10px; color:#626b60; font-size:11px; pointer-events:none; }
++}
++
++.preferences-wrap.pr-preferences .pr-settings-page { .pr-general, .pr-keymaps { max-width:780px; margin:0; } }
++.preferences-wrap.pr-preferences .pr-settings-page {
++  input:not([type=checkbox]):not([type=radio]), select { box-sizing:border-box; }
++  .pr-keymaps .shortcut .col-left, .pr-keymaps .shortcut .col-right { min-width:0; overflow-wrap:anywhere; }
++}
+diff --git a/app/internal_packages/preferences/lib/preferences-root.tsx b/app/internal_packages/preferences/lib/preferences-root.tsx
+index 1225777..7089ea3 100644
+--- a/app/internal_packages/preferences/lib/preferences-root.tsx
++++ b/app/internal_packages/preferences/lib/preferences-root.tsx
+@@ -72,6 +72,22 @@ class PreferencesRoot extends React.Component<{ tab: any; tabs: any[]; selection
+     const { tab, selection, tabs } = this.props;
+     const TabComponent = tab && tab.componentClassFn();
+ 
++    const page =
++      AppEnv.config.get('core.paperReed.enabled') &&
++      {
++        General: ['通用', '让阅读、写信与提醒符合你的习惯。'],
++        Accounts: ['邮箱账号', '管理账号名称、辨识颜色与发件身份。'],
++        Shortcuts: ['快捷键', '找到常用操作，调整为熟悉的按键。'],
++      }[selection.tabId];
++    const content = (
++      <ConfigPropContainer
++        ref={(el) => {
++          this._contentComponent = el;
++        }}
++      >
++        {tab ? <TabComponent accountId={selection.accountId} /> : null}
++      </ConfigPropContainer>
++    );
+     return (
+       <KeyCommandsRegion
+         className={`preferences-wrap ${AppEnv.config.get('core.paperReed.enabled') ? 'pr-preferences' : ''}`}
+@@ -81,13 +97,26 @@ class PreferencesRoot extends React.Component<{ tab: any; tabs: any[]; selection
+         <Flexbox direction={AppEnv.config.get('core.paperReed.enabled') ? 'row' : 'column'}>
+           <PreferencesTabsBar tabs={tabs} selection={selection} />
+           <ScrollRegion className="preferences-content">
+-            <ConfigPropContainer
+-              ref={(el) => {
+-                this._contentComponent = el;
+-              }}
+-            >
+-              {tab ? <TabComponent accountId={selection.accountId} /> : null}
+-            </ConfigPropContainer>
++            {page ? (
++              <div
++                className="pr-settings-page"
++                onKeyDown={(e) => {
++                  if (
++                    (e.key === 'Enter' || e.key === ' ') &&
++                    (e.target as HTMLElement).matches('input, select, button, summary')
++                  )
++                    e.stopPropagation();
++                }}
++              >
++                <header className="pr-settings-heading">
++                  <h1>{page[0]}</h1>
++                  <p>{page[1]}</p>
++                </header>
++                {content}
++              </div>
++            ) : (
++              content
++            )}
+           </ScrollRegion>
+         </Flexbox>
+       </KeyCommandsRegion>
+diff --git a/app/internal_packages/preferences/lib/tabs/config-schema-item.tsx b/app/internal_packages/preferences/lib/tabs/config-schema-item.tsx
+index eace53e..987b608 100644
+--- a/app/internal_packages/preferences/lib/tabs/config-schema-item.tsx
++++ b/app/internal_packages/preferences/lib/tabs/config-schema-item.tsx
+@@ -31,12 +31,12 @@ class ConfigSchemaItem extends React.Component<ConfigSchemaItemProps> {
+ 
+   _onChangeChecked = (event: React.ChangeEvent<HTMLInputElement>) => {
+     this.props.config.toggle(this.props.keyPath);
+-    event.target.blur();
++    if (!AppEnv.config.get('core.paperReed.enabled')) event.target.blur();
+   };
+ 
+   _onChangeValue = (event: React.ChangeEvent<HTMLSelectElement>) => {
+     this.props.config.set(this.props.keyPath, event.target.value);
+-    event.target.blur();
++    if (!AppEnv.config.get('core.paperReed.enabled')) event.target.blur();
+   };
+ 
+   render() {
+@@ -45,14 +45,48 @@ class ConfigSchemaItem extends React.Component<ConfigSchemaItemProps> {
+     // In the future, we may add an option to reveal "advanced settings"
+     if (this.props.configSchema.advanced) return false;
+ 
+-    const note = this.props.configSchema.note ? (
+-      <div className="platform-note">{this.props.configSchema.note}</div>
+-    ) : null;
+-
++    const paperReed = AppEnv.config.get('core.paperReed.enabled');
++    const titles = {
++      'core.workspace.systemTray': '在菜单栏显示图标',
++      'core.workspace.showImportant': '显示 Gmail 重要邮件标记',
++      'core.workspace.showUnreadForAllCategories': '显示各文件夹与标签的未读数量',
++      'core.workspace.use24HourClock': '使用 24 小时制',
++      'core.reading.markAsReadDelay': '打开邮件后标为已读',
++      'core.reading.autoloadImages': '自动加载邮件中的图片',
++      'core.reading.detailedHeaders': '默认显示完整邮件头',
++      'core.reading.detailedNames': '显示收件人完整姓名',
++      'core.reading.restrictMaxWidth': '限制正文宽度，方便阅读',
++      'core.reading.backspaceDelete': '滑动或按退格键时移至废纸篓',
++      'core.reading.swipeDisabled': '停用邮件列表的滑动手势',
++      'core.reading.descendingOrderMessageList': '会话中新邮件显示在上方',
++      'core.reading.emailRenderMode': '邮件正文外观',
++      'core.composing.html': '使用富文本编辑器',
++      'core.composing.spellcheck': '检查拼写',
++      'core.composing.grammarCheck': '检查语法',
++      'core.sending.sounds': '发送邮件时播放声音',
++      'core.sending.defaultSendType': '默认发送方式',
++      'core.sending.defaultReplyType': '默认回复方式',
++      'core.sending.undoSend': '允许撤销发送的时间',
++      'core.sending.defaultAccountIdForSend': '新邮件默认发件账号',
++      'core.notifications.enabled': '收到未读邮件时提醒',
++      'core.notifications.enabledForRepeatedTrackingEvents': '重复打开或点击邮件时提醒',
++      'core.notifications.sounds': '收到新邮件时播放声音',
++      'core.notifications.unsnoozeToTop': '稍后处理到期的邮件回到收件箱顶部',
++      'core.notifications.countBadge': '应用图标角标',
++      'core.notifications.countBadgeAllAccounts': '统计所有账号的未读邮件',
++      'core.attachments.openFolderAfterDownload': '下载附件后打开所在文件夹',
++      'core.attachments.displayFilePreview': '显示可用的附件缩略图',
++    };
++    const title = (paperReed && titles[this.props.keyPath]) || this.props.configSchema.title;
++    const noteText =
++      paperReed && this.props.keyPath === 'core.composing.html'
++        ? '按住 Option 新建或回复，可临时使用纯文本。'
++        : this.props.configSchema.note;
++    const note = noteText ? <div className="platform-note">{noteText}</div> : null;
+     if (this.props.configSchema.type === 'object') {
+       return (
+         <section>
+-          <h6>{_str.humanize(this.props.keyName)}</h6>
++          {this.props.keyName && <h6>{_str.humanize(this.props.keyName)}</h6>}
+           {Object.entries(this.props.configSchema.properties).map(([key, value]) => (
+             <ConfigSchemaItem
+               key={key}
+@@ -69,7 +103,7 @@ class ConfigSchemaItem extends React.Component<ConfigSchemaItemProps> {
+       return (
+         <div className="item">
+           <label htmlFor={this.props.keyPath} style={{ paddingRight: 8 }}>
+-            {this.props.configSchema.title}:
++            {title}:
+           </label>
+           <select
+             id={this.props.keyPath}
+@@ -96,7 +130,7 @@ class ConfigSchemaItem extends React.Component<ConfigSchemaItemProps> {
+             onChange={this._onChangeChecked}
+             checked={!!this.props.config.get(this.props.keyPath)}
+           />
+-          <label htmlFor={this.props.keyPath}>{this.props.configSchema.title}</label>
++          <label htmlFor={this.props.keyPath}>{title}</label>
+           {note}
+         </div>
+       );
+diff --git a/app/internal_packages/preferences/lib/tabs/keymaps/command-item.tsx b/app/internal_packages/preferences/lib/tabs/keymaps/command-item.tsx
+index ccef6f2..ea9cdf3 100644
+--- a/app/internal_packages/preferences/lib/tabs/keymaps/command-item.tsx
++++ b/app/internal_packages/preferences/lib/tabs/keymaps/command-item.tsx
+@@ -155,6 +155,23 @@ export default class CommandKeybinding extends React.Component<
+   };
+ 
+   _onKey = (event: React.KeyboardEvent<HTMLElement>) => {
++    if (AppEnv.config.get('core.paperReed.enabled')) {
++      if (event.type === 'keypress') return;
++      if (!this.state.editing && (event.key === 'Enter' || event.key === ' ')) {
++        event.preventDefault();
++        event.stopPropagation();
++        this._onEdit();
++        return;
++      }
++      if (this.state.editing && (event.key === 'Escape' || event.key === 'Tab')) {
++        if (event.key === 'Escape') event.preventDefault();
++        event.stopPropagation();
++        this.setState({ editingBinding: null, editing: false }, () =>
++          AppEnv.keymaps.resumeAllKeymaps()
++        );
++        return;
++      }
++    }
+     if (!this.state.editing) {
+       return;
+     }
+@@ -188,7 +205,9 @@ export default class CommandKeybinding extends React.Component<
+     const { editing, editingBinding } = this.state;
+     const bindings = editingBinding ? [editingBinding] : this.props.bindings;
+ 
+-    let value: React.ReactChild | React.ReactChild[] = 'None';
++    let value: React.ReactChild | React.ReactChild[] = AppEnv.config.get('core.paperReed.enabled')
++      ? '未设置'
++      : 'None';
+     if (bindings.length > 0) {
+       // Templates may list mod+a and ctrl+a for one command; they are the same key
+       // on Windows and Linux, so dedupe by what the user would actually press.
+@@ -204,10 +223,17 @@ export default class CommandKeybinding extends React.Component<
+     return (
+       <Flexbox
+         className={classnames}
+-        tabIndex={-1}
++        tabIndex={AppEnv.config.get('core.paperReed.enabled') ? 0 : -1}
++        role={AppEnv.config.get('core.paperReed.enabled') ? 'button' : undefined}
++        aria-label={
++          AppEnv.config.get('core.paperReed.enabled')
++            ? `${this.props.label}：${editing ? '正在录入，Esc 取消' : '编辑快捷键'}`
++            : undefined
++        }
++        onClick={AppEnv.config.get('core.paperReed.enabled') ? this._onEdit : undefined}
+         onKeyDown={this._onKey}
+         onKeyPress={this._onKey}
+-        onFocus={this._onEdit}
++        onFocus={AppEnv.config.get('core.paperReed.enabled') ? undefined : this._onEdit}
+         onBlur={this._onFinishedEditing}
+       >
+         <div className="col-left shortcut-name">{this.props.label}</div>
+diff --git a/app/internal_packages/preferences/lib/tabs/preferences-account-details.tsx b/app/internal_packages/preferences/lib/tabs/preferences-account-details.tsx
+index 13356ba..3e90136 100644
+--- a/app/internal_packages/preferences/lib/tabs/preferences-account-details.tsx
++++ b/app/internal_packages/preferences/lib/tabs/preferences-account-details.tsx
+@@ -25,7 +25,9 @@ class AutoaddressControl extends Component<AutoaddressControlProps> {
+     return (
+       <div>
+         <div style={{ display: 'flex', alignItems: 'baseline', marginBottom: 3 }}>
+-          {localized('When composing, automatically')}
++          {AppEnv.config.get('core.paperReed.enabled')
++            ? '写信时自动'
++            : localized('When composing, automatically')}
+           <select
+             aria-label={localized('Automatically CC or BCC recipients')}
+             style={{ marginTop: 0, marginLeft: 8 }}
+@@ -33,8 +35,12 @@ class AutoaddressControl extends Component<AutoaddressControlProps> {
+             onChange={(e) => onChange({ ...autoaddress, type: e.target.value as 'cc' | 'bcc' })}
+             onBlur={onSaveChanges}
+           >
+-            <option value="cc">{localized('Cc')}</option>
+-            <option value="bcc">{localized('Bcc')}</option>
++            <option value="cc">
++              {AppEnv.config.get('core.paperReed.enabled') ? '抄送' : localized('Cc')}
++            </option>
++            <option value="bcc">
++              {AppEnv.config.get('core.paperReed.enabled') ? '密送' : localized('Bcc')}
++            </option>
+           </select>
+           :
+         </div>
+@@ -44,7 +50,11 @@ class AutoaddressControl extends Component<AutoaddressControlProps> {
+           value={autoaddress.value}
+           onChange={(e) => onChange({ ...autoaddress, value: e.target.value })}
+           onBlur={onSaveChanges}
+-          placeholder={localized('Comma-separated email addresses')}
++          placeholder={
++            AppEnv.config.get('core.paperReed.enabled')
++              ? '多个邮箱地址用逗号分隔'
++              : localized('Comma-separated email addresses')
++          }
+         />
+       </div>
+     );
+@@ -332,9 +342,17 @@ class PreferencesAccountDetails extends Component<
+ 
+     return (
+       <div className="account-details">
++        {AppEnv.config.get('core.paperReed.enabled') && (
++          <div className="pr-account-detail-heading">
++            <strong>{account.emailAddress}</strong>
++            <span>字段离开焦点后保存</span>
++          </div>
++        )}
+         {this._renderSyncErrorDetails()}
+         <label htmlFor="account-label">
+-          <h6>{localized('Account Label')}</h6>
++          <h6>
++            {AppEnv.config.get('core.paperReed.enabled') ? '账号名称' : localized('Account Label')}
++          </h6>
+         </label>
+         <input
+           id="account-label"
+@@ -344,7 +362,9 @@ class PreferencesAccountDetails extends Component<
+           onChange={(e) => this._setState({ label: e.target.value })}
+         />
+         <label htmlFor="account-sender-name">
+-          <h6>{localized('Sender Name')}</h6>
++          <h6>
++            {AppEnv.config.get('core.paperReed.enabled') ? '发件人姓名' : localized('Sender Name')}
++          </h6>
+         </label>
+         <input
+           id="account-sender-name"
+@@ -353,20 +373,31 @@ class PreferencesAccountDetails extends Component<
+           onBlur={this._saveChanges}
+           onChange={(e) => this._setState({ name: e.target.value })}
+         />
+-        <h6>{localized('Automatic CC / BCC')}</h6>
++        <h6>
++          {AppEnv.config.get('core.paperReed.enabled')
++            ? '自动抄送与密送'
++            : localized('Automatic CC / BCC')}
++        </h6>
+         <AutoaddressControl
+           autoaddress={account.autoaddress}
+           onChange={this._onAccountAutoaddressUpdated}
+           onSaveChanges={this._saveChanges}
+         />
+-        <h6>{localized('Aliases')}</h6>
++        <h6>{AppEnv.config.get('core.paperReed.enabled') ? '发件别名' : localized('Aliases')}</h6>
+         <div className="platform-note">
+-          {localized(
+-            'You may need to configure aliases with your mail provider (Outlook, Gmail) before using them.'
+-          )}
++          {AppEnv.config.get('core.paperReed.enabled')
++            ? '使用别名前，请先在邮箱服务商处完成配置。'
++            : localized(
++                'You may need to configure aliases with your mail provider (Outlook, Gmail) before using them.'
++              )}
+         </div>
+         <EditableList
+           showEditIcon
++          className={
++            AppEnv.config.get('core.paperReed.enabled') && !aliases.length
++              ? 'pr-aliases-empty'
++              : undefined
++          }
+           items={account.aliases}
+           createInputProps={{ placeholder: aliasPlaceholder }}
+           onItemCreated={this._onAccountAliasCreated}
+@@ -387,29 +418,48 @@ class PreferencesAccountDetails extends Component<
+           </div>
+         ) : undefined}
+         <label htmlFor="account-color">
+-          <h6>{localized('Account Color')}</h6>
++          <h6>
++            {AppEnv.config.get('core.paperReed.enabled') ? '辨识颜色' : localized('Account Color')}
++          </h6>
+         </label>
+         <div style={{ display: 'flex', alignItems: 'flex-end' }}>
+           <input
+             id="account-color"
+             type="color"
+-            value={account.color}
++            value={account.color || '#7d8976'}
+             onBlur={this._saveChanges}
+             onChange={(e) => this._onSetColor({ color: e.target.value })}
+           />
+-          <div className="btn" style={{ marginLeft: 6 }} onClick={this._onResetColor}>
+-            {localized('Reset Account Color')}
+-          </div>
++          <button
++            type="button"
++            className="btn"
++            style={{ marginLeft: 6 }}
++            onClick={this._onResetColor}
++          >
++            {AppEnv.config.get('core.paperReed.enabled')
++              ? '恢复默认颜色'
++              : localized('Reset Account Color')}
++          </button>
+         </div>
+-        <h6>{localized('Account Settings')}</h6>
++        <h6>
++          {AppEnv.config.get('core.paperReed.enabled')
++            ? '连接与联系人'
++            : localized('Account Settings')}
++        </h6>
+         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+           <div className="btn" onClick={this._onManageContacts}>
+-            {localized('Manage Contacts')}
++            {AppEnv.config.get('core.paperReed.enabled')
++              ? '管理联系人'
++              : localized('Manage Contacts')}
+           </div>
+           <div className="btn" onClick={this._onReconnect}>
+             {account.provider === 'gmail'
+-              ? localized('Re-authenticate...')
+-              : localized('Update Connection Settings...')}
++              ? AppEnv.config.get('core.paperReed.enabled')
++                ? '重新授权…'
++                : localized('Re-authenticate...')
++              : AppEnv.config.get('core.paperReed.enabled')
++                ? '更新连接设置…'
++                : localized('Update Connection Settings...')}
+           </div>
+           {account.provider === 'office365' && (
+             <div className="btn" onClick={this._onAddSharedMailbox}>
+@@ -417,9 +467,13 @@ class PreferencesAccountDetails extends Component<
+             </div>
+           )}
+         </div>
+-        <h6>{localized('Local Data')}</h6>
++        <h6>
++          {AppEnv.config.get('core.paperReed.enabled') ? '本机数据' : localized('Local Data')}
++        </h6>
+         <div className="btn" onClick={this._onResetCache}>
+-          {localized('Rebuild Cache...')}
++          {AppEnv.config.get('core.paperReed.enabled')
++            ? '重建邮件缓存…'
++            : localized('Rebuild Cache...')}
+         </div>
+       </div>
+     );
+diff --git a/app/internal_packages/preferences/lib/tabs/preferences-account-list.tsx b/app/internal_packages/preferences/lib/tabs/preferences-account-list.tsx
+index 3c49b9e..66bedfc 100644
+--- a/app/internal_packages/preferences/lib/tabs/preferences-account-list.tsx
++++ b/app/internal_packages/preferences/lib/tabs/preferences-account-list.tsx
+@@ -48,6 +48,30 @@ class PreferencesAccountList extends Component<PreferencesAccountListProps> {
+ 
+   _renderAccount = (account: Account) => {
+     const label = account.label;
++    if (AppEnv.config.get('core.paperReed.enabled'))
++      return (
++        <div className="account pr-settings-account" key={account.id}>
++          <span
++            className="pr-account-monogram"
++            aria-hidden="true"
++            style={{ borderColor: account.color || '#7d8976' }}
++          >
++            {Array.from(account.name || account.emailAddress)[0].toUpperCase()}
++          </span>
++          <div>
++            <div className="account-name" dir="auto">
++              {label || account.name || account.emailAddress}
++            </div>
++            {label !== account.emailAddress && (
++              <div className="account-subtext" dir="auto">
++                {account.emailAddress}
++              </div>
++            )}
++            <div className="pr-account-provider">{account.displayProvider()}</div>
++            {this._renderAccountStatus(account)}
++          </div>
++        </div>
++      );
+     const accountSub = `${account.name || localized('No name provided')} <${account.emailAddress}>`;
+     const syncError = account.hasSyncStateError();
+     let style: CSSProperties = {};
+@@ -94,7 +118,7 @@ class PreferencesAccountList extends Component<PreferencesAccountListProps> {
+     if (!this.props.accounts) {
+       return <div className="account-list" />;
+     }
+-    return (
++    const list = (
+       <EditableList
+         className="account-list"
+         items={this.props.accounts}
+@@ -106,6 +130,25 @@ class PreferencesAccountList extends Component<PreferencesAccountListProps> {
+         onDeleteItem={this.props.onRemoveAccount}
+       />
+     );
++    if (AppEnv.config.get('core.paperReed.enabled'))
++      return (
++        <div className="pr-account-list-wrap">
++          {list}
++          <div className="pr-account-list-actions">
++            <button type="button" onClick={this.props.onAddAccount}>
++              添加账号
++            </button>
++            <button
++              type="button"
++              disabled={!this.props.selected}
++              onClick={() => this.props.onRemoveAccount(this.props.selected)}
++            >
++              移除账号
++            </button>
++          </div>
++        </div>
++      );
++    return list;
+   }
+ }
+ 
+diff --git a/app/internal_packages/preferences/lib/tabs/preferences-general.tsx b/app/internal_packages/preferences/lib/tabs/preferences-general.tsx
+index 4d78a02..353f6de 100644
+--- a/app/internal_packages/preferences/lib/tabs/preferences-general.tsx
++++ b/app/internal_packages/preferences/lib/tabs/preferences-general.tsx
+@@ -54,6 +54,52 @@ class PreferencesGeneral extends React.Component<{
+   };
+ 
+   render() {
++    if (AppEnv.config.get('core.paperReed.enabled')) {
++      const { config, configSchema } = this.props;
++      const group = (key: string, title: string, open = false) => (
++        <details className="pr-settings-group" key={key} open={open}>
++          <summary>{title}</summary>
++          <ConfigSchemaItem
++            configSchema={configSchema.properties[key]}
++            keyPath={`core.${key}`}
++            config={config}
++          />
++        </details>
++      );
++      return (
++        <div className="container-general pr-general">
++          <section className="pr-settings-group">
++            <h2>日常使用</h2>
++            <WorkspaceSection config={config} configSchema={configSchema} />
++          </section>
++          {group('composing', '写信', true)}
++          {group('reading', '阅读')}
++          <details className="pr-settings-group">
++            <summary>发送</summary>
++            <SendingSection config={config} configSchema={configSchema} />
++            <button type="button" onClick={this._onResetEmailsThatIgnoreWarnings}>
++              恢复收件人警告
++            </button>
++          </details>
++          {group('notifications', '通知与声音')}
++          {group('attachments', '附件')}
++          <details className="pr-settings-group">
++            <summary>界面语言</summary>
++            <LanguageSection config={config} />
++          </details>
++          <details className="pr-settings-group pr-local-data">
++            <summary>本机数据</summary>
++            <p>重置缓存会重新同步邮件；重置账号与设置会清除本机配置。</p>
++            <button type="button" onClick={this._onResetEmailCache}>
++              重置邮件缓存
++            </button>
++            <button type="button" onClick={this._onResetAccountsAndSettings}>
++              重置账号与设置…
++            </button>
++          </details>
++        </div>
++      );
++    }
+     return (
+       <div className="container-general">
+         <div className="two-columns-flexbox">
+diff --git a/app/internal_packages/preferences/lib/tabs/preferences-keymaps.tsx b/app/internal_packages/preferences/lib/tabs/preferences-keymaps.tsx
+index f497e07..128255e 100644
+--- a/app/internal_packages/preferences/lib/tabs/preferences-keymaps.tsx
++++ b/app/internal_packages/preferences/lib/tabs/preferences-keymaps.tsx
+@@ -11,7 +11,7 @@ import { Disposable } from 'event-kit';
+ 
+ export default class PreferencesKeymaps extends React.Component<
+   { config: any },
+-  { templates: string[]; bindings: { [command: string]: [] } }
++  { templates: string[]; bindings: { [command: string]: [] }; search: string }
+ > {
+   static displayName = 'PreferencesKeymaps';
+ 
+@@ -20,6 +20,7 @@ export default class PreferencesKeymaps extends React.Component<
+   constructor(props) {
+     super(props);
+     this.state = {
++      search: '',
+       templates: [],
+       bindings: this._getStateFromKeymaps(),
+     };
+@@ -101,6 +102,68 @@ export default class PreferencesKeymaps extends React.Component<
+   };
+ 
+   render() {
++    if (AppEnv.config.get('core.paperReed.enabled')) {
++      const query = this.state.search.trim().toLocaleLowerCase();
++      const sections = displayedKeybindings
++        .map((section) => ({
++          ...section,
++          items: section.items.filter(([command, label]) =>
++            `${label} ${command} ${(this.state.bindings[command] || []).join(' ')}`
++              .toLocaleLowerCase()
++              .includes(query)
++          ),
++        }))
++        .filter((section) => section.items.length);
++      return (
++        <div className="container-keymaps pr-keymaps">
++          <div className="pr-keymap-preset">
++            <label htmlFor="pr-keymap-preset">快捷键方案</label>
++            <select
++              id="pr-keymap-preset"
++              value={this.props.config.get('core.keymapTemplate')}
++              onChange={(e) => this.props.config.set('core.keymapTemplate', e.target.value)}
++            >
++              {this.state.templates.map((template) => (
++                <option key={template} value={template}>
++                  {template}
++                </option>
++              ))}
++            </select>
++            <button type="button" onClick={this._onDeleteUserKeymap}>
++              恢复默认…
++            </button>
++          </div>
++          <p>选择熟悉的方案。点击一行或按 Enter 开始录入，Esc 取消。</p>
++          <label className="sr-only" htmlFor="pr-shortcut-search">
++            搜索操作或按键
++          </label>
++          <input
++            type="search"
++            id="pr-shortcut-search"
++            placeholder="搜索操作或按键…"
++            value={this.state.search}
++            onChange={(e) => this.setState({ search: e.target.value })}
++          />
++          {sections.length ? (
++            sections.map(this._renderBindingsSection)
++          ) : (
++            <div className="pr-settings-empty" role="status">
++              <p>没有匹配的快捷键</p>
++              <button type="button" onClick={() => this.setState({ search: '' })}>
++                清除搜索
++              </button>
++            </div>
++          )}
++          <details className="pr-settings-group">
++            <summary>高级自定义</summary>
++            <p>直接编辑快捷键配置文件。</p>
++            <button type="button" onClick={this._onShowUserKeymaps}>
++              打开配置文件
++            </button>
++          </details>
++        </div>
++      );
++    }
+     return (
+       <div className="container-keymaps">
+         <section>
+diff --git a/app/internal_packages/preferences/lib/tabs/workspace-section.tsx b/app/internal_packages/preferences/lib/tabs/workspace-section.tsx
+index 51acf6c..6dd12a1 100644
+--- a/app/internal_packages/preferences/lib/tabs/workspace-section.tsx
++++ b/app/internal_packages/preferences/lib/tabs/workspace-section.tsx
+@@ -46,7 +46,7 @@ class DefaultMailClientItem extends React.Component<
+       this.setState({ defaultClient: true });
+       helper.registerForURLScheme('mailto');
+     }
+-    event.target.blur();
++    if (!AppEnv.config.get('core.paperReed.enabled')) event.target.blur();
+   };
+ 
+   render() {
+@@ -66,7 +66,9 @@ class DefaultMailClientItem extends React.Component<
+               }
+             }}
+           >
+-            {localized('Use Mailspring as default mail client')}
++            {AppEnv.config.get('core.paperReed.enabled')
++              ? '设为默认邮件客户端'
++              : localized('Use Mailspring as default mail client')}
+           </div>
+         </div>
+       );
+@@ -80,7 +82,11 @@ class DefaultMailClientItem extends React.Component<
+           checked={this.state.defaultClient}
+           onChange={this.toggleDefaultMailClient}
+         />
+-        <label htmlFor="default-client">{localized('Use Mailspring as default mail client')}</label>
++        <label htmlFor="default-client">
++          {AppEnv.config.get('core.paperReed.enabled')
++            ? '设为默认邮件客户端'
++            : localized('Use Mailspring as default mail client')}
++        </label>
+       </div>
+     );
+   }
+@@ -124,7 +130,7 @@ class LaunchSystemStartItem extends React.Component {
+       this.setState({ launchOnStart: true });
+       service.configureToLaunchOnSystemStart();
+     }
+-    event.target.blur();
++    if (!AppEnv.config.get('core.paperReed.enabled')) event.target.blur();
+   };
+ 
+   render() {
+@@ -138,7 +144,11 @@ class LaunchSystemStartItem extends React.Component {
+           checked={this.state.launchOnStart}
+           onChange={this._toggleLaunchOnStart}
+         />
+-        <label htmlFor="launch-on-start">{localized('Launch on system start')}</label>
++        <label htmlFor="launch-on-start">
++          {AppEnv.config.get('core.paperReed.enabled')
++            ? '登录时启动'
++            : localized('Launch on system start')}
++        </label>
+       </div>
+     );
+   }

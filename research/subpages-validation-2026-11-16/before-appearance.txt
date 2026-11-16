@@ -1,0 +1,18 @@
+Layout
+Single Panel
+Two Panel
+Two Panel Vertical
+Apply Layout
+Theme and Style
+Change Theme...
+Use system accent color
+Scaling
+Interface Scale
+Scaling adjusts the entire UI, including icons, dividers, and text. Messages you send will still have the same font size. Decreasing scale significantly may make dividers and icons too small to click.
+Tray icon for new messages
+ Blue icon for new and unread messages
+(The same blue tray icon is used whether you have new or old unread messages.)
+ Red icon for new and blue icon for unread messages
+(A red tray icon is displayed for new messages and a blue icon for older unread messages.)
+ No unread status indication
+(The tray icon always shows the default appearance regardless of unread messages.)

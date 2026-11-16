@@ -1,0 +1,136 @@
+Shortcuts
+Apple Mail
+Gmail
+Inbox by Gmail
+Outlook
+Restore Defaults
+
+You can choose a shortcut set to use keyboard shortcuts of familiar email clients. To edit a shortcut, click it in the list below and enter a replacement on the keyboard.
+
+Application
+New Message
+cd⌘N
+Sync New Mail Now
+F5
+Search
+/
+Actions
+Reply
+r⌘R⌘⌥R
+Reply All
+a⌘⇧R⌘⌥⇧R
+Forward
+f⌘⇧F
+Archive
+e
+Trash
+#
+Remove from view
+BackspaceDel
+Gmail Remove from view
+y
+Star
+s
+Snooze
+zh
+Change Labels
+l
+Change Folder
+v
+Mark as Read
+⇧I
+Mark as Spam
+!
+Mark as Unread
+⇧U_
+Mark as Important (Gmail)
++=
+Mark as Not Important (Gmail)
+-
+Mark All as Read
+None
+Remove and show previous
+}]
+Remove and show next
+{[
+Selection
+Select conversation
+x
+Select all conversations
+⌘A* then a
+Deselect all conversations
+* then n
+Select all read conversations
+* then r
+Select all unread conversations
+* then u
+Select all starred conversations
+* then s
+Select all unstarred conversations
+* then t
+Composer
+Send message
+⌘ENTER
+Focus the To field
+⌘⇧T
+Focus the Cc field
+⌘⇧C
+Focus the Bcc field
+⌘⇧B
+Insert a link
+⌘K
+Insert a Quote Block
+⌘⇧9
+Insert Numbered List
+⌘⇧7
+Insert a bulleted list
+⌘⇧8
+Indent
+⌘]
+Outdent
+⌘[
+Underline
+⌘U
+Toggle Bold
+⌘B
+Toggle Italic
+⌘I
+Select file attachment
+⌘⇧A
+Navigation
+Return to conversation list
+Escapeu
+Open selected conversation
+Entero
+Move to newer conversation
+Upk
+Move to older conversation
+Downj
+Find in thread
+⌘F
+Jumping
+Go to Mail
+⌘⌥1⌘0
+Go to Calendar
+⌘⌥2
+Go to Activity
+⌘⌥3
+Go to Contacts
+⌘⌥4
+Go to Inbox
+g then i
+Go to Unread
+g then u
+Go to Starred
+g then s
+Go to Sent Mail
+g then t
+Go to Drafts
+g then d
+Go to All Mail
+g then a
+Customization
+
+Click shortcuts above to edit them. For even more control, you can edit the shortcuts file directly below.
+
+Edit custom shortcuts

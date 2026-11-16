@@ -31,10 +31,12 @@ try:
     sent=server.sent_messages()
     (work/'smtp-result.json').write_text(json.dumps({'submissions':len(sent),'subjects':[m.header('Subject') for m in sent]}))
     assert run.returncode==0
-    if a.controls and os.environ.get('PAPER_REED_CONTROLS_PHASE') != 'before':
+    if a.controls and os.environ.get('PAPER_REED_CONTROLS_PHASE') != 'before' and os.environ.get('PAPER_REED_SUBPAGES_PHASE') != 'before':
         result_path=Path(__file__).resolve().parent.parent/('settings-validation-2026-11-16/result.json' if os.environ.get('PAPER_REED_SETTINGS_CHECK') else 'controls-validation-2026-11-16/result.json')
         if os.environ.get('PAPER_REED_SETTINGS_CHECK') and os.environ.get('PAPER_REED_SETTINGS_OUTPUT'):
             result_path=Path(os.environ['PAPER_REED_SETTINGS_OUTPUT'])/'result.json'
+        if os.environ.get('PAPER_REED_SUBPAGES_CHECK'):
+            result_path=Path(__file__).resolve().parent.parent/'subpages-validation-2026-11-16/result.json'
         result=json.loads(result_path.read_text());result['observedSMTPSubmissions']=len(sent)
         result_path.write_text(json.dumps(result,indent=2)+'\n')
     if a.conflict or a.close_save or a.recover or a.audit or a.controls:

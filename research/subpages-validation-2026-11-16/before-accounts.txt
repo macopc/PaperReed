@@ -1,0 +1,18 @@
+test@example.test
+Harness Test <test@example.test> (IMAP)
+Account Label
+Sender Name
+Automatic CC / BCC
+When composing, automatically
+Cc
+Bcc
+:
+Aliases
+You may need to configure aliases with your mail provider (Outlook, Gmail) before using them.
+Account Color
+Reset Account Color
+Account Settings
+Manage Contacts
+Update Connection Settings...
+Local Data
+Rebuild Cache...
