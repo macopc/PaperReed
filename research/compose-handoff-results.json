@@ -1,0 +1,107 @@
+{
+  "date": "2026-11-16",
+  "desktop_commit": "535f13dd463536f36728bce3efb4ae0d51ab3f19",
+  "patches": [
+    "0001",
+    "0002",
+    "0003",
+    "0004"
+  ],
+  "engine_sha256": "0209cb33ad90b19b7f5a7dd1a2d63bb128a103bab5d27b4e328cbbd1f4901b4c",
+  "network": "loopback only",
+  "playwright_mock_mode": false,
+  "production_mcp_server": true,
+  "product_ui": "upstream composer, not Paper Reed design implementation",
+  "runs": [
+    {
+      "artifacts": "compose-handoff-yfoe7hvt",
+      "result": {
+        "created": {
+          "draftId": "1E323DB9-D6A8-4507-9C59-E5A5D6484332@getmailspring.com",
+          "revision": 1,
+          "headerMessageId": "1E323DB9-D6A8-4507-9C59-E5A5D6484332@getmailspring.com",
+          "accountId": "c0ffee-harness",
+          "subject": "Paper Reed window handoff"
+        },
+        "updatedRevision": 3,
+        "staleRejected": true,
+        "operation": {
+          "accountId": "c0ffee-harness",
+          "operationId": "pr-send-5d1b0bbb2d6491b7dfd7bdda92a6d404eb854be8c9ab9981843d4946abfa7360",
+          "draftId": "1E323DB9-D6A8-4507-9C59-E5A5D6484332@getmailspring.com",
+          "revision": 3,
+          "state": "accepted",
+          "sentCopy": "pending"
+        }
+      },
+      "smtp": {
+        "submissions": 1,
+        "subjects": [
+          "Paper Reed window handoff"
+        ]
+      }
+    },
+    {
+      "artifacts": "compose-handoff-4cic51qj",
+      "result": {
+        "created": {
+          "draftId": "348CD32D-B18E-4732-AF74-7C2F4F5C680A@getmailspring.com",
+          "revision": 1,
+          "headerMessageId": "348CD32D-B18E-4732-AF74-7C2F4F5C680A@getmailspring.com",
+          "accountId": "c0ffee-harness",
+          "subject": "Paper Reed window handoff"
+        },
+        "updatedRevision": 3,
+        "staleRejected": true,
+        "ccBccPreserved": true,
+        "productionDesktopMcp": true,
+        "playwrightMockMode": false,
+        "operation": {
+          "accountId": "c0ffee-harness",
+          "operationId": "pr-send-7e4e65398d1e384f37110cc7c5267ebc97fdeb46d17a704bafda5b14fd298098",
+          "draftId": "348CD32D-B18E-4732-AF74-7C2F4F5C680A@getmailspring.com",
+          "revision": 3,
+          "state": "accepted",
+          "sentCopy": "pending"
+        }
+      },
+      "smtp": {
+        "submissions": 1,
+        "subjects": [
+          "Paper Reed window handoff"
+        ]
+      }
+    },
+    {
+      "artifacts": "compose-handoff-tbnw5691",
+      "result": {
+        "created": {
+          "draftId": "744C7461-D416-4CBB-B79C-C8DBBB6B4D71@getmailspring.com",
+          "revision": 1,
+          "headerMessageId": "744C7461-D416-4CBB-B79C-C8DBBB6B4D71@getmailspring.com",
+          "accountId": "c0ffee-harness",
+          "subject": "Paper Reed window handoff"
+        },
+        "updatedRevision": 3,
+        "staleRejected": true,
+        "ccBccPreserved": true,
+        "productionDesktopMcp": true,
+        "playwrightMockMode": false,
+        "operation": {
+          "accountId": "c0ffee-harness",
+          "operationId": "pr-send-e442d14c5dafd1c543cd6e9f033ea53bcb799ef241de034fd55eb809896071ee",
+          "draftId": "744C7461-D416-4CBB-B79C-C8DBBB6B4D71@getmailspring.com",
+          "revision": 3,
+          "state": "accepted",
+          "sentCopy": "filed"
+        }
+      },
+      "smtp": {
+        "submissions": 1,
+        "subjects": [
+          "Paper Reed window handoff"
+        ]
+      }
+    }
+  ]
+}

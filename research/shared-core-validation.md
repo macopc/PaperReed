@@ -2,6 +2,8 @@
 
 2026-11-16。前一轮源码修复与原生协议验证已提交推送为 `f90ceca`。本轮接续 [自编译引擎验证](patched-engine-validation.md)，实现了第一版共享服务和实验 CLI，仍保留为小范围上游补丁，不迁移产品页面。
 
+**后续更新：** [完整写信窗口交接](compose-handoff-validation.md) 已通过，包括正常桌面 MCP、CLI 建稿、窗口编辑与发送、CLI 查询，并修复 CSP 下的 schema 校验失败。下文保留此前适配器测试的范围；未保存编辑的反向冲突仍待验证。
+
 ## 本轮交付
 
 - [0003-shared-mail-core.patch](patches/0003-shared-mail-core.patch)：在 Mailspring 桌面源码内增加 `src/services/mail-core/index.ts`。普通 GUI 新建／保存草稿、账号迁移时的新草稿保存、默认发送动作，以及 MCP 草稿工具接入同一服务。
