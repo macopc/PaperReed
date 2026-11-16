@@ -1,0 +1,18 @@
+{
+  "sameNameKeyboardSelection": true,
+  "manualAddress": true,
+  "duplicateDeduped": true,
+  "invalidAddressVisible": true,
+  "composingEnterPreserved": true,
+  "signatureInsertReplaceRemove": true,
+  "signatureEscapeReturnsFocus": true,
+  "signatureEmptyState": true,
+  "mouseBold": true,
+  "keyboardItalic": true,
+  "linkPreservesSelection": true,
+  "colorApplyAndReset": true,
+  "compactLinkWithinViewport": true,
+  "formattingSurvivesCollapse": true,
+  "expectedSMTPSubmissions": 0,
+  "observedSMTPSubmissions": 0
+}

@@ -1,0 +1,34 @@
+// Executes the actual completion method with controlled asynchronous search responses.
+const assert = require('node:assert/strict'), fs = require('node:fs'), path = require('node:path'), vm = require('node:vm');
+const upstream = path.resolve(process.argv[2]);
+const ts = require(require.resolve('typescript', { paths: [upstream] }));
+const source = fs.readFileSync(path.join(upstream, 'app/src/components/tokenizing-text-field.tsx'), 'utf8');
+const ast = ts.createSourceFile('field.tsx', source, ts.ScriptTarget.Latest, true, ts.ScriptKind.TSX);
+const klass = ast.statements.find(n => ts.isClassDeclaration(n) && n.name.text === 'TokenizingTextField');
+const method = klass.members.find(n => n.name?.getText(ast) === '_refreshCompletions');
+const compiled = ts.transpileModule(`class Field { ${method.getText(ast)} }; module.exports=Field;`, { compilerOptions: { target: ts.ScriptTarget.ES2020 } }).outputText;
+const sandbox = { module: { exports: {} }, _: { isArray: Array.isArray }, Promise, console };
+vm.runInNewContext(compiled, sandbox);
+const deferred = () => { let resolve; const promise = new Promise(r => { resolve = r; }); return { promise, resolve }; };
+(async () => {
+  const queries = [];
+  const field = new sandbox.module.exports();
+  field._mounted = true; field._completionRequest = 0; field.state = { inputValue: '', completions: [], activeDescendantId: null };
+  field.setState = values => Object.assign(field.state, values);
+  field.props = { tokens: [], tokenKey: t => t.id, onRequestCompletions: value => { const q = { value, ...deferred() }; queries.push(q); return q.promise; } };
+  field._refreshCompletions('ma'); field._refreshCompletions('maya');
+  queries[1].resolve([{ id: 'new' }]); await Promise.resolve();
+  queries[0].resolve([{ id: 'old' }]); await Promise.resolve();
+  assert.equal(field.state.completions[0].id, 'new');
+  field._refreshCompletions('pending'); field._refreshCompletions('', { clear: true });
+  assert.equal(queries.length, 3, 'dismissal does not start another search');
+  queries[2].resolve([{ id: 'late' }]); await Promise.resolve();
+  assert.equal(field.state.completions.length, 0); assert.equal(field.state.activeDescendantId, null);
+  field._refreshCompletions('selected meanwhile'); field.props.tokens = [{ id: 'chosen' }];
+  queries[3].resolve([{ id: 'chosen' }, { id: 'available' }]); await Promise.resolve();
+  assert.equal(field.state.completions.length, 1); assert.equal(field.state.completions[0].id, 'available');
+  field._refreshCompletions('unmount'); field._mounted = false;
+  queries[4].resolve([{ id: 'unmounted' }]); await Promise.resolve();
+  assert.equal(field.state.completions[0].id, 'available');
+  console.log('PASS actual completion method: out-of-order search, Escape dismissal, current token filtering, unmount');
+})().catch(error => { console.error(error); process.exitCode = 1; });

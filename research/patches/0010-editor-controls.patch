@@ -1,0 +1,380 @@
+diff --git a/app/internal_packages/composer-signature/lib/signature-composer-dropdown.tsx b/app/internal_packages/composer-signature/lib/signature-composer-dropdown.tsx
+index 4730c9b..1d10410 100644
+--- a/app/internal_packages/composer-signature/lib/signature-composer-dropdown.tsx
++++ b/app/internal_packages/composer-signature/lib/signature-composer-dropdown.tsx
+@@ -122,10 +122,59 @@ export default class SignatureComposerDropdown extends React.Component<
+     );
+   }
+ 
++  _renderPaperReed() {
++    const { draft } = this.props;
++    const currentId = draft.bodyEditorState ? currentSignatureIdSlate(draft.bodyEditorState) : currentSignatureId(draft.body);
++    const current = this.state.signatures[currentId];
++    const label = current?.title || (currentId ? '已有签名' : '无');
++    const choose = (event: React.MouseEvent<HTMLButtonElement>, signature: ISignature | null) => {
++      const picker = event.currentTarget.closest('details');
++      this._onChangeSignature(signature);
++      picker.open = false;
++      picker.querySelector('summary').focus();
++    };
++    return <details className="pr-signature-picker"
++      onBlur={event => { if (!event.currentTarget.contains(event.relatedTarget as Node)) event.currentTarget.open = false; }}
++      onKeyDown={event => {
++        const picker = event.currentTarget;
++        if (event.key === 'Escape') {
++          event.preventDefault(); event.stopPropagation(); picker.open = false; picker.querySelector('summary').focus();
++        } else if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
++          event.preventDefault(); picker.open = true;
++          const items = Array.from(picker.querySelectorAll('button'));
++          const index = items.indexOf(document.activeElement as HTMLButtonElement);
++          const next = index < 0 ? (event.key === 'ArrowDown' ? 0 : items.length - 1)
++            : (index + (event.key === 'ArrowDown' ? 1 : -1) + items.length) % items.length;
++          items[next]?.focus();
++        }
++      }}>
++      <summary title={`签名：${label}`}><span>签名</span><span className="pr-signature-value">{label}</span><span aria-hidden="true">⌄</span></summary>
++      <div className="pr-signature-menu" role="group" aria-label="选择邮件签名">
++        <p className="pr-picker-caption">邮件签名</p>
++        <button type="button" aria-pressed={!currentId} onClick={event => choose(event, null)}><span>不使用签名</span></button>
++        {Object.values(this.state.signatures).map(signature => {
++          const preview = new DOMParser().parseFromString(signature.body, 'text/html');
++          preview.querySelectorAll('script,style').forEach(node => node.remove());
++          preview.querySelectorAll('br,div,p').forEach(node => node.append(' '));
++          return <button type="button" key={signature.id} aria-pressed={currentId === signature.id}
++            onClick={event => choose(event, signature)}>
++            <span>{signature.title}</span><small>{preview.body.textContent.replace(/\s+/g, ' ').trim()}</small>
++          </button>;
++        })}
++        {!Object.keys(this.state.signatures).length && <p className="pr-picker-empty">还没有签名，可在设置中创建。</p>}
++        <button type="button" className="pr-signature-manage" onClick={event => {
++          event.currentTarget.closest('details').open = false;
++          Actions.switchPreferencesTab('Signatures'); Actions.openPreferences();
++        }}>管理签名…</button>
++      </div>
++    </details>;
++  }
++
+   render() {
+     if (this.props.draft.plaintext) {
+       return <span />;
+     }
++    if (AppEnv.config.get('core.paperReed.enabled')) return this._renderPaperReed();
+     return (
+       <div className="signature-button-dropdown">
+         <ButtonDropdown
+diff --git a/app/internal_packages/paper-reed/styles/paper-reed.less b/app/internal_packages/paper-reed/styles/paper-reed.less
+index 7ce6d28..50e3d60 100644
+--- a/app/internal_packages/paper-reed/styles/paper-reed.less
++++ b/app/internal_packages/paper-reed/styles/paper-reed.less
+@@ -163,3 +163,60 @@
+   .composer-full-window .pr-composer { padding: 20px 24px; box-sizing: content-box; width: calc(~'100% - 48px'); }
+   @media (max-width: 800px) { .pr-compose-actions { gap: 8px; } .pr-format-toggle span { display: none; } }
+ }
++
++// Recipient suggestions, signature picker and formatting share the paper surface.
++.paper-reed-enabled .pr-composer {
++  .display-deferrable:not(.deferred) { opacity: 1; transition: none; }
++  .tokenizing-field .content-container:not(.empty) { left: 64px; right: 0; width: auto; margin: 3px 0 0; padding: 4px; max-height: 276px; overflow-y: auto; border: 1px solid var(--pr-line); border-radius: 7px; background: #fffefa; box-shadow: 0 5px 18px rgba(48,55,48,.1); z-index: 6; }
++  .tokenizing-field .content-container > .item { margin: 0; padding: 8px 12px; border: 0; border-radius: 4px; color: var(--pr-ink); background: transparent; }
++  .tokenizing-field .content-container > .item.selected { background: #e9eee5; color: var(--pr-ink); }
++  .pr-contact-suggestion { display: flex; flex-direction: column; min-width: 0; }
++  .pr-contact-name { font-size: 13px; line-height: 20px; font-weight: 500; }
++  .pr-contact-address { font-size: 12px; line-height: 18px; color: var(--pr-muted); overflow-wrap: anywhere; }
++  .token, .token:hover, .token.selected { box-shadow: none; background: var(--pr-inset); color: var(--pr-ink); border: 1px solid transparent; margin: 1px 5px 1px 1px; line-height: 22px; }
++  .token.selected, .token.dragging { background: #e9eee5; border-color: var(--pr-reed); color: var(--pr-ink); }
++  .token.selected .action img { background-color: var(--pr-reed); }
++  .token.invalid { border-bottom: 1px dashed #a15445; background: #f7eee9; }
++  .token.invalid.selected { border-color: #a15445; background: #f7eee9; color: var(--pr-ink); }
++  .from-single-name { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++  .from-field .dropdown-component { flex-shrink: 0; padding-left: 12px; }
++  .pr-signature-picker { position: relative; font-size: 12px; line-height: 20px; }
++  .pr-signature-picker summary { display: flex; align-items: center; gap: 7px; padding: 5px 0 5px 8px; color: var(--pr-muted); cursor: pointer; list-style: none; }
++  .pr-signature-picker summary::-webkit-details-marker { display: none; }
++  .pr-signature-value { color: var(--pr-ink); max-width: 96px; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++  .pr-signature-picker[open] summary { color: var(--pr-reed); }
++  .pr-signature-menu { position: absolute; right: 0; top: calc(100% + 4px); width: 288px; max-width: calc(~'100vw - 48px'); max-height: 320px; overflow-y: auto; background: #fffefa; border: 1px solid var(--pr-line); border-radius: 7px; padding: 5px; box-shadow: 0 5px 18px rgba(48,55,48,.1); z-index: 7; }
++  .pr-picker-caption { margin: 0; padding: 6px 10px; font-size: 11px; color: var(--pr-muted); }
++  .pr-signature-menu button { display: block; position: relative; width: 100%; background: transparent; border: 0; border-radius: 4px; box-shadow: none; padding: 8px 28px 8px 10px; text-align: left; color: var(--pr-ink); font: 12px/20px -apple-system, BlinkMacSystemFont, sans-serif; cursor: pointer; }
++  .pr-signature-menu button:hover, .pr-signature-menu button:focus-visible { background: var(--pr-inset); }
++  .pr-signature-menu button[aria-pressed=true] { background: #e9eee5; }
++  .pr-signature-menu button[aria-pressed=true]:after { content: '✓'; position: absolute; right: 10px; top: 8px; color: var(--pr-reed); }
++  .pr-signature-menu small { display: block; font-size: 11px; line-height: 17px; color: var(--pr-muted); overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
++  .pr-signature-menu .pr-signature-manage { margin-top: 5px; border-top: 1px solid var(--pr-line); border-radius: 0; color: var(--pr-muted); }
++  .pr-picker-empty { margin: 0; padding: 8px 10px; color: var(--pr-muted); }
++  .pr-signature-picker summary:focus-visible, .pr-signature-menu button:focus-visible { outline: 2px solid var(--pr-reed); outline-offset: -2px; border-radius: 4px; }
++  .RichEditor-toolbar .floating-container { border-bottom: 0; }
++  .RichEditor-toolbar .inner { width: 100%; gap: 5px 0; padding: 6px; border: 1px solid var(--pr-line); border-radius: 6px; background: var(--pr-inset); }
++  .RichEditor-toolbar .pr-format-group { display: flex; align-items: center; flex-wrap: wrap; gap: 2px; padding: 0 6px; border-left: 1px solid var(--pr-line); }
++  .RichEditor-toolbar .pr-format-group:first-child { padding-left: 0; border-left: 0; }
++  .RichEditor-toolbar button { flex: 0 0 auto; min-width: 28px; max-width: none; height: 28px; padding: 4px 6px; border-radius: 4px; font-size: 12px; color: var(--pr-muted); }
++  .RichEditor-toolbar button:hover { background: #e9e9e1; color: var(--pr-ink); }
++  .RichEditor-toolbar button.active { color: var(--pr-reed); background: #e1e8db; }
++  .RichEditor-toolbar button:focus-visible, .RichEditor-toolbar select:focus-visible, .RichEditor-toolbar input:focus-visible { outline: 2px solid var(--pr-reed); outline-offset: 1px; }
++  .RichEditor-toolbar button:active { opacity: .7; }
++  .RichEditor-toolbar .pr-font-select { font: 12px/20px -apple-system, BlinkMacSystemFont, sans-serif; border: 0; border-radius: 4px; height: 28px; margin: 0; padding: 2px 3px; width: 86px; min-width: 0; color: var(--pr-muted); background: transparent; box-shadow: none; }
++  .RichEditor-toolbar .pr-font-select[aria-label="字号"] { width: 58px; }
++  .RichEditor-toolbar .color-picker > button { width: 28px; height: 28px; margin: 0; vertical-align: initial; box-shadow: none; }
++  .RichEditor-toolbar .pr-color-glyph { display: inline-block; border-bottom: 2px solid; line-height: 15px; padding: 0 2px; }
++  .RichEditor-toolbar .link-picker { flex: 0 0 auto; max-width: none; position: relative; }
++  .RichEditor-toolbar .dropdown { top: calc(100% + 5px); right: 0; border: 1px solid var(--pr-line); border-radius: 6px; background: #fffefa; box-shadow: 0 5px 18px rgba(48,55,48,.1); }
++  .RichEditor-toolbar .link-picker .dropdown { padding: 8px; gap: 8px; width: 300px; max-width: calc(~'100vw - 48px'); }
++  .RichEditor-toolbar .link-picker input { min-width: 0; flex: 1; font-size: 12px; padding: 5px 6px; border: 1px solid var(--pr-line); background: transparent; border-radius: 3px; }
++  .RichEditor-toolbar .link-picker .dropdown button { color: var(--pr-reed); max-width: none; }
++  .pr-color-palette { width: 184px; padding: 5px; }
++  .pr-color-options { display: grid; grid-template-columns: repeat(4, 28px); gap: 10px; padding: 6px 10px 12px; }
++  .RichEditor-toolbar .pr-color-options button { border: 3px solid #fffefa; outline: 1px solid var(--pr-line); border-radius: 50%; padding: 0; }
++  .RichEditor-toolbar .pr-color-options button[aria-pressed=true], .RichEditor-toolbar .pr-color-options button:focus-visible { outline: 2px solid var(--pr-reed); outline-offset: 1px; }
++  .pr-color-custom { display: flex; align-items: center; justify-content: space-between; padding: 8px 10px 4px; border-top: 1px solid var(--pr-line); font-size: 11px; color: var(--pr-muted); }
++  .pr-color-custom input { width: 28px; height: 26px; padding: 0; background: none; border: 0; cursor: pointer; }
++}
+diff --git a/app/src/components/composer-editor/composer-editor-toolbar.tsx b/app/src/components/composer-editor/composer-editor-toolbar.tsx
+index 23b09f1..7c57706 100644
+--- a/app/src/components/composer-editor/composer-editor-toolbar.tsx
++++ b/app/src/components/composer-editor/composer-editor-toolbar.tsx
+@@ -95,6 +95,12 @@ export default class ComposerEditorToolbar extends React.Component<
+     );
+ 
+     pluginsWithToolbars.forEach(({ toolbarComponents, toolbarSectionClass }, idx) => {
++      if (AppEnv.config.get('core.paperReed.enabled')) {
++        sectionItems.push(<div className={`pr-format-group ${toolbarSectionClass || ''}`} key={idx}>
++          {toolbarComponents.map((Component, cdx) => <Component key={cdx} editor={editor} value={value} className={toolbarSectionClass} />)}
++        </div>);
++        return;
++      }
+       sectionItems.push(
+         ...toolbarComponents.map((Component, cdx) => (
+           <Component
+@@ -115,7 +121,7 @@ export default class ComposerEditorToolbar extends React.Component<
+     return (
+       <div ref={(el) => (this._el = el)} className="RichEditor-toolbar">
+         <div ref={(el) => (this._floatingEl = el)} className="floating-container">
+-          <div className="inner display-deferrable">{sectionItems}</div>
++          <div className="inner display-deferrable" role="group" aria-label={AppEnv.config.get('core.paperReed.enabled') ? '正文格式' : 'Text formatting'}>{sectionItems}</div>
+         </div>
+       </div>
+     );
+diff --git a/app/src/components/composer-editor/emoji-plugins.tsx b/app/src/components/composer-editor/emoji-plugins.tsx
+index 1b9ad1a..9884a5e 100644
+--- a/app/src/components/composer-editor/emoji-plugins.tsx
++++ b/app/src/components/composer-editor/emoji-plugins.tsx
+@@ -329,6 +329,8 @@ const ToolbarEmojiButton = ({ value, editor }: ComposerEditorPluginToolbarCompon
+ 
+   return (
+     <button
++      type="button" aria-label={AppEnv.config.get('core.paperReed.enabled') ? '表情' : 'Emoji'}
++      title={AppEnv.config.get('core.paperReed.enabled') ? '表情' : 'Emoji'}
+       onClick={(e) => {
+         Actions.openPopover(<EmojiToolbarPopover onInsertEmoji={onInsertEmoji} />, {
+           originRect: (e.target as HTMLElement).getBoundingClientRect(),
+diff --git a/app/src/components/composer-editor/toolbar-component-factories.tsx b/app/src/components/composer-editor/toolbar-component-factories.tsx
+index 28fce0b..2bb5737 100644
+--- a/app/src/components/composer-editor/toolbar-component-factories.tsx
++++ b/app/src/components/composer-editor/toolbar-component-factories.tsx
+@@ -115,19 +115,27 @@ export function applyValueForMark(editor: Editor, type: string, markValue: any)
+ 
+ // React Component Factories
+ 
++const paperReedToolNames = {
++  bold: '加粗', italic: '斜体', underline: '下划线', strike: '删除线',
++  blockquote: '引用', code: '代码块', ol_list: '编号列表', ul_list: '项目列表',
++};
++
+ export function BuildToggleButton({
+   type,
+   button: { iconClass, isActive, onToggle },
+ }: IEditorToolbarConfigItem) {
+   return ({ editor, className, value }: ComposerEditorPluginToolbarComponentProps) => {
+     const active = isActive(value);
++    const label = AppEnv.config.get('core.paperReed.enabled') ? paperReedToolNames[type] || type : type;
+     const onMouseDown = (e: React.MouseEvent<HTMLButtonElement>) => {
+       onToggle(editor, active);
+       e.preventDefault();
+     };
+     return (
+-      <button className={`${className} ${active ? 'active' : ''}`} onMouseDown={onMouseDown}>
+-        <i title={type} className={iconClass} />
++      <button type="button" title={label} aria-label={label} aria-pressed={active}
++        className={`${className} ${active ? 'active' : ''}`} onMouseDown={onMouseDown}
++        onClick={event => { if (event.detail === 0) { onToggle(editor, active); editor.focus(); } }}>
++        <i aria-hidden="true" className={iconClass} />
+       </button>
+     );
+   };
+@@ -226,6 +234,7 @@ export function BuildMarkButtonWithValuePicker(config) {
+     render() {
+       const { value, className } = this.props;
+       const { expanded } = this.state;
++      const paperReed = AppEnv.config.get('core.paperReed.enabled');
+ 
+       const active = safeActiveMarks(value).find((m) => m.type === config.type);
+       return (
+@@ -236,11 +245,13 @@ export function BuildMarkButtonWithValuePicker(config) {
+           onBlur={this.onBlur}
+         >
+           {active ? (
+-            <button className="active" onMouseDown={this.onPrompt}>
++            <button type="button" className="active" aria-label={paperReed ? '编辑链接' : 'Edit link'} title={paperReed ? '编辑链接' : 'Edit link'} aria-expanded={expanded}
++              onMouseDown={this.onPrompt} onClick={event => { if (event.detail === 0) this.onPrompt(event); }}>
+               <i className={config.iconClassOn} />
+             </button>
+           ) : (
+-            <button onMouseDown={this.onPrompt}>
++            <button type="button" aria-label={paperReed ? '添加链接' : 'Add link'} title={paperReed ? '添加链接' : 'Add link'} aria-expanded={expanded}
++              onMouseDown={this.onPrompt} onClick={event => { if (event.detail === 0) this.onPrompt(event); }}>
+               <i className={config.iconClassOff} />
+             </button>
+           )}
+@@ -248,18 +259,22 @@ export function BuildMarkButtonWithValuePicker(config) {
+             <div className="dropdown">
+               <input
+                 type="text"
+-                placeholder={config.placeholder}
++                aria-label={paperReed ? '链接地址' : 'Link URL'}
++                placeholder={paperReed ? '粘贴链接地址' : config.placeholder}
+                 value={this.state.fieldValue}
+                 ref={(el) => (this._inputEl = el)}
+                 onBlur={this.onBlur}
+                 onChange={(e) => this.setState({ fieldValue: e.target.value })}
+                 onKeyDown={(e) => {
+-                  if (e.which === 13) {
++                  if (e.key === 'Escape') {
++                    e.preventDefault(); e.stopPropagation();
++                    this.setState({ expanded: false }, () => this.props.editor.focus());
++                  } else if (e.which === 13 && !e.nativeEvent.isComposing) {
+                     this.onConfirm(e);
+                   }
+                 }}
+               />
+-              <button onMouseDown={this.onConfirm}>{active ? 'Save' : 'Add'}</button>
++              <button type="button" onMouseDown={this.onConfirm} onClick={event => { if (event.detail === 0) this.onConfirm(event); }}>{paperReed ? (active ? '保存' : '添加') : (active ? 'Save' : 'Add')}</button>
+             </div>
+           )}
+         </div>
+@@ -312,6 +327,7 @@ export function BuildColorPicker(config) {
+     render() {
+       const color = getActiveValueForMark(this.props.value, config.type) || config.default;
+       const { expanded } = this.state;
++      const paperReed = AppEnv.config.get('core.paperReed.enabled');
+ 
+       return (
+         <div
+@@ -319,16 +335,28 @@ export function BuildColorPicker(config) {
+           onBlur={this._onBlur}
+           ref={(el) => (this._el = el)}
+           className={`color-picker ${this.props.className}`}
++          onKeyDown={event => { if (event.key === 'Escape') { event.stopPropagation(); this.setState({ expanded: false }); this._el.querySelector('button').focus(); } }}
+         >
+           <button
++            type="button" aria-label={paperReed ? '文字颜色' : 'Text color'} title={paperReed ? '文字颜色' : 'Text color'} aria-expanded={expanded}
+             onClick={this._onToggleExpanded}
+             style={{
+-              backgroundColor: color,
++              backgroundColor: paperReed ? undefined : color,
+             }}
+-          />
++          >{paperReed && <span className="pr-color-glyph" style={{ borderBottomColor: color }}>A</span>}</button>
+           {expanded && (
+             <div className="dropdown">
+-              <CompactPicker color={color} onChangeComplete={this._onChangeComplete} />
++              {paperReed ? <div className="pr-color-palette">
++                <p className="pr-picker-caption">文字颜色</p>
++                <div className="pr-color-options">{[
++                  ['默认', config.default], ['苇绿', '#4b634f'], ['蓝灰', '#476b80'], ['赭棕', '#946b40'],
++                  ['暗红', '#a15445'], ['紫灰', '#77628a'], ['灰色', '#626b60'], ['墨色', '#303730'],
++                ].map(([name, hex]) => <button type="button" key={name} title={name} aria-label={name}
++                  aria-pressed={color.toLowerCase() === hex.toLowerCase()} style={{ backgroundColor: hex }}
++                  onClick={() => this._onChangeComplete({ hex })} />)}</div>
++                <label className="pr-color-custom">自定义颜色<input type="color" aria-label="自定义文字颜色" value={/^#[0-9a-f]{6}$/i.test(color) ? color : config.default}
++                  onChange={event => this._onChangeComplete({ hex: event.target.value })} /></label>
++              </div> : <CompactPicker color={color} onChangeComplete={this._onChangeComplete} />}
+             </div>
+           )}
+         </div>
+@@ -360,6 +388,14 @@ export function BuildFontPicker(config) {
+       const value = getActiveValueForMark(this.props.value, config.type) || config.default;
+       const displayed = config.convert(value);
+ 
++      if (AppEnv.config.get('core.paperReed.enabled')) {
++        const names = config.type === 'size' ? {1:'小',2:'标准',4:'大',6:'特大'} : {'sans-serif':'无衬线','serif':'衬线','monospace':'等宽'};
++        return <select className="pr-font-select" aria-label={config.type === 'size' ? '字号' : '字体'}
++          title={config.type === 'size' ? '字号' : '字体'} value={displayed} onChange={this._onSetValue}>
++          {config.options.map(({ name, value }) => <option key={value} value={value}>{names[value] || name}</option>)}
++        </select>;
++      }
++
+       return (
+         <button
+           style={{ padding: 0, paddingRight: 6 }}
+diff --git a/app/src/components/participants-text-field.tsx b/app/src/components/participants-text-field.tsx
+index e97b9d2..d92f15e 100644
+--- a/app/src/components/participants-text-field.tsx
++++ b/app/src/components/participants-text-field.tsx
+@@ -20,7 +20,7 @@ const TokenRenderer = (props: { token: object }) => {
+     chipText = contact.fullName();
+   }
+   return (
+-    <div className="participant">
++    <div className="participant" title={contact.toString()}>
+       <InjectedComponentSet
+         matching={{ role: 'Composer:RecipientChip' }}
+         exposedProps={{ contact: props.token, collapsed: false }}
+@@ -69,6 +69,12 @@ export default class ParticipantsTextField extends React.Component<ParticipantsT
+     const CustomComponent = p.customComponent;
+     if (CustomComponent) return <CustomComponent token={p} />;
+     if (p instanceof Contact) {
++      if (AppEnv.config.get('core.paperReed.enabled')) return (
++        <span className="pr-contact-suggestion">
++          <span className="pr-contact-name">{p.fullName() || p.email}</span>
++          {p.fullName() && p.fullName() !== p.email && <span className="pr-contact-address">{p.email}</span>}
++        </span>
++      );
+       return <Menu.NameEmailContent name={p.fullName()} email={p.email} key={p.id} />;
+     } else if (p instanceof ContactGroup) {
+       return p.name;
+diff --git a/app/src/components/tokenizing-text-field.tsx b/app/src/components/tokenizing-text-field.tsx
+index 13a69e3..c6694c0 100644
+--- a/app/src/components/tokenizing-text-field.tsx
++++ b/app/src/components/tokenizing-text-field.tsx
+@@ -381,6 +381,7 @@ export class TokenizingTextField<T> extends React.Component<
+   };
+ 
+   _mounted = false;
++  private _completionRequest = 0;
+   private _inputId = `tokenizing-field-${Utils.generateTempId()}`;
+ 
+   constructor(props) {
+@@ -488,6 +489,10 @@ export class TokenizingTextField<T> extends React.Component<
+   };
+ 
+   _onInputKeydown = (event: React.KeyboardEvent<HTMLInputElement>) => {
++    if (event.nativeEvent.isComposing) {
++      event.stopPropagation();
++      return;
++    }
+     if (['Backspace', 'Delete'].includes(event.key)) {
+       this._removeTokens(this._selectedTokens());
+     } else if (['Escape'].includes(event.key)) {
+@@ -854,8 +859,13 @@ export class TokenizingTextField<T> extends React.Component<
+   // this function will handle calling `setState` on `completions` when
+   // `onRequestCompletions` returns.
+   _refreshCompletions = (val = this.state.inputValue, { clear }: { clear?: boolean } = {}) => {
+-    const usedKeys = this.props.tokens.map(this.props.tokenKey);
++    const request = ++this._completionRequest;
++    if (clear) {
++      this.setState({ completions: [], activeDescendantId: null });
++      return;
++    }
+     const removeUsedTokens = (tokens) => {
++      const usedKeys = this.props.tokens.map(this.props.tokenKey);
+       return tokens.filter((t) => !usedKeys.includes(this.props.tokenKey(t)));
+     };
+ 
+@@ -865,7 +875,7 @@ export class TokenizingTextField<T> extends React.Component<
+       this.setState({ completions: removeUsedTokens(tokensOrPromise) });
+     } else if (tokensOrPromise instanceof Promise) {
+       tokensOrPromise.then((tokens) => {
+-        if (!this._mounted) {
++        if (!this._mounted || request !== this._completionRequest) {
+           return;
+         }
+         this.setState({ completions: removeUsedTokens(tokens) });

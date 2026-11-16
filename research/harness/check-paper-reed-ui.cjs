@@ -1,7 +1,7 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
 module.exports=async({app,main,cdp,work,account,cli,click,evaluate,until,restart})=>{
  app.windows().forEach(page=>page.on('dialog',()=>{}));app.on('window',page=>page.on('dialog',()=>{}));
- const out=path.resolve(__dirname,'../editor-validation-2026-11-16');fs.mkdirSync(out,{recursive:true});
+ const out=process.env.PAPER_REED_UI_OUTPUT || path.resolve(__dirname,'../editor-validation-2026-11-16');fs.mkdirSync(out,{recursive:true});
  const text=()=>evaluate(cdp,'document.body.innerText');
  const action=selector=>click(main,cdp,selector);
  const frame=async(name)=>{const shot=await cdp.send('Page.captureScreenshot',{format:'png',fromSurface:true});fs.writeFileSync(path.join(out,name+'.png'),Buffer.from(shot.data,'base64'));};

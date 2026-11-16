@@ -7,7 +7,7 @@ const token=randomUUID(),config=path.join(work,'config');fs.mkdirSync(config);
 const tokenFile=path.join(work,'token');fs.writeFileSync(tokenFile,token,{mode:0o600});
 const configData={'*':{env:'production',accounts:[account],accountsVersion:2,core:{
   themes:['ui-light'],disabledPackages:['open-tracking','link-tracking','send-reminders','send-later','thread-snooze'],
-  paperReed:{enabled:mode==='workspace'},workspace:{mode:'split'},sending:{undoSend:0,sounds:false},mcp:{enabled:true,accessLevel:'read-write-send',enabledAccounts:{[account.id]:{enabled:true}}}
+  paperReed:{enabled:mode==='workspace'||mode==='controls'},workspace:{mode:'split'},sending:{undoSend:0,sounds:false},mcp:{enabled:true,accessLevel:'read-write-send',enabledAccounts:{[account.id]:{enabled:true}}}
 }}};
 fs.writeFileSync(path.join(config,'config.json'),JSON.stringify(configData));
 let app,main,cdp,port;
@@ -32,7 +32,7 @@ async function startDesktop(){
  const km=JSON.stringify(path.join(upstream,'app/src/key-manager'));
  await evaluate(cdp,`(async()=>{const km=require(${km}).default;await km.replacePassword('test@example.test-imap','pass');await km.replacePassword('test@example.test-smtp','pass');const a=require('mailspring-exports').AccountStore.accountForId(${JSON.stringify(account.id)});await AppEnv.mailsyncBridge.forceRelaunchClient(a);return true;})()`);
  console.log('SETUP secrets and sync');
- await until(()=>evaluate(cdp,`document.body.innerText.includes(${JSON.stringify(mode==='workspace'?'收件箱':'Inbox')})`),'inbox');
+ await until(()=>evaluate(cdp,`document.body.innerText.includes(${JSON.stringify((mode==='workspace'||mode==='controls')?'收件箱':'Inbox')})`),'inbox');
  await until(async()=>{try{return (await fetch(`http://127.0.0.1:${port}/mcp`)).status===401;}catch{return false;}},'production MCP listener');
  console.log('SETUP production MCP via package manager');
 }
@@ -40,6 +40,10 @@ async function startDesktop(){
  const reservation=require('node:net').createServer();await new Promise(r=>reservation.listen(0,'127.0.0.1',r));port=reservation.address().port;await new Promise(r=>reservation.close(r));
  configData['*'].core.mcp.port=port;configData['*'].core.mcp.token=token;fs.writeFileSync(path.join(config,'config.json'),JSON.stringify(configData));
  await startDesktop();
+ if(mode==='controls') {
+   await require('./check-editor-controls.cjs')({app,main,cdp,work,account,cli,click,evaluate,until});
+   return;
+ }
  if(mode==='workspace') {
    await require('./check-paper-reed-ui.cjs')({app,main,cdp,work,account,cli,click,evaluate,until, restart: async()=>{ await app.close(); await startDesktop(); return {app,main,cdp}; }});
    return;
@@ -158,4 +162,4 @@ async function startDesktop(){
  console.error(error.stack);
  if(cdp)try{fs.writeFileSync(path.join(work,'failure-dom.txt'),await evaluate(cdp,'document.body.innerText'));}catch{}
  process.exitCode=1;
-}).finally(async()=>{if(app){if(mode==='workspace'){app.process().kill('SIGKILL');process.exit(process.exitCode||0);}if(mode==='conflict'||mode==='recover'||mode==='workspace')await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().forEach(w=>w.destroy())).catch(()=>{});await app.close();}});
+}).finally(async()=>{if(app){if(mode==='workspace'||mode==='controls'){app.process().kill('SIGKILL');process.exit(process.exitCode||0);}if(mode==='conflict'||mode==='recover'||mode==='workspace')await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().forEach(w=>w.destroy())).catch(()=>{});await app.close();}});

@@ -1,0 +1,21 @@
+Paper Reed editor controls validation
+Date: 2026-11-16
+Baseline pushed: 8d1282f
+Baseline actual UI: compose-handoff-7ix7yyu0
+Final controls UI: compose-handoff-5xwbf7sm
+Final workspace UI: compose-handoff-vb10jfc_
+PASS contacts fixture uses isolated SQLite search index; no production contact sync claim
+PASS actual Electron + CLI + desktop MCP + native engine controls; SMTP=0
+PASS same-name keyboard selection, manual/duplicate/invalid recipients, synthetic composing Enter
+PASS signature insert/replace/remove preserves body; keyboard/Escape; empty state
+PASS mouse bold, keyboard italic, link selection, color apply/reset, collapse preserves format
+PASS compact 900x700 link remains in viewport
+PASS full workspace flow including reply, conflict, copies, restart and send; SMTP=1
+PASS actual completion method with controlled async order, clear, used-token and unmount cases
+PASS full upstream TypeScript typecheck
+PASS shared draft and recovery boundary checks
+SHA256 7cf514cbe63c8848ea21403fa995c581f3f49e5656a7de100f5eb95e9065ace8  research/patches/0010-editor-controls.patch
+SHA256 f1e86f6c4782ff970d94940c0169479e3e28ff8418bde53c33725510633b47a7  research/.local/Mailspring/app/mailsync
+PASS 8 desktop patches applied in order; 31 files byte-identical to tested source
+PASS repository check: 36 JS syntax checks; generated previews, JSON and Markdown links
+PASS git diff --check excluding patch context whitespace

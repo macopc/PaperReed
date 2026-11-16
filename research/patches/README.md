@@ -13,10 +13,11 @@
 | `0007-connected-workspace.patch` | Mailspring 根目录，在 0006 后应用 | 同上，加 0002–0006 |
 | `0008-recovery-provenance.patch` | `mailsync/` 子模块，在 0001 后应用 | 子模块固定基线，加 0001 |
 | `0009-editor-recovery-identity.patch` | Mailspring 根目录，在 0007 后应用 | 桌面固定基线，加 0002–0007；需要 0008 引擎 |
+| `0010-editor-controls.patch` | Mailspring 根目录，在 0009 后应用 | 桌面固定基线，加 0002–0007 / 0009 |
 
-在干净的固定版本 checkout 中，使用补丁的绝对路径分别执行 `git apply --check <patch>`、`git apply <patch>`。0001、0008 按顺序在子模块根目录应用；0002–0007、0009 按顺序在桌面根目录应用。应用 0008 后重新构建引擎，并替换实验桌面 `app/mailsync`。本轮已在临时目录恢复各文件的基线版本、实际应用补丁，并逐字节比对测试过的源码。
+在干净的固定版本 checkout 中，使用补丁的绝对路径分别执行 `git apply --check <patch>`、`git apply <patch>`。0001、0008 按顺序在子模块根目录应用；0002–0007、0009、0010 按顺序在桌面根目录应用。应用 0008 后重新构建引擎，并替换实验桌面 `app/mailsync`；0010 不要求额外原生构建。本轮已在临时目录恢复各文件的基线版本、实际应用补丁，并逐字节比对测试过的源码。
 
-当前工作区的 `research/.local/Mailspring` 已应用九份补丁，**不要重复应用**。安装过程中产生的上游 `app/package-lock.json` 变化不在补丁内。
+当前工作区的 `research/.local/Mailspring` 已应用十份补丁，**不要重复应用**。安装过程中产生的上游 `app/package-lock.json` 变化不在补丁内。
 
 接入方式：新增一个 `MailMutationGuard.hpp`，只依赖现有 SQLiteCpp / nlohmann。它由 `TaskProcessor.cpp` 和 `MailStore.cpp` 直接包含，不新增构建目标、服务、数据库或任务调度器。迁移在原数据库中建立 `PaperReedSend` 表和活动草稿唯一索引；实验阶段不改变上游 `user_version`。正式分支需要接入自己的版本化迁移。
 
@@ -33,3 +34,5 @@
 0007 提供由 `core.paperReed.enabled: true` 开启的实验工作台：收件箱、会话／回复、写信、持续编辑状态和上下文交接。开关关闭时保留原有工作区；原有组件注册位置保留，正文继续使用上游隔离渲染器。启动前设置开关并重启，实验 harness 会自动配置独立目录。检查与限制见 [界面接入记录](../ui-validation-2026-11-16/README.md)。
 
 0008 将恢复副本来源写入原数据库的 `PaperReedDraftRecovery` 表，与副本在同一事务保存；不修改邮件头。0009 收敛写信／回复结构，显示稳定副本编号、时间及来源跳转。恢复副本需要新引擎；旧引擎缺少表时明确拒绝保存副本，不能报告成功却丢失标记。已有未标记副本不回填猜测来源。详情见 [编辑器与副本验证](../editor-validation-2026-11-16/README.md)。
+
+0010 打磨收件人补全、签名选择和格式工具，修正补全异步结果覆盖与取消时序，并补充格式工具键盘操作。界面仍由原有 Paper Reed 开关控制；补全时序和输入法保护、格式键盘操作适用于共用组件。实际窗口、选区和保存结果见 [控件验证](../controls-validation-2026-11-16/README.md)。
