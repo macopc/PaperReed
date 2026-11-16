@@ -40,7 +40,7 @@ try:
     assert set(sent[0].recipients)=={'recipient@example.test','cc@example.test','bcc@example.test'},sent[0].recipients
     assert sent[0].header('Bcc') is None
     if a.workspace:
-        result_path=Path(__file__).resolve().parent.parent/'ui-validation-2026-11-16/result.json'
+        result_path=Path(__file__).resolve().parent.parent/'editor-validation-2026-11-16/result.json'
         result=json.loads(result_path.read_text())
         result['observedSMTPSubmissions']=len(sent)
         result_path.write_text(json.dumps(result,indent=2)+'\n')

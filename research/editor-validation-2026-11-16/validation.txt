@@ -1,0 +1,20 @@
+Paper Reed editor / recovery identity validation
+Date: 2026-11-16
+Baseline pushed: 4685f9a
+Final desktop run: compose-handoff-nut8ujl7
+PASS actual Electron + CLI + desktop MCP + native engine, loopback only
+PASS final result.json: 8 inbox threads, two copies, restart, source navigation, deletion; SMTP=1
+PASS native recovery transaction rollback, stable number, account isolation and existing mutation/send guards
+PASS recovery boundaries and draft boundaries
+PASS full upstream TypeScript typecheck
+PASS native Release arm64 build
+PASS prior real native stale-draft regression: contracts-naf8jrly
+PASS prior legacy popout recovery flow: compose-handoff-luyqezp7
+SHA256 f1e86f6c4782ff970d94940c0169479e3e28ff8418bde53c33725510633b47a7  research/.local/Mailspring/app/mailsync
+SHA256 38028204747d0c7fd6f5e0fa6815bdb293cb17c75045b21b2e2eeef922a06489  research/patches/0008-recovery-provenance.patch
+SHA256 56db175f745fbeec3c236e9c110f1f982e47076d81d22a8653efaf72b102e366  research/patches/0009-editor-recovery-identity.patch
+PASS Mailspring: 7 patches applied in sequence; 25 files byte-identical to tested source
+PASS mailsync: 2 patches applied in sequence; 4 files byte-identical to tested source
+PASS conflict keeps Send in the same horizontal position
+PASS repository check: 33 JS syntax checks; generated previews, JSON, Markdown links
+PASS git diff --check (excluding patch context whitespace)

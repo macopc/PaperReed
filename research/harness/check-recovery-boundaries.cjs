@@ -65,11 +65,11 @@ function setup() {
   console.log('PASS copy is frozen; input typed during save keeps editor open');
 
   // Execute the shared copy service too, with only persistence/model adapters.
-  let queued = [];
-  class Save { constructor({draft}) { this.draft = draft; } }
+  let queued = [], recoveryQueries = [], recoverySchema = true;
+  class Save { constructor(fields) { Object.assign(this, fields); } }
   const deps = {
     crypto: require('node:crypto'), '../../flux/models/message': { Message },
-    '../../flux/stores/database-store': {}, '../../flux/stores/account-store': {},
+    '../../flux/stores/database-store': { _query: async (sql, values) => { recoveryQueries.push({sql, values}); return recoverySchema ? [{name:'PaperReedDraftRecovery'}] : []; } }, '../../flux/stores/account-store': {},
     '../../flux/tasks/syncback-draft-task': { SyncbackDraftTask: Save },
     '../../flux/tasks/send-draft-task': {},
     '../../flux/actions': { queueTask: task => queued.push(task) },
@@ -90,10 +90,19 @@ function setup() {
   await assert.rejects(saveDraftCopy(original, { ...access, visible: async () => false }), /draft-not-found/);
   await assert.rejects(saveDraftCopy(new Message({...original, files:[{id:'attachment'}]}), access), /attachments/);
   assert.equal(queued.length, 0);
+  assert.equal(recoveryQueries.length, 0);
+  recoverySchema = false;
+  await assert.rejects(saveDraftCopy(original, access), /recovery-engine-update-required/);
+  assert.equal(queued.length, 0);
+  recoverySchema = true;
+  recoveryQueries = [];
   const copied = await saveDraftCopy(original, access);
   assert.notEqual(copied.headerMessageId, original.headerMessageId); assert.equal(copied.id, 'copy-row'); assert.equal(copied.version, 1);
   for(const key of ['body','subject','plaintext','from','to','cc','bcc','replyTo','replyToHeaderMessageId']) assert.deepEqual(copied[key], original[key], key);
   assert.equal(copied.pluginMetadata, undefined); assert.equal(original.version, 3); assert.equal(original.headerMessageId, 'source');
   assert.equal(queued.length, 1); assert(queued[0] instanceof Save);
+  assert.equal(recoveryQueries.length, 1);
+  assert(recoveryQueries[0].sql.startsWith('SELECT'));
+  assert.deepEqual(JSON.parse(JSON.stringify(queued[0].recoverySource)), {sourceDraftId: 'source', sourceRevision: 3});
   console.log('PASS copy identity, fields and receipt; denied access/attachments enqueue nothing; scheduling metadata not copied');
 })().catch(error => { console.error(error); process.exitCode = 1; });

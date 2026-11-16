@@ -41,7 +41,7 @@ async function startDesktop(){
  configData['*'].core.mcp.port=port;configData['*'].core.mcp.token=token;fs.writeFileSync(path.join(config,'config.json'),JSON.stringify(configData));
  await startDesktop();
  if(mode==='workspace') {
-   await require('./check-paper-reed-ui.cjs')({app,main,cdp,work,account,cli,click,evaluate,until});
+   await require('./check-paper-reed-ui.cjs')({app,main,cdp,work,account,cli,click,evaluate,until, restart: async()=>{ await app.close(); await startDesktop(); return {app,main,cdp}; }});
    return;
  }
  if(mode==='audit') {

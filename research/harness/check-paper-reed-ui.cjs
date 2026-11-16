@@ -1,11 +1,11 @@
 const assert=require('node:assert/strict'),fs=require('node:fs'),path=require('node:path');
-module.exports=async({app,main,cdp,work,account,cli,click,evaluate,until})=>{
+module.exports=async({app,main,cdp,work,account,cli,click,evaluate,until,restart})=>{
  app.windows().forEach(page=>page.on('dialog',()=>{}));app.on('window',page=>page.on('dialog',()=>{}));
- const out=path.resolve(__dirname,'../ui-validation-2026-11-16');fs.mkdirSync(out,{recursive:true});
+ const out=path.resolve(__dirname,'../editor-validation-2026-11-16');fs.mkdirSync(out,{recursive:true});
  const text=()=>evaluate(cdp,'document.body.innerText');
  const action=selector=>click(main,cdp,selector);
- const frame=async(name)=>{await main.screenshot({path:path.join(out,name+'.png')});};
- const screenshot=async(name)=>{await evaluate(cdp,'new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');await frame(name);};
+ const frame=async(name)=>{const shot=await cdp.send('Page.captureScreenshot',{format:'png',fromSurface:true});fs.writeFileSync(path.join(out,name+'.png'),Buffer.from(shot.data,'base64'));};
+ const screenshot=async(name)=>{await cdp.send('Emulation.setDeviceMetricsOverride',{width:name.includes('compact')?900:1440,height:name.includes('compact')?700:900,deviceScaleFactor:1,mobile:false});await evaluate(cdp,'new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');await frame(name);};
  const openSubject=async subject=>{
    await until(()=>evaluate(cdp,`Array.from(document.querySelectorAll('.pr-mail-row')).some(e=>e.innerText.includes(${JSON.stringify(subject)}))`),'draft in list');
    await evaluate(cdp,`Array.from(document.querySelectorAll('.pr-mail-row')).find(e=>e.innerText.includes(${JSON.stringify(subject)})).setAttribute('data-test-target','true');true`);
@@ -40,6 +40,19 @@ module.exports=async({app,main,cdp,work,account,cli,click,evaluate,until})=>{
  await until(()=>evaluate(cdp,'!!document.querySelector(".pr-editor [contenteditable=true]")'),'full editor');
  const editorWidth=await evaluate(cdp,'document.querySelector(".pr-editor").getBoundingClientRect().width');
  assert.equal(editorWidth,readerWidth);
+ const sendLeft=await evaluate(cdp,'document.querySelector(".btn-send").getBoundingClientRect().left');
+ const headerOrder=await evaluate(cdp,'Array.from(document.querySelectorAll(".pr-editor .expanded-participants .composer-participant-field")).map(e=>e.className)');
+ assert(headerOrder[0].includes('from-field'),'From precedes recipients in DOM');
+ assert.equal(await evaluate(cdp,'getComputedStyle(document.querySelector(".RichEditor-toolbar")).display'),'none');
+ await action('.pr-format-toggle');
+ assert.notEqual(await evaluate(cdp,'getComputedStyle(document.querySelector(".RichEditor-toolbar")).display'),'none');
+ await action('.pr-format-toggle');
+ await action('.pr-subject-heading textarea');await main.keyboard.press('Meta+A');await main.keyboard.insertText('A very long subject that should wrap naturally inside the same reading column without pushing recipients or actions outside the window — Paper Reed editor review');
+ assert(await evaluate(cdp,`(()=>{const e=new KeyboardEvent('keydown',{key:'Enter',isComposing:true,bubbles:true,cancelable:true});document.querySelector('.pr-subject-heading textarea').dispatchEvent(e);return !e.defaultPrevented;})()`),'Composing Enter must not be consumed by subject navigation');
+ const titleHeight=await evaluate(cdp,'document.querySelector(".pr-subject-heading textarea").getBoundingClientRect().height');
+ assert(titleHeight>=76,'Long subject wraps');
+ await screenshot('long-subject');
+ await main.keyboard.press('Meta+A');await main.keyboard.insertText(created.subject);
  await edit('Paper Reed GUI edit — preserve this version.');
  assert((await text()).includes('尚未保存'));
  const remote=await cli('draft-update',{...ref,expectedRevision:created.revision,changes:{body:'CLI newer version'}});
@@ -47,8 +60,10 @@ module.exports=async({app,main,cdp,work,account,cli,click,evaluate,until})=>{
  await until(async()=>(await text()).includes('草稿有更新'),'persistent conflict');
  await action('[data-mailbox="inbox"]');
  assert(await evaluate(cdp,'!!document.querySelector(".pr-editor")'),'conflict blocks navigation');
- await until(async()=>(await text()).includes('当前编辑尚未保存'),'blocked navigation notice');
+ await until(async()=>(await text()).includes('草稿有更新'),'conflict remains after navigation attempt');
+ assert(!(await text()).includes('当前编辑尚未保存。请在编辑区处理后再切换。'),'no duplicate page-level error');
  assert(await evaluate(cdp,'document.querySelector(".btn-send").disabled'),'conflicting send control disabled');
+ assert.equal(await evaluate(cdp,'document.querySelector(".btn-send").getBoundingClientRect().left'),sendLeft,'Conflict must not move the send action');
  await screenshot('conflict');
  await action('.pr-status-line button');
  await until(async()=>(await text()).includes('副本已保存到本机'),'copy saved');
@@ -65,18 +80,36 @@ module.exports=async({app,main,cdp,work,account,cli,click,evaluate,until})=>{
  await until(()=>evaluate(cdp,'document.querySelector("[contenteditable=true]")?.innerText.includes("CLI newer version")'),'explicit original reload');
  assert((await text()).includes('已保存到本机'));
  await screenshot('recovered');
+ await action('[data-mailbox="drafts"]');
+ await until(()=>evaluate(cdp,'document.querySelectorAll(".pr-copy-badge").length===2'),'two marked recovery copies');
+ assert((await text()).includes('原稿 · 2 份恢复副本'));
+ await screenshot('recovery-list');
+ await action(`[data-draft-id="${copyId}"]`);
+ await until(()=>evaluate(cdp,'!!document.querySelector(".pr-recovery-origin")'),'copy provenance in editor');
+ await screenshot('recovery-copy');
+ await action('.pr-recovery-origin button');
+ const sourceWindow=await until(async()=>app.windows().find(w=>JSON.parse(new URL(w.url()).searchParams.get('loadSettings')||'{}').windowType==='composer'),'source composer');
+ sourceWindow.on('dialog',()=>{});
+ const sourceCdp=await app.context().newCDPSession(sourceWindow);
+ await until(()=>evaluate(sourceCdp,'!!document.querySelector("[contenteditable=true]")'),'source editor');
+ assert((await evaluate(sourceCdp,'document.body.innerText')).includes('CLI newer version'));
+ await evaluate(sourceCdp,'setTimeout(()=>AppEnv.close(),0);true');
+ await until(async()=>sourceWindow.isClosed(),'clean source close');
+ await action('[data-mailbox="drafts"]');
+ await action(`[data-draft-id="${created.draftId}"]`);
+ await until(()=>evaluate(cdp,'!!document.querySelector(".pr-editor [contenteditable=true]")'),'original restored');
  await action('.pr-agent-button');
  await action('.pr-agent-panel button');
 
  await until(async()=>(await text()).includes('已复制上下文'),'context copied');
  const context=await evaluate(cdp,'(async()=>JSON.parse(await require("@electron/remote").clipboard.readText()))()');
- assert.equal(context.context.draftId,created.draftId);assert.equal(context.context.revision,remote.revision);
+ assert.equal(context.context.draftId,created.draftId);assert.equal(context.context.revision,(await cli('draft-get',ref)).revision);
  await screenshot('agent-context');
  await action('.pr-agent-panel button + button');
  await until(()=>evaluate(cdp,'!document.querySelector(".pr-workspace")'),'agent settings');
  await evaluate(cdp,'require("mailspring-exports").Actions.selectRootSheet(require("mailspring-exports").WorkspaceStore.Sheet.Threads);true');
  await until(()=>evaluate(cdp,'!!document.querySelector(".pr-editor [contenteditable=true]")'),'return to same draft');
- assert((await cli('draft-get',ref)).body==='CLI newer version');
+ assert(['CLI newer version','<div>CLI newer version</div>'].includes((await cli('draft-get',ref)).body),'Source text retained through editor HTML normalization');
  await edit('Paper Reed GUI edit');
  await action('.pr-draft-status button');
  await until(async()=>(await text()).includes('已保存到本机'),'save before send');
@@ -87,11 +120,29 @@ module.exports=async({app,main,cdp,work,account,cli,click,evaluate,until})=>{
  await until(async()=>(await text()).includes('服务器已接受'),'persistent send result');
  await action('.pr-send-results summary');
  await screenshot('sent');
+ const provenance=await evaluate(cdp,`require('mailspring-exports').DatabaseStore._query('SELECT * FROM PaperReedDraftRecovery')`);
+ assert.equal(provenance.length,2);assert(provenance.every(r=>r.accountId===account.id&&r.sourceDraftId===created.draftId&&r.sourceRevision===created.revision));
+ ({app,main,cdp}=await restart());
+ app.windows().forEach(page=>page.on('dialog',()=>{}));app.on('window',page=>page.on('dialog',()=>{}));
+ await cdp.send('Emulation.setDeviceMetricsOverride',{width:1440,height:900,deviceScaleFactor:1,mobile:false});
+ await action('[data-mailbox="drafts"]');
+ await until(()=>evaluate(cdp,'document.querySelectorAll(".pr-copy-badge").length===2'),'copy labels survive restart');
+ await screenshot('recovery-list-restarted');
+ await action(`[data-draft-id="${copyId}"]`);
+ await until(()=>evaluate(cdp,'!!document.querySelector(".pr-recovery-origin")'),'restored provenance');
+ assert((await text()).includes('Paper Reed GUI edit'));
+ await action('.pr-recovery-origin button');
+ await until(async()=>(await text()).includes('原稿暂不可用或已不在草稿箱'),'source no longer draft');
+ await screenshot('source-unavailable');
+ await evaluate(cdp,`(async()=>{const {DatabaseStore,Message,Actions}=require('mailspring-exports');const draft=await DatabaseStore.findBy(Message,{accountId:${JSON.stringify(account.id)},headerMessageId:${JSON.stringify(copyId)}});Actions.destroyDraft({accountId:draft.accountId,headerMessageId:draft.headerMessageId,id:draft.id});return true;})()`);
+ await action('[data-mailbox="drafts"]');
+ await until(()=>evaluate(cdp,'document.querySelectorAll(".pr-copy-badge").length===1'),'deleted copy excluded from provenance list');
+ assert.equal((await evaluate(cdp,'document.querySelector(".pr-copy-badge").innerText')).trim(),'恢复副本 2','Deleting the first copy must not renumber the second');
  const renderer=fs.readFileSync(path.join(work,'renderer.log'),'utf8');
  assert(!renderer.includes('Failed to activate plugin'), 'All packages must activate');
- const result={realInboxThreads:8,compactSubjectWidth:compact.subject.width,readingAndReply:true,readerWidth,editorWidth,conflictingSendDisabled:true,
+ const result={realInboxThreads:8,compactSubjectWidth:compact.subject.width,readingAndReply:true,readerWidth,editorWidth,conflictingSendDisabled:true,sendPositionStable:true,
    cliDraftOpened:true,conflictVisible:true,navigationBlocked:true,recoveryPreservesBoth:true,newEditsRequireFreshCopy:true,
-   explicitReload:true,contextUsesSavedRevision:true,settingsReturnToDraft:true,sentResultVisible:true,expectedSMTPSubmissions:1};
+   explicitReload:true,contextUsesSavedRevision:true,settingsReturnToDraft:true,sentResultVisible:true,subjectWraps:true,composingEnterPreserved:true,formatToggleWorks:true,fromFirst:true,recoveryLabelsPersist:true,sourceNavigation:true,missingSourceExplained:true,deletedCopyHidden:true,expectedSMTPSubmissions:1};
  fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(result,null,2));
  console.log('PASS connected Paper Reed UI:',JSON.stringify(result));
 };

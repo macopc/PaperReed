@@ -44,6 +44,25 @@ int main(int argc, char ** argv) {
         MailMutationGuard::migrate(db);
         MailMutationGuard::migrate(db); // restart/migration is repeatable
         MailMutationGuard g(db);
+        json origin = {{"sourceDraftId", "source@example.test"}, {"sourceRevision", 2}};
+        try {
+            transaction(db, [&] {
+                g.recordDraftRecovery("a", "rollback-copy", origin, false);
+                auto copy = draft(); copy["id"] = "rollback-copy"; seed(db, copy);
+                throw std::runtime_error("copy save failed");
+            });
+        } catch (const std::runtime_error &) {}
+        assert(db.execAndGet("SELECT COUNT(*) FROM PaperReedDraftRecovery").getInt() == 0);
+        assert(db.execAndGet("SELECT COUNT(*) FROM Message WHERE id = 'rollback-copy'").getInt() == 0);
+        conflict("invalid-recovery-source", [&] { g.recordDraftRecovery("a", "existing", origin, true); });
+        conflict("invalid-recovery-source", [&] { g.recordDraftRecovery("a", "copy", json::object(), false); });
+        transaction(db, [&] { g.recordDraftRecovery("a", "copy", origin, false); });
+        transaction(db, [&] { g.recordDraftRecovery("b", "copy", origin, false); });
+        assert(db.execAndGet("SELECT COUNT(*) FROM PaperReedDraftRecovery").getInt() == 2);
+        assert(db.execAndGet("SELECT MIN(createdAt) FROM PaperReedDraftRecovery").getInt64() > 0);
+        transaction(db, [&] { g.recordDraftRecovery("a", "second-copy", origin, false); });
+        assert(db.execAndGet("SELECT copyNumber FROM PaperReedDraftRecovery WHERE accountId = 'a' AND copyDraftId = 'second-copy'").getInt() == 2);
+        std::cout << "PASS recovery provenance shares transaction, rejects updates, preserves account scope\n";
         auto old = draft(); seed(db, old);
         auto latest = old; latest["v"] = 3;
         transaction(db, [&] { assert(g.checkRevision("a", old, false) == "a-draft"); seed(db, latest); });

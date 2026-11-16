@@ -1,0 +1,64 @@
+diff --git a/MailSync/MailMutationGuard.hpp b/MailSync/MailMutationGuard.hpp
+index 77ae9ca..2e901b7 100644
+--- a/MailSync/MailMutationGuard.hpp
++++ b/MailSync/MailMutationGuard.hpp
+@@ -4,6 +4,7 @@
+ #include "json.hpp"
+ #include <stdexcept>
+ #include <string>
++#include <chrono>
+ 
+ // Paper Reed experiment. Uses the engine database and caller's write transaction;
+ // it does not own a queue, connection, or network retry policy.
+@@ -22,6 +23,10 @@ public:
+     explicit MailMutationGuard(SQLite::Database & db) : db(db) {}
+ 
+     static void migrate(SQLite::Database & db) {
++        db.exec("CREATE TABLE IF NOT EXISTS PaperReedDraftRecovery ("
++                "accountId TEXT NOT NULL, copyDraftId TEXT NOT NULL, sourceDraftId TEXT NOT NULL, "
++                "sourceRevision INTEGER NOT NULL, createdAt INTEGER NOT NULL, copyNumber INTEGER NOT NULL, "
++                "PRIMARY KEY (accountId, copyDraftId))");
+         db.exec("CREATE TABLE IF NOT EXISTS PaperReedSend ("
+                 "accountId TEXT NOT NULL, requestId TEXT NOT NULL, draftId TEXT NOT NULL, "
+                 "payload TEXT NOT NULL, phase TEXT NOT NULL, sentCopy TEXT NOT NULL DEFAULT 'pending', "
+@@ -30,6 +35,25 @@ public:
+                 "ON PaperReedSend(accountId, draftId) WHERE phase != 'rejected'");
+     }
+ 
++    void recordDraftRecovery(const std::string & account, const std::string & copy,
++                             const json & origin, bool existing) {
++        if (existing || !origin.is_object() || !origin.count("sourceDraftId") ||
++            !origin["sourceDraftId"].is_string() || origin["sourceDraftId"].get<std::string>().empty() ||
++            origin["sourceDraftId"] == copy || !origin.count("sourceRevision") ||
++            !origin["sourceRevision"].is_number_integer() || origin["sourceRevision"].get<int>() < 1) {
++            throw Conflict("invalid-recovery-source", "Recovery provenance requires a new copy and a saved source revision.");
++        }
++        auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
++            std::chrono::system_clock::now().time_since_epoch()).count();
++        SQLite::Statement next(db, "SELECT COALESCE(MAX(copyNumber), 0) + 1 FROM PaperReedDraftRecovery WHERE accountId = ? AND sourceDraftId = ?");
++        next.bind(1, account); next.bind(2, origin["sourceDraftId"].get<std::string>()); next.executeStep();
++        int number = next.getColumn(0).getInt();
++        SQLite::Statement q(db, "INSERT INTO PaperReedDraftRecovery "
++            "(accountId, copyDraftId, sourceDraftId, sourceRevision, createdAt, copyNumber) VALUES (?, ?, ?, ?, ?, ?)");
++        q.bind(1, account); q.bind(2, copy); q.bind(3, origin["sourceDraftId"].get<std::string>());
++        q.bind(4, origin["sourceRevision"].get<int>()); q.bind(5, static_cast<int64_t>(now)); q.bind(6, number); q.exec();
++    }
++
+     json request(const std::string & account, const std::string & id) {
+         SQLite::Statement q(db, "SELECT draftId, payload, phase, sentCopy FROM PaperReedSend "
+                                 "WHERE accountId = ? AND requestId = ?");
+diff --git a/MailSync/TaskProcessor.cpp b/MailSync/TaskProcessor.cpp
+index 1feb431..adc6c56 100644
+--- a/MailSync/TaskProcessor.cpp
++++ b/MailSync/TaskProcessor.cpp
+@@ -1383,6 +1383,10 @@ void TaskProcessor::performLocalSaveDraft(Task * task) {
+             draftJSON["id"] = MailUtils::idForDraftHeaderMessageId(account->id(), draftJSON["hMsgId"]);
+         }
+ 
++        auto origin = task->data().value("recoverySource", json(nullptr));
++        if (!origin.is_null()) {
++            guard.recordDraftRecovery(account->id(), draftJSON["hMsgId"].get<string>(), origin, existing != nullptr);
++        }
+         Message draft = inflateClientDraftJSON(draftJSON, existing);
+ 
+         if (existing) {

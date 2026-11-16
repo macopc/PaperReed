@@ -1,0 +1,2 @@
+PASS Mailspring: 7 patches applied in sequence; 25 files byte-identical to tested source
+PASS mailsync: 2 patches applied in sequence; 4 files byte-identical to tested source

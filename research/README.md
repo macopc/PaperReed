@@ -27,6 +27,8 @@ node --test research/harness/check-feasibility.cjs
 
 ## 界面检查
 
+[编辑器与副本辨识](editor-validation-2026-11-16/README.md) 进一步收敛写信／回复布局，并保存副本来源、时间与稳定编号；附设计与真实窗口的前后对照。
+
 `design/preview-checks.js` 用于临时 HTML 中的原型交互检查，不随产品执行。此前 25 项检查与渲染观察见 [UI/UX 评审](../design/UX-REVIEW.md)；这些结果不能代替设计批准、真实用户测试或客户端验收。
 
 [运行界面与设计／spec 的体验走查](ux-audit-2026-11-16/REVIEW.md) 汇总本机测试邮箱下的实际页面截图、四项优先缺口和下一轮验收任务；[交互对照](ux-audit-2026-11-16/index.html) 可直接打开。
