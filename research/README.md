@@ -4,7 +4,7 @@
 
 实现进展：[CLI / GUI 共用草稿与发送结果接口](shared-core-validation.md)，包括可应用补丁、实验 CLI、真实引擎交接与请求重试检查。
 
-后续 [真实写信窗口交接](compose-handoff-validation.md) 已通过 CLI 建稿、GUI 自动保存／发送、旧 CLI 修订拒绝与结果查询；反向未保存编辑冲突、真实服务商与新设计页面仍待验收。
+后续 [真实写信窗口交接](compose-handoff-validation.md) 已通过 CLI 建稿、GUI 自动保存／发送、旧 CLI 修订拒绝与结果查询；[反向未保存编辑冲突](unsaved-conflict-validation.md) 已复现并修复关闭窗口丢失输入的问题；冲突核对界面、真实服务商与新设计页面仍待验收。
 
 最新进展：[首版技术选型](../design/TECH-CHOICE.md) 与 [本轮验证记录](tech-selection-validation.md)。当前推荐优先验证 Mailspring 产品分支；尚未通过完整构建与真实邮箱实验。
 

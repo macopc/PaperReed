@@ -1,6 +1,6 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const {createRequire}=require('node:module'),{spawn}=require('node:child_process'),{randomUUID}=require('node:crypto');
-const [upstream,work]=process.argv.slice(2),r=createRequire(path.join(upstream,'package.json'));
+const [upstream,work,mode]=process.argv.slice(2),r=createRequire(path.join(upstream,'package.json'));
 const {_electron}=r('playwright');
 const account=JSON.parse(fs.readFileSync(path.join(work,'account.json')));
 const token=randomUUID(),config=path.join(work,'config');fs.mkdirSync(config);
@@ -42,10 +42,49 @@ async function click(page,session,selector){const box=await evaluate(session,`((
  const ref={accountId:account.id,draftId:created.draftId};
  await evaluate(cdp,`require('mailspring-exports').Actions.composePopoutDraft(${JSON.stringify(created.draftId)});true`);
  const composer=await until(async()=>app.windows().find(w=>JSON.parse(new URL(w.url()).searchParams.get('loadSettings')||'{}').windowType==='composer'),'composer window');
+ // Electron already handles its beforeunload cancellation; do not let Playwright auto-answer a nonexistent Chrome dialog.
+ composer.on('dialog',d=>{if(d.type()!=='beforeunload')d.dismiss().catch(e=>console.error(e.message));});
  const editor=await app.context().newCDPSession(composer);
  await until(()=>evaluate(editor,`!!document.querySelector('[contenteditable="true"]')`),'composer editor');
+ if(mode==='conflict') await evaluate(editor,`global.__conflictDialogs=[];AppEnv.showErrorDialog=async(message)=>{global.__conflictDialogs.push(message);return 0;};true`);
  fs.writeFileSync(path.join(work,'composer-before.txt'),await evaluate(editor,'document.body.innerText'));
  await click(composer,editor,'[contenteditable="true"]');await composer.keyboard.press('Meta+End');await composer.keyboard.insertText('\nPaper Reed GUI edit');
+ if(mode==='conflict') {
+   const snapshot=()=>evaluate(editor,`(async()=>{const s=await require('mailspring-exports').DraftStore.sessionForClientId(${JSON.stringify(created.draftId)});return {body:s.draft().body,revision:s.draft().version,dirty:s.changes.isDirty(),errors:global.__conflictDialogs};})()`);
+   console.log('CONFLICT unsaved input');
+   const before=await snapshot();assert(before.dirty);assert.equal(before.revision,created.revision);
+   const remote=await cli('draft-update',{...ref,expectedRevision:created.revision,changes:{body:'CLI newer version'}});
+   await until(async()=>{const s=await snapshot();return s.errors.length?s:null;},'autosave conflict warning',25000);
+   const autosave=await snapshot();assert(autosave.dirty);assert(autosave.body.includes('Paper Reed GUI edit'));assert.equal(autosave.revision,created.revision);
+   console.log('CONFLICT autosave rejected');
+   await click(composer,editor,'.btn-send');
+   await until(async()=>{const s=await snapshot();return s.errors.length>autosave.errors.length;},'send conflict warning');
+   assert(!composer.isClosed());
+   const sends=await evaluate(cdp,`require('mailspring-exports').DatabaseStore._query('SELECT requestId FROM PaperReedSend WHERE accountId = ?',[${JSON.stringify(account.id)}])`);
+   assert.equal(sends.length,0);
+   console.log('CONFLICT send blocked; requesting close');
+   // Request normal native close, including beforeunload handlers, not force destroy.
+   await evaluate(editor,`setTimeout(()=>AppEnv.close(),0);true`);
+   await new Promise(r=>setTimeout(r,1500));
+   assert(!composer.isClosed(),'Conflict must prevent closing the unsaved editor');
+   const closing=await snapshot();assert(closing.dirty);assert(closing.body.includes('Paper Reed GUI edit'));
+   assert(closing.errors.some(message=>message.includes('This window will stay open.')),'Close failure must explain that edits remain in the window');
+   const stored=await cli('draft-get',ref);assert.equal(stored.body,'CLI newer version');assert.equal(stored.revision,remote.revision);
+   fs.writeFileSync(path.join(work,'conflict-result.json'),JSON.stringify({originalRevision:created.revision,storedRevision:stored.revision,autosaveRejected:true,sendBlocked:true,closeBlocked:true,localInputRetained:true,latestCLIContentRetained:true,sendOperations:sends.length,notificationAdapter:'warning dialogs recorded and auto-acknowledged; save/send/close logic unchanged'},null,2));
+   console.log('PASS unsaved GUI / newer CLI: autosave rejected, send blocked, close blocked, both versions retained');
+   return;
+ }
+ if(mode==='close-save') {
+   const dirty=await evaluate(editor,`(async()=>{const s=await require('mailspring-exports').DraftStore.sessionForClientId(${JSON.stringify(created.draftId)});return s.changes.isDirty();})()`);
+   assert(dirty,'Close must start with unsaved input');
+   await evaluate(editor,`setTimeout(()=>AppEnv.close(),0);true`);
+   await until(async()=>composer.isClosed(),'close after successful save');
+   const stored=await cli('draft-get',ref);
+   assert(stored.body.includes('Paper Reed GUI edit'));assert(stored.revision>created.revision);
+   fs.writeFileSync(path.join(work,'close-result.json'),JSON.stringify({dirtyBeforeClose:true,closed:true,storedRevision:stored.revision,localInputSaved:true},null,2));
+   console.log('PASS normal close saves unsaved input before closing; CLI reads saved body');
+   return;
+ }
  // Save through the actual visible editor/session using its standard idle autosave.
  const updated=await until(async()=>{const d=await cli('draft-get',ref);return d.body.includes('Paper Reed GUI edit')?d:null;},'GUI autosave',25000);
  assert(updated.revision>created.revision);
@@ -63,4 +102,4 @@ async function click(page,session,selector){const box=await evaluate(session,`((
  console.error(error.stack);
  if(cdp)try{fs.writeFileSync(path.join(work,'failure-dom.txt'),await evaluate(cdp,'document.body.innerText'));}catch{}
  process.exitCode=1;
-}).finally(async()=>{if(app)await app.close();});
+}).finally(async()=>{if(app){if(mode==='conflict')await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().forEach(w=>w.destroy())).catch(()=>{});await app.close();}});

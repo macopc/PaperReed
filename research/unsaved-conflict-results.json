@@ -1,0 +1,135 @@
+{
+  "date": "2026-11-16",
+  "previous_work_pushed": "fab51f241d71e1e7c96546c46793652ff28bf740",
+  "desktop_commit": "535f13dd463536f36728bce3efb4ae0d51ab3f19",
+  "patches": [
+    "0001",
+    "0002",
+    "0003",
+    "0004",
+    "0005"
+  ],
+  "engine_sha256": "0209cb33ad90b19b7f5a7dd1a2d63bb128a103bab5d27b4e328cbbd1f4901b4c",
+  "network": "loopback only",
+  "production_mcp_server": true,
+  "playwright_mock_mode": false,
+  "baseline": {
+    "artifacts": "compose-handoff-6zq830vm",
+    "patches": [
+      "0001",
+      "0002",
+      "0003",
+      "0004"
+    ],
+    "expected_failure": "Conflict must prevent closing the unsaved editor",
+    "smtp": {
+      "submissions": 0,
+      "subjects": []
+    }
+  },
+  "conflict_runs": [
+    {
+      "artifacts": "compose-handoff-s8bgeiql",
+      "result": {
+        "originalRevision": 1,
+        "storedRevision": 3,
+        "autosaveRejected": true,
+        "sendBlocked": true,
+        "closeBlocked": true,
+        "localInputRetained": true,
+        "latestCLIContentRetained": true,
+        "sendOperations": 0,
+        "notificationAdapter": "warning dialogs recorded and auto-acknowledged; save/send/close logic unchanged"
+      },
+      "smtp": {
+        "submissions": 0,
+        "subjects": []
+      }
+    },
+    {
+      "artifacts": "compose-handoff-x_2_dcft",
+      "result": {
+        "originalRevision": 1,
+        "storedRevision": 3,
+        "autosaveRejected": true,
+        "sendBlocked": true,
+        "closeBlocked": true,
+        "localInputRetained": true,
+        "latestCLIContentRetained": true,
+        "sendOperations": 0,
+        "notificationAdapter": "warning dialogs recorded and auto-acknowledged; save/send/close logic unchanged"
+      },
+      "smtp": {
+        "submissions": 0,
+        "subjects": []
+      }
+    },
+    {
+      "artifacts": "compose-handoff-_x28gc17",
+      "result": {
+        "originalRevision": 1,
+        "storedRevision": 3,
+        "autosaveRejected": true,
+        "sendBlocked": true,
+        "closeBlocked": true,
+        "localInputRetained": true,
+        "latestCLIContentRetained": true,
+        "sendOperations": 0,
+        "notificationAdapter": "warning dialogs recorded and auto-acknowledged; save/send/close logic unchanged"
+      },
+      "smtp": {
+        "submissions": 0,
+        "subjects": []
+      }
+    }
+  ],
+  "normal_close": {
+    "artifacts": "compose-handoff-crx3kxfy",
+    "result": {
+      "dirtyBeforeClose": true,
+      "closed": true,
+      "storedRevision": 3,
+      "localInputSaved": true
+    },
+    "smtp": {
+      "submissions": 0,
+      "subjects": []
+    }
+  },
+  "normal_send_regression": {
+    "artifacts": "compose-handoff-a_cg7co0",
+    "result": {
+      "created": {
+        "draftId": "0D774AAD-3FC6-4D5A-80D9-46EB80650A45@getmailspring.com",
+        "revision": 1,
+        "headerMessageId": "0D774AAD-3FC6-4D5A-80D9-46EB80650A45@getmailspring.com",
+        "accountId": "c0ffee-harness",
+        "subject": "Paper Reed window handoff"
+      },
+      "updatedRevision": 3,
+      "staleRejected": true,
+      "ccBccPreserved": true,
+      "productionDesktopMcp": true,
+      "playwrightMockMode": false,
+      "operation": {
+        "accountId": "c0ffee-harness",
+        "operationId": "pr-send-ecf12798d7f24e52a46bc29e5604deca5be424acb3d2190ea1e79b74b39d1a45",
+        "draftId": "0D774AAD-3FC6-4D5A-80D9-46EB80650A45@getmailspring.com",
+        "revision": 3,
+        "state": "accepted",
+        "sentCopy": "filed"
+      }
+    },
+    "smtp": {
+      "submissions": 1,
+      "subjects": [
+        "Paper Reed window handoff"
+      ]
+    }
+  },
+  "limits": [
+    "Conflict error dialogs are recorded and auto-acknowledged, not visually validated",
+    "Editor input retained in memory; no crash recovery or conflict resolution UI",
+    "Normal composer close tested; whole application quit not tested"
+  ]
+}
