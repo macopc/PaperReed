@@ -1,0 +1,330 @@
+diff --git a/app/src/services/mail-core/index.ts b/app/src/services/mail-core/index.ts
+new file mode 100644
+--- /dev/null
++++ b/app/src/services/mail-core/index.ts
+@@ -0,0 +1,137 @@
++import { createHash } from 'crypto';
++import DatabaseStore from '../../flux/stores/database-store';
++import TaskQueue from '../../flux/stores/task-queue';
++import { AccountStore } from '../../flux/stores/account-store';
++import { Message } from '../../flux/models/message';
++import { SyncbackDraftTask } from '../../flux/tasks/syncback-draft-task';
++import { SendDraftTask } from '../../flux/tasks/send-draft-task';
++import * as Actions from '../../flux/actions';
++
++export type Reference = { accountId: string; draftId: string };
++export type Access = {
++  check(accountId: string, action: 'read' | 'draft' | 'send'): void;
++  visible(draft: Message): Promise<boolean>;
++};
++export const desktopAccess: Access = {
++  check(accountId) {
++    if (!AccountStore.accountForId(accountId)) throw new Error('account-not-found');
++  },
++  visible: async () => true,
++};
++
++export function operationId(accountId: string, requestId: string) {
++  if (!accountId || !requestId || requestId.length > 200) throw new Error('invalid-request-id');
++  return 'pr-send-' + createHash('sha256').update(JSON.stringify([accountId, requestId])).digest('hex');
++}
++
++export async function getDraft(ref: Reference, access: Access) {
++  access.check(ref.accountId, 'read');
++  const draft = await DatabaseStore.findBy<Message>(Message, {
++    accountId: ref.accountId, headerMessageId: ref.draftId, draft: true,
++  }).include(Message.attributes.body);
++  if (!draft || !(await access.visible(draft))) throw new Error('draft-not-found');
++  access.check(ref.accountId, 'read');
++  if (typeof draft.body !== 'string') throw new Error('draft-body-not-cached');
++  return draft;
++}
++
++export function draftResult(draft: Message) {
++  return { accountId: draft.accountId, draftId: draft.headerMessageId, revision: draft.version,
++    subject: draft.subject, body: draft.body, plaintext: draft.plaintext,
++    to: draft.to, cc: draft.cc, bcc: draft.bcc };
++}
++
++// Desktop edits and external edits go through the same task and receipt check.
++export async function saveDraft(draft: Message, access: Access) {
++  access.check(draft.accountId, 'draft');
++  if (!(await access.visible(draft))) throw new Error('draft-not-found');
++  const task = new SyncbackDraftTask({ draft });
++  access.check(draft.accountId, 'draft');
++  Actions.queueTask(task);
++  const saved = await TaskQueue.waitForPerformLocal(task);
++  if (saved.error) throw new Error((saved.error as any).key || 'draft-save-failed');
++  saved.assertSaved();
++  return saved;
++}
++
++export async function updateDraft(ref: Reference, revision: number,
++  changes: { subject?: string; body?: string }, access: Access) {
++  const draft = await getDraft(ref, access);
++  access.check(ref.accountId, 'draft');
++  if (!Number.isSafeInteger(revision) || draft.version !== revision) throw new Error('draft-conflict');
++  // Text is already in the draft's format. No account, identity, attachments or
++  // bookkeeping fields can be overwritten through this small update interface.
++  if (changes.subject !== undefined) draft.subject = changes.subject;
++  if (changes.body !== undefined) draft.body = changes.body;
++  const saved = await saveDraft(draft, access);
++  draft.version = saved.savedDraftRevision;
++  draft.id = saved.savedDraftId;
++  return draftResult(draft);
++}
++
++async function ledger(accountId: string, id: string) {
++  const rows = await DatabaseStore._query(
++    'SELECT payload, phase, sentCopy FROM PaperReedSend WHERE accountId = ? AND requestId = ?',
++    [accountId, id]);
++  return rows[0];
++}
++
++async function checkRow(row: any, access: Access) {
++  const draft = new Message({}).fromJSON(JSON.parse(row.payload).draft);
++  access.check(draft.accountId, 'read');
++  if (!(await access.visible(draft))) throw new Error('operation-not-found');
++}
++
++function result(accountId: string, id: string, row: any) {
++  const draft = JSON.parse(row.payload).draft;
++  return { accountId, operationId: id, draftId: draft.hMsgId, revision: draft.v,
++    state: row.phase === 'attempting' ? 'running' : row.phase === 'rejected' ? 'failed' : row.phase,
++    sentCopy: row.sentCopy };
++}
++
++export async function getOperation(accountId: string, id: string, access: Access) {
++  access.check(accountId, 'read');
++  const row = await ledger(accountId, id);
++  if (row) { await checkRow(row, access); return result(accountId, id, row); }
++  const tasks = await DatabaseStore._query('SELECT data FROM Task WHERE accountId = ? AND id = ?', [accountId, id]);
++  if (!tasks.length) throw new Error('operation-not-found');
++  const task = JSON.parse(tasks[0].data);
++  if (task.__cls !== 'SendDraftTask') throw new Error('operation-not-found');
++  if (!(await access.visible(new Message({}).fromJSON(task.draft)))) throw new Error('operation-not-found');
++  access.check(accountId, 'read');
++  const state = task.error?.key === 'send-unknown' ? 'unknown' : task.error ? 'failed'
++    : task.status === 'cancelled' ? 'cancelled' : task.status === 'complete' ? 'unknown' : 'queued';
++  return { accountId, operationId: id, state, error: task.error || null };
++}
++
++export async function submitSend(ref: Reference, revision: number, requestId: string, access: Access) {
++  access.check(ref.accountId, 'send');
++  access.check(ref.accountId, 'read');
++  if (!Number.isSafeInteger(revision) || revision < 1) throw new Error('invalid-revision');
++  const id = operationId(ref.accountId, requestId);
++  const prior = await ledger(ref.accountId, id);
++  const match = (row: any) => {
++    const frozen = JSON.parse(row.payload).draft;
++    if (frozen.hMsgId !== ref.draftId || frozen.v !== revision) throw new Error('request-conflict');
++    return result(ref.accountId, id, row);
++  };
++  if (prior) { await checkRow(prior, access); return match(prior); } // Works even after the sent draft / Task was removed.
++  const draft = await getDraft(ref, access);
++  if (draft.version !== revision) throw new Error('draft-conflict');
++  const task = SendDraftTask.forSending(draft);
++  task.id = id;
++  access.check(ref.accountId, 'send');
++  if (typeof navigator !== 'undefined' && !navigator.onLine) throw new Error('offline');
++  Actions.queueTask(task);
++  // Admission, not delivery: network completion is queried by operation id.
++  let timer: ReturnType<typeof setTimeout>;
++  const admitted = await Promise.race([
++    TaskQueue.waitForPerformLocal(task),
++    new Promise<null>((resolve) => { timer = setTimeout(() => resolve(null), 5000); }),
++  ]).finally(() => clearTimeout(timer));
++  if (!admitted) return { accountId: ref.accountId, operationId: id, state: 'pending-admission', sentCopy: 'pending' };
++  const row = await ledger(ref.accountId, id);
++  if (row) return match(row); // Also checks a concurrent same-id/different-parameters race.
++  if (admitted.error) throw new Error((admitted.error as any).key || 'send-rejected');
++  throw new Error('send-admission-not-recorded');
++}
+diff --git a/app/src/flux/stores/draft-editing-session.ts b/app/src/flux/stores/draft-editing-session.ts
+--- a/app/src/flux/stores/draft-editing-session.ts
++++ b/app/src/flux/stores/draft-editing-session.ts
+@@ -1,3 +1,4 @@
++import { saveDraft, desktopAccess } from '../../services/mail-core';
+ import * as Immutable from 'immutable';
+ import MailspringStore from 'mailspring-store';
+ import { Editor, Value, Block, Text } from 'slate';
+@@ -458,8 +459,7 @@
+           accountId: draft.accountId,
+         });
+ 
+-      Actions.queueTask(create);
+-      const created = (await TaskQueue.waitForPerformLocal(create)).assertSaved();
++      const created = await saveDraft(create.draft, desktopAccess);
+       this.acceptSaveReceipt(created);
+       if (destroy) Actions.queueTask(destroy);
+     }
+@@ -524,9 +524,7 @@
+     if (this._destroyed || !this._draft) {
+       return;
+     }
+-    const task = new SyncbackDraftTask({ draft: this._draft });
+-    Actions.queueTask(task);
+-    this.acceptSaveReceipt((await TaskQueue.waitForPerformLocal(task)).assertSaved());
++    this.acceptSaveReceipt(await saveDraft(this._draft, desktopAccess));
+   }
+ 
+   acceptSaveReceipt(saved: SyncbackDraftTask) {
+diff --git a/app/src/flux/stores/draft-store.ts b/app/src/flux/stores/draft-store.ts
+--- a/app/src/flux/stores/draft-store.ts
++++ b/app/src/flux/stores/draft-store.ts
+@@ -1,3 +1,4 @@
++import { saveDraft, desktopAccess } from '../../services/mail-core';
+ import { ipcRenderer } from 'electron';
+ import MailspringStore from 'mailspring-store';
+ import { DraftEditingSession } from './draft-editing-session';
+@@ -210,9 +211,7 @@
+     draft.body = `${body}\n\n${draft.body}`;
+     draft.pristine = false;
+ 
+-    const t = new SyncbackDraftTask({ draft });
+-    Actions.queueTask(t);
+-    (await TaskQueue.waitForPerformLocal(t)).assertSaved();
++    await saveDraft(draft, desktopAccess);
+     Actions.sendDraft(draft.headerMessageId);
+   };
+ 
+@@ -348,10 +347,7 @@
+     // doesn't need to do a query for it a second from now when the composer wants it.
+     const session = this._createSession(draft.headerMessageId, draft);
+ 
+-    const task = new SyncbackDraftTask({ draft });
+-    Actions.queueTask(task);
+-
+-    session.acceptSaveReceipt((await TaskQueue.waitForPerformLocal(task)).assertSaved());
++    session.acceptSaveReceipt(await saveDraft(draft, desktopAccess));
+     if (popout) {
+       this._onPopoutDraft(draft.headerMessageId);
+     }
+diff --git a/app/src/flux/stores/send-actions-store.ts b/app/src/flux/stores/send-actions-store.ts
+--- a/app/src/flux/stores/send-actions-store.ts
++++ b/app/src/flux/stores/send-actions-store.ts
+@@ -1,8 +1,9 @@
++import { randomUUID } from 'crypto';
++import { submitSend, desktopAccess } from '../../services/mail-core';
+ import _str from 'underscore.string';
+ import MailspringStore from 'mailspring-store';
+ import * as Actions from '../actions';
+ import { Message } from '../models/message';
+-import { SendDraftTask } from '../tasks/send-draft-task';
+ import * as ExtensionRegistry from '../../registries/extension-registry';
+ 
+ export interface ISendAction {
+@@ -20,7 +21,15 @@
+   iconUrl: null,
+   configKey: DefaultSendActionKey,
+   isAvailableForDraft: () => true,
+-  performSendAction: ({ draft }) => Actions.queueTask(SendDraftTask.forSending(draft)),
++  performSendAction: async ({ draft }) => {
++    try {
++      return await submitSend({ accountId: draft.accountId, draftId: draft.headerMessageId },
++        draft.version, randomUUID(), desktopAccess);
++    } catch (error) {
++      Actions.draftDeliveryFailed({ headerMessageId: draft.headerMessageId, threadId: draft.threadId,
++        errorMessage: error.message, errorDetail: 'The send request was not confirmed. Check the operation before retrying.' });
++    }
++  },
+ };
+ 
+ function verifySendAction(sendAction: ISendAction, extension: { name?: string } = {}) {
+diff --git a/app/internal_packages/mcp-server/lib/mcp-tools.ts b/app/internal_packages/mcp-server/lib/mcp-tools.ts
+--- a/app/internal_packages/mcp-server/lib/mcp-tools.ts
++++ b/app/internal_packages/mcp-server/lib/mcp-tools.ts
+@@ -1,3 +1,4 @@
++import * as MailCore from '../../../src/services/mail-core';
+ import fs from 'fs';
+ import path from 'path';
+ import { McpServer, ResourceTemplate } from '@modelcontextprotocol/sdk/server/mcp.js';
+@@ -57,6 +58,14 @@
+ import { countMessages, DIMS } from '../../../src/services/mail-access/counts';
+ import { currentIdentity } from '../../../src/services/mail-access/identity';
+ 
++const paperReedAccess: MailCore.Access = {
++  check(accountId, action) {
++    const error = checkAccessLevel(action) || checkAccountAccess(accountId);
++    if (error) throw new Error(error);
++  },
++  visible: isMessageVisible,
++};
++
+ const FILTER_DESCRIPTION =
+   'Structured JSON filter, an alternative to `query` that avoids search-syntax parsing. Each ' +
+   'object has exactly one key. Combinators: {and:[...]}, {or:[...]}, {not:{...}}. Message ' +
+@@ -1028,11 +1037,11 @@
+       if (accountErr) return errorResult(accountErr);
+ 
+       draft.pristine = false;
+-      const task = new SyncbackDraftTask({ draft });
+-      Actions.queueTask(task);
+-      await TaskQueue.waitForPerformLocal(task);
++      const saved = await MailCore.saveDraft(draft, paperReedAccess);
+ 
+       return textResult({
++        draftId: draft.headerMessageId,
++        revision: saved.savedDraftRevision,
+         headerMessageId: draft.headerMessageId,
+         accountId: draft.accountId,
+         subject: draft.subject,
+@@ -1073,11 +1082,11 @@
+       draft.body = `${reply}\n\n${draft.body}`;
+       draft.pristine = false;
+ 
+-      const task = new SyncbackDraftTask({ draft });
+-      Actions.queueTask(task);
+-      await TaskQueue.waitForPerformLocal(task);
++      const saved = await MailCore.saveDraft(draft, paperReedAccess);
+ 
+       return textResult({
++        draftId: draft.headerMessageId,
++        revision: saved.savedDraftRevision,
+         headerMessageId: draft.headerMessageId,
+         accountId: draft.accountId,
+         threadId: draft.threadId,
+@@ -1250,28 +1259,21 @@
+ 
+   // ── Send Tool ──
+ 
+-  defineTool(
+-    server,
+-    'send_draft',
+-    'Send an existing draft by its headerMessageId',
+-    { headerMessageId: z.string().describe('The headerMessageId of the draft to send') },
+-    'send',
+-    async ({ headerMessageId }) => {
+-      const draft = await DatabaseStore.findBy<Message>(Message, {
+-        headerMessageId,
+-        draft: true,
+-      }).include(Message.attributes.body);
+-
+-      if (!(await isMessageVisible(draft))) {
+-        return errorResult(`Draft with headerMessageId '${headerMessageId}' not found`);
+-      }
+-
+-      const task = SendDraftTask.forSending(draft, { silent: true });
+-      Actions.queueTask(task);
+-
+-      return textResult({ sent: true, headerMessageId });
+-    }
+-  );
++  const draftRef = { accountId: z.string().min(1), draftId: z.string().min(1) };
++  defineTool(server, 'get_draft', 'Read a local draft with its revision', draftRef, 'read',
++    async (ref) => textResult(MailCore.draftResult(await MailCore.getDraft(ref, paperReedAccess))));
++  defineTool(server, 'update_draft', 'Save subject/body only if the draft revision still matches',
++    { ...draftRef, expectedRevision: z.number().int().min(1),
++      changes: z.object({ subject: z.string().optional(), body: z.string().optional() }).strict() }, 'draft',
++    async ({ expectedRevision, changes, ...ref }) =>
++      textResult(await MailCore.updateDraft(ref, expectedRevision, changes, paperReedAccess)));
++  defineTool(server, 'send_draft', 'Submit a saved revision; returns an operation, not delivery success',
++    { ...draftRef, expectedRevision: z.number().int().min(1), requestId: z.string().min(1).max(200) }, 'send',
++    async ({ expectedRevision, requestId, ...ref }) =>
++      textResult(await MailCore.submitSend(ref, expectedRevision, requestId, paperReedAccess)));
++  defineTool(server, 'get_operation', 'Query a durable send outcome independently of Task history',
++    { accountId: z.string().min(1), operationId: z.string().min(1) }, 'read',
++    async ({ accountId, operationId }) => textResult(await MailCore.getOperation(accountId, operationId, paperReedAccess)));
+ 
+   // ── Send Later Tools ──
+ 

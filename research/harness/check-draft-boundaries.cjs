@@ -90,6 +90,7 @@ const { SendDraftTask } = load('flux/tasks/send-draft-task.ts', {
   let receipt;
   const { DraftEditingSession } = load('flux/stores/draft-editing-session.ts', {
     immutable: {}, 'mailspring-store': Store, slate: {}, '../../regexp-utils': {}, '../../intl': common['../../intl'],
+    '../../services/mail-core': { saveDraft: async () => receipt.assertSaved(), desktopAccess: {} },
     './task-queue': { waitForPerformLocal: async () => receipt }, '../models/message': { Message },
     '../models/utils': {}, '../actions': actions, './contact-store': {},
     './database-store': { findBy: () => ({ include: () => new Promise(() => {}) }) }, './account-store': {},
