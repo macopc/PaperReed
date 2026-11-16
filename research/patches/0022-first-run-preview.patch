@@ -1,0 +1,1017 @@
+diff --git a/app/build/build.js b/app/build/build.js
+index 69ed63a..0d72e11 100644
+--- a/app/build/build.js
++++ b/app/build/build.js
+@@ -266,10 +266,7 @@ function buildPackagerOptions() {
+   return {
+     appVersion: packageJSON.version,
+     platform,
+-    protocols: [
+-      { name: 'Mailspring Protocol', schemes: ['mailspring'] },
+-      { name: 'Mailto Protocol', schemes: ['mailto'] },
+-    ],
++    protocols: [{ name: 'Mailto Protocol', schemes: ['mailto'] }],
+     dir: appDir,
+     appCategoryType: 'public.app-category.business',
+     tmpdir,
+@@ -279,7 +276,7 @@ function buildPackagerOptions() {
+       win32: path.resolve(appDir, 'build', 'resources', 'win', 'mailspring-square.ico'),
+       linux: undefined,
+     }[platform],
+-    name: { darwin: 'Mailspring', win32: 'Mailspring', linux: 'mailspring' }[platform],
++    name: { darwin: 'Paper Reed', win32: 'Mailspring', linux: 'mailspring' }[platform],
+     appCopyright: `Copyright (C) 2014-${new Date().getFullYear()} Foundry 376, LLC. All rights reserved.`,
+     derefSymlinks: false,
+     asar: {
+@@ -377,7 +374,7 @@ function buildPackagerOptions() {
+             // cannot match to a profile scoped to that binary.
+             // Note: electron-osx-sign passes the .app bundle path (not the
+             // inner executable path) when signing the top-level app bundle.
+-            const isMainExecutable = filePath.endsWith('/Mailspring.app');
++            const isMainExecutable = filePath.endsWith('/Paper Reed.app');
+             return {
+               hardenedRuntime: true,
+               entitlements: path.resolve(
+@@ -412,10 +409,11 @@ function buildPackagerOptions() {
+     extendInfo: path.resolve(appDir, 'build', 'resources', 'mac', 'extra.plist'),
+     extraResource:
+       platform === 'darwin'
+-        ? [path.resolve(appDir, 'build', 'resources', 'mac', 'new-mail.mp3'), fmHelperPath]
+-            .filter(Boolean)
++        ? [path.resolve(appDir, 'build', 'resources', 'mac', 'new-mail.mp3'), fmHelperPath].filter(
++            Boolean
++          )
+         : undefined,
+-    appBundleId: 'com.mailspring.mailspring',
++    appBundleId: 'io.github.macopc.paperreed',
+     afterCopy: [
+       runCopyPlatformSpecificResources,
+       runWriteCommitHashIntoPackage,
+@@ -450,14 +448,14 @@ async function runPackager() {
+ }
+
+ async function createMacZip() {
+-  const zipPath = path.join(outputDir, 'Mailspring.zip');
++  const zipPath = path.join(outputDir, 'Paper Reed.zip');
+   if (fs.existsSync(zipPath)) {
+     fs.unlinkSync(zipPath);
+   }
+-  const cwd = path.join(outputDir, `Mailspring-darwin-${arch}`);
++  const cwd = path.join(outputDir, `Paper Reed-darwin-${arch}`);
+   await spawn({
+     cmd: 'zip',
+-    args: ['-9', '-y', '-r', '-9', '-X', zipPath, 'Mailspring.app'],
++    args: ['-9', '-y', '-r', '-9', '-X', zipPath, 'Paper Reed.app'],
+     opts: { cwd },
+   });
+   console.log(`>> Created ${zipPath}`);
+diff --git a/app/build/resources/mac/extra.plist b/app/build/resources/mac/extra.plist
+index 96e9fe7..39ad33b 100644
+--- a/app/build/resources/mac/extra.plist
++++ b/app/build/resources/mac/extra.plist
+@@ -2,24 +2,24 @@
+ <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+ <plist version="1.0">
+ <dict>
+-	<key>NSPrincipalClass</key>
+-	<string>AtomApplication</string>
+-	<key>NSFocusStatusUsageDescription</key>
+-	<string>Mailspring checks Focus mode status to silence new mail notifications when Do Not Disturb is enabled.</string>
+-	<key>CFBundleDocumentTypes</key>
+-	<array>
+-		<dict>
+-			<key>LSHandlerRank</key>
+-			<string>Alternate</string>
+-			<key>CFBundleTypeRole</key>
+-			<string>Viewer</string>
+-			<key>CFBundleTypeName</key>
+-			<string>File</string>
+-			<key>CFBundleTypeExtensions</key>
+-			<array>
+-				<string>*</string>
+-			</array>
+-		</dict>
+-	</array>
++  <key>NSPrincipalClass</key>
++  <string>AtomApplication</string>
++  <key>NSFocusStatusUsageDescription</key>
++  <string>Paper Reed checks Focus mode status to silence new mail notifications when Do Not Disturb is enabled.</string>
++  <key>CFBundleDocumentTypes</key>
++  <array>
++    <dict>
++      <key>LSHandlerRank</key>
++      <string>Alternate</string>
++      <key>CFBundleTypeRole</key>
++      <string>Viewer</string>
++      <key>CFBundleTypeName</key>
++      <string>File</string>
++      <key>CFBundleTypeExtensions</key>
++      <array>
++        <string>*</string>
++      </array>
++    </dict>
++  </array>
+ </dict>
+ </plist>
+diff --git a/app/dot-mailspring/config.json b/app/dot-mailspring/config.json
+index 10ce0b7..da5c7a6 100644
+--- a/app/dot-mailspring/config.json
++++ b/app/dot-mailspring/config.json
+@@ -2,9 +2,7 @@
+   "*": {
+     "env": "production",
+     "core": {
+-      "themes": [
+-        "ui-light"
+-      ],
++      "themes": ["ui-light"],
+       "disabledPackages": [
+         "message-view-on-github",
+         "personal-level-indicators",
+@@ -14,8 +12,26 @@
+         "keybase",
+         "composer-markdown",
+         "composer-scheduler",
+-        "composer-mail-merge"
+-      ]
++        "composer-mail-merge",
++        "open-tracking",
++        "link-tracking",
++        "send-reminders",
++        "send-later",
++        "thread-snooze"
++      ],
++      "paperReed": {
++        "enabled": true
++      },
++      "workspace": {
++        "mode": "split"
++      },
++      "sending": {
++        "undoSend": 0
++      },
++      "mcp": {
++        "enabled": false,
++        "accessLevel": "read-only"
++      }
+     }
+   }
+ }
+diff --git a/app/internal_packages/mcp-server/lib/main.ts b/app/internal_packages/mcp-server/lib/main.ts
+index 625d9c2..ca5506f 100644
+--- a/app/internal_packages/mcp-server/lib/main.ts
++++ b/app/internal_packages/mcp-server/lib/main.ts
+@@ -8,7 +8,8 @@ export function activate() {
+   if (AppEnv.isMainWindow()) {
+     McpServerManager.activate();
+     try {
+-      refreshMailspringClaudeDesktopEntryIfStale();
++      if (!AppEnv.config.get('core.paperReed.enabled'))
++        refreshMailspringClaudeDesktopEntryIfStale();
+     } catch (err) {
+       console.warn('[MCP Server] Could not refresh the Claude Desktop registration:', err);
+     }
+diff --git a/app/internal_packages/onboarding/lib/decorators/create-page-for-form.tsx b/app/internal_packages/onboarding/lib/decorators/create-page-for-form.tsx
+index eb98fc6..e5fe161 100644
+--- a/app/internal_packages/onboarding/lib/decorators/create-page-for-form.tsx
++++ b/app/internal_packages/onboarding/lib/decorators/create-page-for-form.tsx
+@@ -46,10 +46,6 @@ const CreatePageForForm = (FormComponent: React.ComponentType<any> & Record<stri
+       this._applyFocus();
+     }
+
+-    componentDidUpdate() {
+-      this._applyFocus();
+-    }
+-
+     _applyFocus() {
+       const anyInputFocused = document.activeElement && document.activeElement.nodeName === 'INPUT';
+       if (anyInputFocused) {
+@@ -116,6 +112,7 @@ const CreatePageForForm = (FormComponent: React.ComponentType<any> & Record<stri
+     };
+
+     onSubmit = () => {
++      if (this.state.submitting || !this._isValid()) return;
+       OnboardingActions.setAccount(this.state.account);
+       if (this._formEl.submit) {
+         this.setState({ submitting: true });
+@@ -146,6 +143,7 @@ const CreatePageForForm = (FormComponent: React.ComponentType<any> & Record<stri
+       // warn users about authenticating a Gmail or Google Apps account via IMAP
+       // and allow them to go back
+       if (
++        !AppEnv.config.get('core.paperReed.enabled') &&
+         !didWarnAboutGmailIMAP &&
+         account.provider === 'imap' &&
+         account.settings.imap_host &&
+@@ -231,32 +229,37 @@ const CreatePageForForm = (FormComponent: React.ComponentType<any> & Record<stri
+             errorLog: err.rawLog,
+             errorFieldNames,
+             submitting: false,
+-          });
++          }, () => document.querySelector('.pr-onboarding .page')?.scrollTo(0, 0));
+         });
+     };
+
+     _renderButton() {
+       const { account, submitting } = this.state;
+-      const buttonLabel = FormComponent.submitLabel(account);
++      const buttonLabel =
++        AppEnv.config.get('core.paperReed.enabled') &&
++        FormComponent.displayName === 'AccountBasicSettingsForm'
++          ? '下一步'
++          : FormComponent.submitLabel(account);
+
+       // We're not on the last page.
+       if (submitting) {
+         return (
+-          <button className="btn btn-large btn-disabled btn-add-account spinning">
++          <button className="btn btn-large btn-disabled btn-add-account spinning" disabled>
+             <RetinaImg
+               name="sending-spinner.gif"
+               width={15}
+               height={15}
+               mode={RetinaImg.Mode.ContentPreserve}
+             />
+-            {localized('Adding account')}&hellip;
++            {AppEnv.config.get('core.paperReed.enabled') ? '正在连接' : localized('Adding account')}
++            &hellip;
+           </button>
+         );
+       }
+
+       if (!this._isValid()) {
+         return (
+-          <button className="btn btn-large btn-gradient btn-disabled btn-add-account">
++          <button className="btn btn-large btn-gradient btn-disabled btn-add-account" disabled>
+             {buttonLabel}
+           </button>
+         );
+@@ -273,6 +276,14 @@ const CreatePageForForm = (FormComponent: React.ComponentType<any> & Record<stri
+     // help with common problems. For instance, they may need an app password,
+     // or to enable specific settings with their provider.
+     _renderCredentialsNote() {
++      if (AppEnv.config.get('core.paperReed.enabled'))
++        return (
++          this.state.errorStatusCode === 401 && (
++            <p className="message error">
++              请核对账号与密码；部分邮箱需要启用 IMAP 并使用应用专用密码。
++            </p>
++          )
++        );
+       const { errorStatusCode, account } = this.state;
+       if (errorStatusCode !== 401) {
+         return false;
+@@ -320,14 +331,25 @@ const CreatePageForForm = (FormComponent: React.ComponentType<any> & Record<stri
+
+       return (
+         <div className={`page account-setup ${FormComponent.displayName}`}>
+-          <div className="logo-container">
+-            <RetinaImg
+-              style={{ backgroundColor: providerConfig.color, borderRadius: 44 }}
+-              name={providerConfig.headerIcon}
+-              mode={RetinaImg.Mode.ContentPreserve}
+-              className="logo"
+-            />
+-          </div>
++          {AppEnv.config.get('core.paperReed.enabled') ? (
++            <div className="pr-onboarding-brand">
++              Paper Reed
++              <span>
++                {FormComponent.displayName === 'AccountIMAPSettingsForm'
++                  ? account.emailAddress
++                  : '让邮件回归从容'}
++              </span>
++            </div>
++          ) : (
++            <div className="logo-container">
++              <RetinaImg
++                style={{ backgroundColor: providerConfig.color, borderRadius: 44 }}
++                name={providerConfig.headerIcon}
++                mode={RetinaImg.Mode.ContentPreserve}
++                className="logo"
++              />
++            </div>
++          )}
+           {hideTitle ? (
+             <div style={{ height: 20 }} />
+           ) : (
+@@ -355,12 +377,22 @@ const CreatePageForForm = (FormComponent: React.ComponentType<any> & Record<stri
+             onFieldKeyPress={this.onFieldKeyPress}
+             onConnect={this.onConnect}
+           />
+-          <div>
+-            <div className="btn btn-large btn-gradient" onClick={this.onBack}>
+-              {localized('Back')}
+-            </div>
++          <div className="pr-onboarding-actions">
++            {(!AppEnv.config.get('core.paperReed.enabled') ||
++              FormComponent.displayName !== 'AccountBasicSettingsForm') && (
++              <button
++                className="btn btn-large btn-gradient"
++                disabled={submitting}
++                onClick={this.onBack}
++              >
++                {AppEnv.config.get('core.paperReed.enabled') ? '返回' : localized('Back')}
++              </button>
++            )}
+             {this._renderButton()}
+           </div>
++          {AppEnv.config.get('core.paperReed.enabled') && (
++            <p className="pr-onboarding-note">开发预览 · 目前支持 IMAP / SMTP 邮箱</p>
++          )}
+         </div>
+       );
+     }
+diff --git a/app/internal_packages/onboarding/lib/main.ts b/app/internal_packages/onboarding/lib/main.ts
+index f1d0eb3..b698f8a 100644
+--- a/app/internal_packages/onboarding/lib/main.ts
++++ b/app/internal_packages/onboarding/lib/main.ts
+@@ -12,7 +12,7 @@ export function activate() {
+
+   const accounts = AppEnv.config.get('accounts') || [];
+
+-  if (accounts.length === 0) {
++  if (accounts.length === 0 && !AppEnv.config.get('core.paperReed.enabled')) {
+     const startService = new SystemStartService();
+     startService.checkAvailability().then((available) => {
+       if (!available) {
+diff --git a/app/internal_packages/onboarding/lib/onboarding-root.tsx b/app/internal_packages/onboarding/lib/onboarding-root.tsx
+index f614729..185bf6f 100644
+--- a/app/internal_packages/onboarding/lib/onboarding-root.tsx
++++ b/app/internal_packages/onboarding/lib/onboarding-root.tsx
+@@ -90,7 +90,9 @@ export default class OnboardingRoot extends React.Component<
+     }
+
+     return (
+-      <div className="page-frame">
++      <div
++        className={`page-frame ${AppEnv.config.get('core.paperReed.enabled') ? 'pr-onboarding' : ''}`}
++      >
+         <PageTopBar
+           pageDepth={this.state.pageDepth}
+           allowMoveBack={!['initial-preferences', 'account-choose'].includes(this.state.page)}
+diff --git a/app/internal_packages/onboarding/lib/onboarding-store.ts b/app/internal_packages/onboarding/lib/onboarding-store.ts
+index b42d208..8809df3 100644
+--- a/app/internal_packages/onboarding/lib/onboarding-store.ts
++++ b/app/internal_packages/onboarding/lib/onboarding-store.ts
+@@ -40,6 +40,16 @@ class OnboardingStore extends MailspringStore {
+       settings: {},
+     });
+
++    if (AppEnv.config.get('core.paperReed.enabled')) {
++      this._account = existingAccountJSON
++        ? new Account({}).fromJSON(existingAccountJSON)
++        : new Account({ name: '', emailAddress: '', provider: 'imap', settings: {} });
++      this._pageStack = existingAccountJSON
++        ? ['account-settings', 'account-settings-imap']
++        : ['account-settings'];
++      return;
++    }
++
+     if (existingAccountJSON) {
+       // Used when re-adding an account after re-connecting, take the user back
+       // to the best page with the most details
+@@ -75,6 +85,10 @@ class OnboardingStore extends MailspringStore {
+   }
+
+   _onOnboardingComplete = () => {
++    if (AppEnv.config.get('core.paperReed.enabled')) {
++      ipcRenderer.send('account-setup-successful');
++      return;
++    }
+     // When account JSON is received, we want to notify external services
+     // that it succeeded. Unfortunately in this case we're likely to
+     // close the window before those requests can be made. We add a short
+@@ -180,8 +194,14 @@ class OnboardingStore extends MailspringStore {
+           e.toString()
+         ),
+       });
++      this._onMoveToPage('account-settings-imap');
++      return;
+     }
+
++    if (AppEnv.config.get('core.paperReed.enabled')) {
++      this._onOnboardingComplete();
++      return;
++    }
+     AppEnv.displayWindow();
+
+     if (isFirstAccount) {
+diff --git a/app/internal_packages/onboarding/lib/page-account-onboarding-success.tsx b/app/internal_packages/onboarding/lib/page-account-onboarding-success.tsx
+index ae046b0..0af25a6 100644
+--- a/app/internal_packages/onboarding/lib/page-account-onboarding-success.tsx
++++ b/app/internal_packages/onboarding/lib/page-account-onboarding-success.tsx
+@@ -8,6 +8,14 @@ class AccountOnboardingSuccess extends Component<{ account: Account }> {
+   static displayName = 'AccountOnboardingSuccess';
+
+   render() {
++    if (AppEnv.config.get('core.paperReed.enabled'))
++      return (
++        <div className="page account-setup">
++          <div className="pr-onboarding-brand">Paper Reed</div>
++          <h2>邮箱已连接</h2>
++          <p>正在打开收件箱…</p>
++        </div>
++      );
+     const { account } = this.props;
+     const providerConfig = AccountProviders.find(({ provider }) => provider === account.provider);
+
+diff --git a/app/internal_packages/onboarding/lib/page-account-settings-imap.tsx b/app/internal_packages/onboarding/lib/page-account-settings-imap.tsx
+index 4df6a4e..a65ee29 100644
+--- a/app/internal_packages/onboarding/lib/page-account-settings-imap.tsx
++++ b/app/internal_packages/onboarding/lib/page-account-settings-imap.tsx
+@@ -24,15 +24,19 @@ class AccountIMAPSettingsForm extends React.Component<AccountIMAPSettingsFormPro
+   static displayName = 'AccountIMAPSettingsForm';
+
+   static submitLabel = () => {
+-    return localized('Connect Account');
++    return AppEnv.config.get('core.paperReed.enabled') ? '连接邮箱' : localized('Connect Account');
+   };
+
+   static titleLabel = () => {
+-    return localized('Set up Account');
++    return AppEnv.config.get('core.paperReed.enabled')
++      ? '连接邮件服务器'
++      : localized('Set up Account');
+   };
+
+   static subtitleLabel = () => {
+-    return localized('Complete the IMAP and SMTP settings below to connect your account.');
++    return AppEnv.config.get('core.paperReed.enabled')
++      ? '使用邮箱服务商提供的服务器设置。凭据由系统加密后保存在本机。'
++      : localized('Complete the IMAP and SMTP settings below to connect your account.');
+   };
+
+   // confirmServers means the servers came from unsigned DNS SRV records, so the user confirms
+@@ -80,7 +84,11 @@ class AccountIMAPSettingsForm extends React.Component<AccountIMAPSettingsFormPro
+       if (!account.settings[`${type}_host`]) {
+         return { errorMessage, errorFieldNames, populated: false };
+       }
+-      if (!Number.isInteger(account.settings[`${type}_port`] / 1)) {
++      if (
++        !Number.isInteger(account.settings[`${type}_port`] / 1) ||
++        account.settings[`${type}_port`] < 1 ||
++        account.settings[`${type}_port`] > 65535
++      ) {
+         errorMessage = localized('Please provide a valid port number.');
+         errorFieldNames.push(`${type}_port`);
+       }
+@@ -90,7 +98,7 @@ class AccountIMAPSettingsForm extends React.Component<AccountIMAPSettingsFormPro
+   };
+
+   componentDidMount() {
+-    ipcRenderer.send('resize-window', { width: 900, height: 660 });
++    ipcRenderer.send('resize-window', { width: 900, height: AppEnv.config.get('core.paperReed.enabled') ? 780 : 660 });
+   }
+
+   renderPortDropdown(protocol) {
+diff --git a/app/internal_packages/onboarding/lib/page-account-settings.tsx b/app/internal_packages/onboarding/lib/page-account-settings.tsx
+index f3baa97..a2d0323 100644
+--- a/app/internal_packages/onboarding/lib/page-account-settings.tsx
++++ b/app/internal_packages/onboarding/lib/page-account-settings.tsx
+@@ -26,6 +26,7 @@ export class AccountBasicSettingsForm extends React.Component<AccountBasicSettin
+     displayNameShort?: string;
+     displayName: string;
+   }) => {
++    if (AppEnv.config.get('core.paperReed.enabled')) return '连接你的邮箱';
+     return (
+       providerConfig.title ||
+       localized(
+@@ -36,6 +37,8 @@ export class AccountBasicSettingsForm extends React.Component<AccountBasicSettin
+   };
+
+   static subtitleLabel = (providerConfig: { note?: React.ReactNode }) => {
++    if (AppEnv.config.get('core.paperReed.enabled'))
++      return '填写发件人姓名和邮箱。下一步连接你的收信与发信服务器。';
+     return (
+       providerConfig.note ||
+       localized(
+@@ -69,6 +72,27 @@ export class AccountBasicSettingsForm extends React.Component<AccountBasicSettin
+   };
+
+   async submit() {
++    if (AppEnv.config.get('core.paperReed.enabled')) {
++      const account = this.props.account.clone();
++      account.settings = {
++        imap_username: account.emailAddress,
++        smtp_username: account.emailAddress,
++        smtp_password: account.settings.imap_password,
++        imap_port: 993,
++        smtp_port: 465,
++        imap_security: 'SSL / TLS',
++        smtp_security: 'SSL / TLS',
++        imap_allow_insecure_ssl: false,
++        smtp_allow_insecure_ssl: false,
++        container_folder: '',
++        create_helper_folders: false,
++        smtp_verification: 'login',
++        ...account.settings,
++      };
++      OnboardingActions.setAccount(account);
++      OnboardingActions.moveToPage('account-settings-imap');
++      return;
++    }
+     // create a new account with expanded settings and just the three fields
+     const {
+       name,
+@@ -93,11 +117,23 @@ export class AccountBasicSettingsForm extends React.Component<AccountBasicSettin
+   render() {
+     return (
+       <form className="settings">
+-        <FormField field="name" title={localized('Name')} {...this.props} />
+-        <FormField field="emailAddress" title={localized('Email')} {...this.props} />
++        <FormField
++          field="name"
++          title={AppEnv.config.get('core.paperReed.enabled') ? '发件人姓名' : localized('Name')}
++          {...this.props}
++        />
++        <FormField
++          field="emailAddress"
++          title={AppEnv.config.get('core.paperReed.enabled') ? '邮箱地址' : localized('Email')}
++          {...this.props}
++        />
+         <FormField
+           field="settings.imap_password"
+-          title={localized('Password')}
++          title={
++            AppEnv.config.get('core.paperReed.enabled')
++              ? '密码或应用专用密码'
++              : localized('Password')
++          }
+           type="password"
+           {...this.props}
+         />
+diff --git a/app/internal_packages/onboarding/styles/onboarding.less b/app/internal_packages/onboarding/styles/onboarding.less
+index a1efadb..fa6b560 100644
+--- a/app/internal_packages/onboarding/styles/onboarding.less
++++ b/app/internal_packages/onboarding/styles/onboarding.less
+@@ -755,3 +755,133 @@ body.platform-win32 {
+     }
+   }
+ }
++
++// The first-run flow shares Paper Reed's paper and reed palette.
++.page-frame.pr-onboarding {
++  position: fixed;
++  inset: 0;
++  color: #353a36;
++  font-family: -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif;
++  .page {
++    background: #faf9f6;
++    overflow-y: auto;
++  }
++  .account-setup {
++    padding: 54px 56px 30px;
++  }
++  .pr-onboarding-brand {
++    font:
++      30px/40px 'Iowan Old Style',
++      Palatino,
++      Georgia,
++      serif;
++    margin-bottom: 30px;
++  }
++  .pr-onboarding-brand span {
++    display: block;
++    font:
++      12px/22px -apple-system,
++      BlinkMacSystemFont,
++      sans-serif;
++    color: #858b81;
++    margin-top: 6px;
++  }
++  h2 {
++    font:
++      500 23px/34px -apple-system,
++      BlinkMacSystemFont,
++      'PingFang SC',
++      sans-serif;
++    margin: 0 0 12px;
++  }
++  .message {
++    font-size: 13px;
++    line-height: 22px;
++    margin-bottom: 24px;
++    max-width: 600px;
++  }
++  .message.error {
++    color: #9c5348;
++  }
++  form.settings {
++    max-width: 360px;
++    margin: 0 auto 20px;
++    padding: 0;
++    text-align: left;
++  }
++  label {
++    color: #687066;
++    font-size: 12px;
++    line-height: 20px;
++  }
++  input {
++    border: 1px solid #d9ddd4;
++    border-radius: 5px;
++    padding: 8px 10px;
++    margin-bottom: 18px;
++    font-size: 14px;
++    box-shadow: none;
++  }
++  input:focus,
++  select:focus {
++    outline: 2px solid #7e9180;
++    outline-offset: 2px;
++  }
++  input[type='checkbox'] {
++    margin-bottom: 0;
++  }
++  .twocol {
++    max-width: 700px;
++    margin: 0 auto 20px;
++    text-align: left;
++  }
++  .twocol .col {
++    padding: 0 18px;
++  }
++  .col-heading {
++    color: #454f43;
++    font-size: 13px;
++    font-weight: 600;
++    margin-bottom: 16px;
++  }
++  .AccountIMAPSettingsForm {
++    padding-top: 28px;
++  }
++  .AccountIMAPSettingsForm .pr-onboarding-brand {
++    margin-bottom: 15px;
++  }
++  .AccountIMAPSettingsForm .message {
++    margin-bottom: 18px;
++  }
++  .AccountIMAPSettingsForm input {
++    margin-bottom: 10px;
++  }
++  .btn {
++    border: 1px solid #d9ddd4;
++    background: transparent;
++    color: #586650;
++    box-shadow: none;
++    text-shadow: none;
++    border-radius: 5px;
++    font-size: 13px;
++    line-height: 20px;
++  }
++  .btn-add-account {
++    background: #65775e;
++    border-color: #65775e;
++    color: white;
++    min-width: 150px;
++  }
++  .btn-add-account:disabled {
++    opacity: 0.5;
++    cursor: default;
++  }
++  .pr-onboarding-actions {
++    margin-top: 12px;
++  }
++  .pr-onboarding-note {
++    color: #858b81;
++    font-size: 11px;
++    margin-top: 25px;
++  }
++}
+diff --git a/app/internal_packages/paper-reed/lib/workspace.tsx b/app/internal_packages/paper-reed/lib/workspace.tsx
+index d39e671..31c267b 100644
+--- a/app/internal_packages/paper-reed/lib/workspace.tsx
++++ b/app/internal_packages/paper-reed/lib/workspace.tsx
+@@ -1,3 +1,4 @@
++import { ipcRenderer } from 'electron';
+ import {
+   categories,
+   localLabels,
+@@ -24,6 +25,9 @@ import { agentHandoff, cliStatus } from '../../mcp-server/lib/paper-reed-cli';
+ import { clipboard } from '@electron/remote';
+ import {
+   AccountStore,
++  Account,
++  KeyManager,
++  FolderSyncProgressStore,
+   Actions,
+   CategoryStore,
+   DatabaseStore,
+@@ -144,6 +148,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       DatabaseStore.listen(this.scheduleRefresh),
+       onLocalTriageChanged(this.scheduleRefresh),
+       CategoryStore.listen(this.scheduleRefresh),
++      FolderSyncProgressStore.listen(() => this.forceUpdate()),
+       AccountStore.listen(this.scheduleRefresh),
+       WorkspaceStore.setSectionLeaveGuard(() => {
+         if (!this.dirtySessions().length) return true;
+@@ -184,7 +189,11 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   }
+   accountIds = () => (this.state.accountId ? [this.state.accountId] : AccountStore.accountIds());
+   dirtySessions = () =>
+-    Object.values(DraftStore._draftSessions).filter((s) => !s._destroyed && (s.changes.isDirty() || AttachmentStore.hasPendingDraftAttachments(s.headerMessageId)));
++    Object.values(DraftStore._draftSessions).filter(
++      (s) =>
++        !s._destroyed &&
++        (s.changes.isDirty() || AttachmentStore.hasPendingDraftAttachments(s.headerMessageId))
++    );
+   scheduleRefresh = () => {
+     clearTimeout(this.refreshTimer);
+     this.refreshTimer = setTimeout(this.refresh, 100);
+@@ -244,10 +253,13 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       const snippets: Record<string, string> = {};
+       if ((folder !== 'drafts' || query) && rows.length) {
+         const ids = rows.slice(0, limit).map((row) => row.id);
+-        const latest = await DatabaseStore._query(`SELECT threadId, data FROM (
++        const latest = await DatabaseStore._query(
++          `SELECT threadId, data FROM (
+           SELECT threadId, data, ROW_NUMBER() OVER (PARTITION BY threadId ORDER BY date DESC, id DESC) AS position
+           FROM Message WHERE draft=0 AND threadId IN (${ids.map(() => '?').join(',')})
+-        ) WHERE position=1`, ids);
++        ) WHERE position=1`,
++          ids
++        );
+         for (const row of latest) snippets[row.threadId] = JSON.parse(row.data).snippet || '';
+       }
+       if (this.mounted && generation === this.generation)
+@@ -290,7 +302,8 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+         });
+     } catch (error) {
+       console.error('Paper Reed send results:', error);
+-      if (this.mounted) this.setState({ operations: [], operationsError: '发送结果暂时无法读取。' });
++      if (this.mounted)
++        this.setState({ operations: [], operationsError: '发送结果暂时无法读取。' });
+     }
+   };
+   move = async (next: () => void | Promise<void>) => {
+@@ -779,7 +792,8 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       contacts?.[0];
+     const name = person?.displayName() || (draft ? '未填写收件人' : '未知发件人');
+     const date = draft ? row.date : row.lastMessageReceivedTimestamp;
+-    const color = AccountStore.accountForId(row.accountId)?.color ||
++    const color =
++      AccountStore.accountForId(row.accountId)?.color ||
+       colors[Math.max(0, AccountStore.accountIds().indexOf(row.accountId)) % colors.length];
+     const content = (
+       <button
+@@ -873,6 +887,47 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       </div>
+     );
+   };
++  reconnect = async (account: Account) => {
++    try {
++      ipcRenderer.send('command', 'application:add-account', {
++        existingAccountJSON: await KeyManager.insertAccountSecrets(account),
++      });
++    } catch (error) {
++      this.setState({ notice: error.message });
++    }
++  };
++  renderSyncStatus() {
++    const accounts = AccountStore.accounts().filter((a) => this.accountIds().includes(a.id));
++    const failed = accounts.filter((a) => a.hasSyncStateError());
++    if (failed.length)
++      return (
++        <div className="pr-sync-status" role="status">
++          {failed.map((account) => (
++            <div key={account.id}>
++              <span>
++                {account.emailAddress} ·{' '}
++                {account.syncState === Account.SYNC_STATE_AUTH_FAILED
++                  ? '需要重新连接'
++                  : '同步暂时中断'}
++              </span>
++              <button onClick={() => this.reconnect(account)}>重新连接</button>
++              <button onClick={() => Actions.restartAccountSync(account)}>重试同步</button>
++            </div>
++          ))}
++        </div>
++      );
++    const pending = accounts.some((a) => CategoryStore.categories(a.id).length === 0);
++    const active = FolderSyncProgressStore.getSummary().phrase;
++    return (
++      (pending || active) && (
++        <p className="pr-sync-status" role="status">
++          {pending
++            ? '正在读取邮箱文件夹，邮件会陆续出现在这里…'
++            : '正在同步邮件，已缓存的内容可以继续阅读。'}
++        </p>
++      )
++    );
++  }
+   render() {
+     const { route, folder, selected, rows, loading, agent } = this.state;
+     const title =
+@@ -985,6 +1040,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                 {cliStatus().ready ? '交给 Agent ↗' : '连接 Agent ↗'}
+               </button>
+             </div>
++            {this.renderSyncStatus()}
+             {this.state.labelManager && (
+               <LabelManager
+                 labels={this.state.labels}
+diff --git a/app/internal_packages/paper-reed/styles/paper-reed.less b/app/internal_packages/paper-reed/styles/paper-reed.less
+index 4cff8b4..17a3ddb 100644
+--- a/app/internal_packages/paper-reed/styles/paper-reed.less
++++ b/app/internal_packages/paper-reed/styles/paper-reed.less
+@@ -628,3 +628,15 @@
+   .pr-local-rule-preview h2 { font-size:14px; line-height:22px; font-weight:500; margin:0 0 8px; }
+   .pr-local-rule-notice { position:sticky; bottom:0; background:#faf9f6; border-top:1px solid #dfe2d9; }
+ }
++
++.paper-reed-enabled .pr-sync-status {
++  margin: 0 0 16px;
++  font-size: 12px;
++  line-height: 22px;
++  color: var(--pr-muted);
++}
++.paper-reed-enabled .pr-sync-status button {
++  margin-left: 12px;
++  color: var(--pr-reed);
++  text-decoration: underline;
++}
+diff --git a/app/package.json b/app/package.json
+index e8ea079..c74c801 100644
+--- a/app/package.json
++++ b/app/package.json
+@@ -1,6 +1,6 @@
+ {
+   "name": "mailspring",
+-  "productName": "Mailspring",
++  "productName": "Paper Reed",
+   "desktopName": "Mailspring.desktop",
+   "version": "1.26.2",
+   "repository": {
+@@ -8,7 +8,7 @@
+     "url": "git://github.com/foundry376/mailspring.git"
+   },
+   "commitHash": "COMMIT_INSERTED_DURING_PACKAGING",
+-  "description": "The best email app for people and teams at work",
++  "description": "Paper Reed development preview — open source mail for macOS",
+   "license": "GPL-3.0",
+   "main": "./src/browser/main.js",
+   "dependencies": {
+diff --git a/app/src/browser/application.ts b/app/src/browser/application.ts
+index 39c1281..f91536d 100644
+--- a/app/src/browser/application.ts
++++ b/app/src/browser/application.ts
+@@ -176,8 +176,10 @@ export default class Application extends EventEmitter {
+       initializeInBackground = false;
+     }
+
+-    await this.oneTimeMoveToApplications();
+-    await this.oneTimeAddToDock();
++    if (!this.config.get('core.paperReed.enabled')) {
++      await this.oneTimeMoveToApplications();
++      await this.oneTimeAddToDock();
++    }
+
+     guardAuxiliaryWindowNavigation();
+     this.autoUpdateManager = new AutoUpdateManager(version, config, specMode);
+@@ -217,6 +219,7 @@ export default class Application extends EventEmitter {
+       this.openUrl(pendingUrl);
+     }
+
++    if (this.config.get('core.paperReed.enabled')) return;
+     if (process.platform === 'linux') {
+       const helper = new DefaultClientHelper();
+       helper.registerForURLScheme('mailspring');
+@@ -356,7 +359,9 @@ export default class Application extends EventEmitter {
+     if (hasAccount) {
+       this.windowManager.ensureWindow(WindowManager.MAIN_WINDOW, {}, behavior);
+     } else {
+-      const title = localized('Welcome to Mailspring');
++      const title = this.config.get('core.paperReed.enabled')
++        ? 'Paper Reed'
++        : localized('Welcome to Mailspring');
+       this.windowManager.ensureWindow(WindowManager.ONBOARDING_WINDOW, { title }, behavior);
+     }
+   }
+diff --git a/app/src/browser/autoupdate-manager.ts b/app/src/browser/autoupdate-manager.ts
+index 5af85e1..5f02746 100644
+--- a/app/src/browser/autoupdate-manager.ts
++++ b/app/src/browser/autoupdate-manager.ts
+@@ -35,6 +35,10 @@ export default class AutoUpdateManager extends EventEmitter {
+     this.specMode = specMode;
+     this.preferredChannel = preferredChannel;
+
++    if (config.get('core.paperReed.enabled')) {
++      this.state = UnsupportedState;
++      return; // The preview must not install updates from the upstream product.
++    }
+     this.updateFeedURL();
+     this.config.onDidChange('identity.id', this.updateFeedURL);
+
+@@ -163,6 +167,7 @@ export default class AutoUpdateManager extends EventEmitter {
+   }
+
+   check({ hidePopups }: { hidePopups?: boolean } = {}) {
++    if (this.config.get('core.paperReed.enabled')) return;
+     this.updateFeedURL();
+     if (!hidePopups) {
+       autoUpdater.once('update-not-available', this.onUpdateNotAvailable);
+@@ -172,6 +177,7 @@ export default class AutoUpdateManager extends EventEmitter {
+   }
+
+   install() {
++    if (this.config.get('core.paperReed.enabled')) return;
+     autoUpdater.quitAndInstall();
+   }
+
+diff --git a/app/src/browser/main.js b/app/src/browser/main.js
+index edaad0a..a849a57 100644
+--- a/app/src/browser/main.js
++++ b/app/src/browser/main.js
+@@ -42,12 +42,12 @@ if (typeof process.setFdLimit === 'function') {
+ }
+
+ const setupConfigDir = args => {
+-  let dirname = 'Mailspring';
++  let dirname = 'Paper Reed';
+   if (args.devMode) {
+-    dirname = 'Mailspring-dev';
++    dirname = 'Paper Reed-dev';
+   }
+   if (args.specMode) {
+-    dirname = 'Mailspring-spec';
++    dirname = 'Paper Reed-spec';
+   }
+
+   // Check if a custom config dir was provided via --config-dir-path
+@@ -280,6 +280,7 @@ const handleStartupEventWithSquirrel = () => {
+ };
+
+ const start = () => {
++  app.setName('Paper Reed');
+   if (process.platform === 'win32') {
+     // Must be set before setAppUserModelId so RegisterActivator writes it
+     // into the Start Menu shortcut. Without this, action/reply notification
+@@ -293,7 +294,7 @@ const start = () => {
+   // StatusNotifierItem ID on Linux, causing their tray visibility settings
+   // to be synchronized. See: https://github.com/electron/electron/issues/40936
+   if (process.platform === 'linux') {
+-    app.setName('Mailspring');
++    app.setName('Paper Reed');
+   }
+
+
+diff --git a/app/src/error-logger.js b/app/src/error-logger.js
+index ff3badb..e2b8bb5 100644
+--- a/app/src/error-logger.js
++++ b/app/src/error-logger.js
+@@ -39,13 +39,16 @@ module.exports = ErrorLogger = (function () {
+
+     this._extendNativeConsole();
+
+-    this.extensions = [
+-      new SentryErrorReporter({
+-        inSpecMode: args.inSpecMode,
+-        inDevMode: args.inDevMode,
+-        resourcePath: args.resourcePath,
+-      }),
+-    ];
++    this.extensions =
++      require('../package.json').productName === 'Paper Reed'
++        ? []
++        : [
++            new SentryErrorReporter({
++              inSpecMode: args.inSpecMode,
++              inDevMode: args.inDevMode,
++              resourcePath: args.resourcePath,
++            }),
++          ];
+
+     if (this.inSpecMode) {
+       return;
+@@ -72,8 +75,7 @@ module.exports = ErrorLogger = (function () {
+     // differ, this call site's stack differs too, so Sentry attributes and
+     // groups them separately going forward. Keep the original message when
+     // there is one — only the stack is synthetic.
+-    var hasMessage =
+-      error && typeof error.message === 'string' && error.message.length > 0;
++    var hasMessage = error && typeof error.message === 'string' && error.message.length > 0;
+     var hasStack = error && typeof error.stack === 'string' && error.stack.length > 0;
+     if (!hasStack) {
+       var message;
+@@ -156,7 +158,7 @@ module.exports = ErrorLogger = (function () {
+   /////////////////////////////////////////////////////////////////////
+
+   ErrorLogger.prototype._startCrashReporter = function (args) {
+-    if (process.type === 'renderer') {
++    if (process.type === 'renderer' || require('../package.json').productName === 'Paper Reed') {
+       return;
+     }
+     require('electron').crashReporter.start({
+diff --git a/app/src/flux/models/account.ts b/app/src/flux/models/account.ts
+index f76fea5..ef158dd 100644
+--- a/app/src/flux/models/account.ts
++++ b/app/src/flux/models/account.ts
+@@ -115,6 +115,8 @@ export class Account extends ModelWithMetadata {
+     // when the user granted Mail.Send; accounts authorized earlier get it by reconnecting.
+     graph_send?: boolean;
+     container_folder: string;
++    create_helper_folders?: boolean;
++    smtp_verification?: 'login';
+   };
+   public label: string;
+   public autoaddress: AccountAutoaddress;

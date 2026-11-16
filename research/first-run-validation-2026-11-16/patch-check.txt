@@ -1,0 +1,4 @@
+PASS: 22 patches applied; 90 source files checked byte-for-byte; CLI copies match.
+PASS: npm run typecheck (full app TypeScript, noEmit).
+PASS: 59 JavaScript syntax checks; JSON and local Markdown links; 12 generated previews current.
+PASS: macOS arm64 packaged app, blank-profile UI/CLI/IMAP/SMTP regression, one SMTP submission.
