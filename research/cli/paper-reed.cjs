@@ -51,6 +51,10 @@ const commands = {
   threads: ['list_threads', 'accountId'],
   search: ['search_mail', 'accountId'],
   'thread-get': ['get_thread', 'threadId'],
+  'attachment-get': ['get_attachment', 'messageId'],
+  'draft-reply': ['reply_to_thread', 'accountId'],
+  'draft-attach': ['add_draft_attachment', 'accountId'],
+  'draft-detach': ['remove_draft_attachment', 'accountId'],
   'draft-get': ['get_draft', 'accountId'],
   'draft-create': ['create_draft', 'accountId'],
   'draft-update': ['update_draft', 'accountId'],
@@ -125,6 +129,10 @@ const examples = {
   threads: { accountId: 'ACCOUNT_ID', folderId: 'FOLDER_ID', limit: 25 },
   search: { accountId: 'ACCOUNT_ID', query: 'in:inbox', limit: 25 },
   'thread-get': { threadId: 'THREAD_ID' },
+  'attachment-get': { messageId: 'MESSAGE_ID', fileId: 'FILE_ID' },
+  'draft-reply': { accountId: 'ACCOUNT_ID', threadId: 'THREAD_ID', type: 'reply-all', body: '<div>Thank you.</div>' },
+  'draft-attach': { accountId: 'ACCOUNT_ID', draftId: 'DRAFT_ID', expectedRevision: 1, path: '/absolute/path/report.pdf' },
+  'draft-detach': { accountId: 'ACCOUNT_ID', draftId: 'DRAFT_ID', expectedRevision: 2, fileId: 'FILE_ID' },
   'draft-get': { accountId: 'ACCOUNT_ID', draftId: 'DRAFT_ID' },
   'draft-create': {
     accountId: 'ACCOUNT_ID',
@@ -136,7 +144,7 @@ const examples = {
     accountId: 'ACCOUNT_ID',
     draftId: 'DRAFT_ID',
     expectedRevision: 1,
-    changes: { body: '<div>Updated</div>' },
+    changes: { to: [{ email: 'recipient@example.test' }], cc: [], bcc: [], body: '<div>Updated</div>' },
   },
   'draft-send': {
     accountId: 'ACCOUNT_ID',
@@ -271,7 +279,7 @@ function inputFor(command, args) {
 function help(command) {
   if (commands[command])
     return `paper-reed ${command} --input '${JSON.stringify(examples[command])}'\nOr pass the same JSON through stdin. Results are JSON; failures exit 1.\n${mailActions[command] ? 'Returns per-target task receipts. queued is not success; poll change-get. Reuse requestId only for the same targets/action while task history remains.\n' : ''}${command === 'draft-send' ? 'Send only with explicit user approval. Keep requestId stable across retries; inspect operation-get after uncertain results.\n' : ''}`;
-  return `Paper Reed CLI ${VERSION}\n\nStart here:\n  paper-reed doctor             Check the local connection (read-only)\n  paper-reed accounts           List authorized accounts\n  paper-reed <command> --help   Show a JSON example\n\nRead: accounts, folders, threads, search, thread-get\nDrafts: draft-get, draft-create, draft-update, draft-send, operation-get\nRules: rules, rule-save, rule-delete, rules-reorder, rules-preview, rules-apply\nClassification: classify, classify-auto\nLocal: pin, unpin, snooze, unsnooze, local-list, local-state, labels, label-create, label-update, label-delete, label-add, label-remove\nOrganize: mark-read, mark-unread, archive, spam, trash, restore-inbox, change-get, undo\n\nJSON input: --input '{...}' or stdin. JSON output; errors exit 1.\nInstall/connect from Paper Reed → Settings → Agent. Keep the app running.\nNo mail is sent by installation or doctor. Sending requires permission and user approval.\n`;
+  return `Paper Reed CLI ${VERSION}\n\nStart here:\n  paper-reed doctor             Check the local connection (read-only)\n  paper-reed accounts           List authorized accounts\n  paper-reed <command> --help   Show a JSON example\n\nRead: accounts, folders, threads, search, thread-get, attachment-get\nDrafts: draft-get, draft-create, draft-reply, draft-update, draft-attach, draft-detach, draft-send, operation-get\nRules: rules, rule-save, rule-delete, rules-reorder, rules-preview, rules-apply\nClassification: classify, classify-auto\nLocal: pin, unpin, snooze, unsnooze, local-list, local-state, labels, label-create, label-update, label-delete, label-add, label-remove\nOrganize: mark-read, mark-unread, archive, spam, trash, restore-inbox, change-get, undo\n\nJSON input: --input '{...}' or stdin. JSON output; errors exit 1.\nInstall/connect from Paper Reed → Settings → Agent. Keep the app running.\nNo mail is sent by installation or doctor. Sending requires permission and user approval.\n`;
 }
 async function main() {
   const [command, ...args] = process.argv.slice(2);
@@ -326,7 +334,7 @@ async function main() {
     requestInit: {
       headers: { Authorization: `Bearer ${token}` },
       redirect: 'error',
-      signal: AbortSignal.timeout(15000),
+      signal: AbortSignal.timeout(command === 'attachment-get' ? 45000 : 15000),
     },
   });
   try {
@@ -338,7 +346,7 @@ async function main() {
         arguments: input,
       },
       undefined,
-      { timeout: 10000 }
+      { timeout: command === 'attachment-get' ? 40000 : 10000 }
     );
     const item = result.content?.find((c) => c.type === 'text');
     if (!item)

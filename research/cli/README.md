@@ -1,6 +1,6 @@
 # Paper Reed CLI · 实验版
 
-CLI 随实验桌面源码补丁提供，复用桌面内的运行环境与固定版本 MCP SDK，不需要另装 Node 或全局 npm 包。当前不是独立发布的安装包；先运行已应用 [补丁系列](../patches/README.md)（包括 0019）的实验桌面。
+CLI 随实验桌面源码补丁提供，复用桌面内的运行环境与固定版本 MCP SDK，不需要另装 Node 或全局 npm 包。当前不是独立发布的安装包；先运行已应用 [补丁系列](../patches/README.md)（包括 0020）的实验桌面。
 
 ## 从桌面接入
 
@@ -49,16 +49,39 @@ JSON
 | `threads` | 按账号和文件夹列出会话，支持分页 |
 | `search` | 在显式账号范围搜索邮件，支持分页 |
 | `thread-get` | 读取会话正文，仍受账号／文件夹权限限制 |
+| `attachment-get` | 读取附件元数据、可用本机路径；小型文本附带正文 |
 | `draft-get` / `draft-create` / `draft-update` | 读取、创建、更新共用草稿 |
+| `draft-reply` | 为指定会话创建回复或回复全部草稿，不发送 |
+| `draft-attach` / `draft-detach` | 按草稿修订添加／移除附件 |
 | `draft-send` | 提交发送请求，需要发送权限及用户明确授权 |
 | `operation-get` | 查询持久发送结果 |
 | `mark-read` / `mark-unread` | 标为已读／未读 |
 | `archive` / `spam` / `trash` / `restore-inbox` | 归档、垃圾邮件、废纸篓、移回收件箱 |
 | `change-get` / `undo` | 查询整理任务／撤销一个可恢复的整理任务 |
 
-每个邮件命令都提供 `paper-reed <command> --help` 和输入示例。`draft-create` 要求显式 `accountId` 和 `to` 数组。正文遵循草稿的 `plaintext` 格式，不能通过正文更新切换格式；当前编辑接口只修改主题和正文，其余字段保留。
+每个邮件命令都提供 `paper-reed <command> --help` 和输入示例。`draft-create` 要求显式 `accountId` 和 `to` 数组。正文遵循草稿的 `plaintext` 格式，不能通过正文更新切换格式；编辑接口可修改主题、正文与 `to` / `cc` / `bcc`，其余字段保留。收件人字段省略表示不修改，传 `[]` 表示清空；发送前必须至少有一个有效收件人。
 
 `draft-send` 输入为 `{accountId,draftId,expectedRevision,requestId}`。重试间必须保持 `requestId` 不变。结果可能只是 `queued` 或 `pending-admission`，随后使用返回的 operation ID 查询 `operation-get`。结果未知、连接中断或超时时，不生成新请求 ID 重发；先检查操作状态或邮箱。详见 [共用接口记录](../shared-core-validation.md)。
+
+## 回复与附件
+
+```sh
+paper-reed draft-reply --input '{"accountId":"ACCOUNT_ID","threadId":"THREAD_ID","type":"reply-all","body":"<div>谢谢，附件已补充。</div>"}'
+paper-reed draft-attach --input '{"accountId":"ACCOUNT_ID","draftId":"DRAFT_ID","expectedRevision":1,"path":"/absolute/path/report.pdf"}'
+paper-reed draft-get --input '{"accountId":"ACCOUNT_ID","draftId":"DRAFT_ID"}'
+paper-reed attachment-get --input '{"messageId":"MESSAGE_ID","fileId":"FILE_ID"}'
+paper-reed draft-detach --input '{"accountId":"ACCOUNT_ID","draftId":"DRAFT_ID","expectedRevision":2,"fileId":"FILE_ID"}'
+```
+
+示例中的修订号仅为示意：**每次使用上一次成功结果或重新 `draft-get` 得到的 `revision`**。`draft-reply` 的 `type` 为 `reply`（默认）或 `reply-all`，保留回复关联和引用；创建草稿不等于发送。回复内容按该草稿的正文格式处理。
+
+`draft-get` 现在包含 `messageId` 和 `files`（ID、名称、字节数、类型、内嵌图片 contentId）。`attachment-get` 使用这两个对象的实际 ID，不猜磁盘位置。普通收信同样先从 `thread-get` 的消息 `files` 获取 ID。小于等于 200 KiB 的文本附件返回 `data`，其他附件使用结果中的本机 `path`；CLI 不把图片或 PDF 二进制塞进 JSON，也不会自动复制到下载目录。
+
+`draft-attach` 要求本机文件的绝对路径，只接收普通文件；复制完成后再保存草稿，之后修改原文件不会改变附件。每封草稿附件总量最多 **25,000,000 字节**（沿用桌面限制，包含内嵌图片；服务商的 MIME 编码后限制可能更低）。`draft-detach` 只改草稿引用，为未保存的 GUI 编辑保留缓存文件；内嵌图片仍被正文 `cid:` 引用时拒绝移除，需要先修改正文。
+
+附件和收件人修改都经过共同修订检查与账号／文件夹权限检查。发生冲突时读取最新草稿再决定如何合并；超时也不能直接换修订盲目重试。发送会为当前附件建立独立文件快照，缺失或无法完整复制时阻止提交。GUI 的含附件恢复副本同样使用独立文件，不再共用可被其他编辑移除的附件。
+
+真实 Electron、CLI 与本机 IMAP / SMTP 的检查见 [附件与写信闭环记录](../attachments-validation-2026-11-16/README.md)。
 
 ## 整理邮件与查询结果
 

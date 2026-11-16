@@ -1,0 +1,570 @@
+diff --git a/app/internal_packages/mcp-server/bin/paper-reed.cjs b/app/internal_packages/mcp-server/bin/paper-reed.cjs
+index e5bfe8a..2e035ef 100644
+--- a/app/internal_packages/mcp-server/bin/paper-reed.cjs
++++ b/app/internal_packages/mcp-server/bin/paper-reed.cjs
+@@ -51,6 +51,10 @@ const commands = {
+   threads: ['list_threads', 'accountId'],
+   search: ['search_mail', 'accountId'],
+   'thread-get': ['get_thread', 'threadId'],
++  'attachment-get': ['get_attachment', 'messageId'],
++  'draft-reply': ['reply_to_thread', 'accountId'],
++  'draft-attach': ['add_draft_attachment', 'accountId'],
++  'draft-detach': ['remove_draft_attachment', 'accountId'],
+   'draft-get': ['get_draft', 'accountId'],
+   'draft-create': ['create_draft', 'accountId'],
+   'draft-update': ['update_draft', 'accountId'],
+@@ -125,6 +129,10 @@ const examples = {
+   threads: { accountId: 'ACCOUNT_ID', folderId: 'FOLDER_ID', limit: 25 },
+   search: { accountId: 'ACCOUNT_ID', query: 'in:inbox', limit: 25 },
+   'thread-get': { threadId: 'THREAD_ID' },
++  'attachment-get': { messageId: 'MESSAGE_ID', fileId: 'FILE_ID' },
++  'draft-reply': { accountId: 'ACCOUNT_ID', threadId: 'THREAD_ID', type: 'reply-all', body: '<div>Thank you.</div>' },
++  'draft-attach': { accountId: 'ACCOUNT_ID', draftId: 'DRAFT_ID', expectedRevision: 1, path: '/absolute/path/report.pdf' },
++  'draft-detach': { accountId: 'ACCOUNT_ID', draftId: 'DRAFT_ID', expectedRevision: 2, fileId: 'FILE_ID' },
+   'draft-get': { accountId: 'ACCOUNT_ID', draftId: 'DRAFT_ID' },
+   'draft-create': {
+     accountId: 'ACCOUNT_ID',
+@@ -136,7 +144,7 @@ const examples = {
+     accountId: 'ACCOUNT_ID',
+     draftId: 'DRAFT_ID',
+     expectedRevision: 1,
+-    changes: { body: '<div>Updated</div>' },
++    changes: { to: [{ email: 'recipient@example.test' }], cc: [], bcc: [], body: '<div>Updated</div>' },
+   },
+   'draft-send': {
+     accountId: 'ACCOUNT_ID',
+@@ -271,7 +279,7 @@ function inputFor(command, args) {
+ function help(command) {
+   if (commands[command])
+     return `paper-reed ${command} --input '${JSON.stringify(examples[command])}'\nOr pass the same JSON through stdin. Results are JSON; failures exit 1.\n${mailActions[command] ? 'Returns per-target task receipts. queued is not success; poll change-get. Reuse requestId only for the same targets/action while task history remains.\n' : ''}${command === 'draft-send' ? 'Send only with explicit user approval. Keep requestId stable across retries; inspect operation-get after uncertain results.\n' : ''}`;
+-  return `Paper Reed CLI ${VERSION}\n\nStart here:\n  paper-reed doctor             Check the local connection (read-only)\n  paper-reed accounts           List authorized accounts\n  paper-reed <command> --help   Show a JSON example\n\nRead: accounts, folders, threads, search, thread-get\nDrafts: draft-get, draft-create, draft-update, draft-send, operation-get\nRules: rules, rule-save, rule-delete, rules-reorder, rules-preview, rules-apply\nClassification: classify, classify-auto\nLocal: pin, unpin, snooze, unsnooze, local-list, local-state, labels, label-create, label-update, label-delete, label-add, label-remove\nOrganize: mark-read, mark-unread, archive, spam, trash, restore-inbox, change-get, undo\n\nJSON input: --input '{...}' or stdin. JSON output; errors exit 1.\nInstall/connect from Paper Reed → Settings → Agent. Keep the app running.\nNo mail is sent by installation or doctor. Sending requires permission and user approval.\n`;
++  return `Paper Reed CLI ${VERSION}\n\nStart here:\n  paper-reed doctor             Check the local connection (read-only)\n  paper-reed accounts           List authorized accounts\n  paper-reed <command> --help   Show a JSON example\n\nRead: accounts, folders, threads, search, thread-get, attachment-get\nDrafts: draft-get, draft-create, draft-reply, draft-update, draft-attach, draft-detach, draft-send, operation-get\nRules: rules, rule-save, rule-delete, rules-reorder, rules-preview, rules-apply\nClassification: classify, classify-auto\nLocal: pin, unpin, snooze, unsnooze, local-list, local-state, labels, label-create, label-update, label-delete, label-add, label-remove\nOrganize: mark-read, mark-unread, archive, spam, trash, restore-inbox, change-get, undo\n\nJSON input: --input '{...}' or stdin. JSON output; errors exit 1.\nInstall/connect from Paper Reed → Settings → Agent. Keep the app running.\nNo mail is sent by installation or doctor. Sending requires permission and user approval.\n`;
+ }
+ async function main() {
+   const [command, ...args] = process.argv.slice(2);
+@@ -326,7 +334,7 @@ async function main() {
+     requestInit: {
+       headers: { Authorization: `Bearer ${token}` },
+       redirect: 'error',
+-      signal: AbortSignal.timeout(15000),
++      signal: AbortSignal.timeout(command === 'attachment-get' ? 45000 : 15000),
+     },
+   });
+   try {
+@@ -338,7 +346,7 @@ async function main() {
+         arguments: input,
+       },
+       undefined,
+-      { timeout: 10000 }
++      { timeout: command === 'attachment-get' ? 40000 : 10000 }
+     );
+     const item = result.content?.find((c) => c.type === 'text');
+     if (!item)
+diff --git a/app/internal_packages/mcp-server/lib/mcp-tools.ts b/app/internal_packages/mcp-server/lib/mcp-tools.ts
+index 54149b2..47a518e 100644
+--- a/app/internal_packages/mcp-server/lib/mcp-tools.ts
++++ b/app/internal_packages/mcp-server/lib/mcp-tools.ts
+@@ -267,6 +267,7 @@ async function attachmentPathOnDisk(file: File): Promise<string | null> {
+   const filePath = AttachmentStore.pathForFile(file);
+   if (!filePath) return null;
+   if (await fileExists(filePath)) return filePath;
++  if (file.localFilename) return null; // Owned draft files require their exact path.
+   try {
+     const dir = path.dirname(filePath);
+     const items = (await fs.promises.readdir(dir)).filter((i) => i !== '.DS_Store');
+@@ -702,6 +703,7 @@ export function registerTools(server: McpServer) {
+         );
+       }
+ 
++      if (!(await isMessageVisible(message))) return errorResult('Attachment access was revoked');
+       const { size } = await fs.promises.stat(filePath);
+       const mimeType = mimeTypeForFile(file);
+       const metadata = {
+@@ -1054,13 +1056,13 @@ export function registerTools(server: McpServer) {
+       // own check of the Alt key.
+       const html = DraftFactory.useHTML();
+       const fields: any = {
+-        to: to.map((c) => new Contact({ name: c.name || '', email: c.email })),
++        to: MailCore.draftContacts(to),
+         subject,
+         plaintext: !html,
+         body: html ? await prepareAgentHTML(body) : body,
+       };
+-      if (cc) fields.cc = cc.map((c) => new Contact({ name: c.name || '', email: c.email }));
+-      if (bcc) fields.bcc = bcc.map((c) => new Contact({ name: c.name || '', email: c.email }));
++      if (cc) fields.cc = MailCore.draftContacts(cc);
++      if (bcc) fields.bcc = MailCore.draftContacts(bcc);
+       if (accountId) fields.accountId = accountId;
+ 
+       const draft = await DraftFactory.createDraft(fields);
+@@ -1092,6 +1094,7 @@ export function registerTools(server: McpServer) {
+     'Create a reply draft to the latest message in a thread',
+     {
+       threadId: z.string().describe('Thread ID to reply to'),
++      accountId: z.string().optional().describe('Expected account; required by Paper Reed CLI'),
+       body: z.string().describe('Reply body (HTML)'),
+       type: z
+         .enum(['reply', 'reply-all'])
+@@ -1100,14 +1103,14 @@ export function registerTools(server: McpServer) {
+         .describe('Reply type (default: reply)'),
+     },
+     'draft',
+-    async ({ threadId, body, type }) => {
++    async ({ threadId, accountId, body, type }) => {
+       const thread = await DatabaseStore.find<Thread>(Thread, threadId);
+-      if (!thread || !isThreadAllowed(thread)) return errorResult(`Thread '${threadId}' not found`);
++      if (!thread || (accountId && thread.accountId !== accountId) || !isThreadAllowed(thread)) return errorResult(`Thread '${threadId}' not found`);
+ 
+       const messages = await DatabaseStore.findAll<Message>(Message, { threadId })
+         .include(Message.attributes.body)
+         .order(Message.attributes.date.descending());
+-      const message = messages.find((m) => !m.isHidden());
++      const message = (await allowedMessages(messages)).find((m) => !m.isHidden() && !m.draft);
+       if (!message) return errorResult('No visible message found in thread');
+ 
+       const draft = await DraftFactory.createDraftForReply({
+@@ -1510,16 +1513,26 @@ export function registerTools(server: McpServer) {
+   defineTool(
+     server,
+     'update_draft',
+-    'Save subject/body only if the draft revision still matches',
++    'Save subject, body or recipients only if the draft revision still matches',
+     {
+       ...draftRef,
+       expectedRevision: z.number().int().min(1),
+-      changes: z.object({ subject: z.string().optional(), body: z.string().optional() }).strict(),
++      changes: z.object({ subject: z.string().optional(), body: z.string().optional(),
++        to: z.array(z.object({ name: z.string().optional(), email: z.string() })).optional(),
++        cc: z.array(z.object({ name: z.string().optional(), email: z.string() })).optional(),
++        bcc: z.array(z.object({ name: z.string().optional(), email: z.string() })).optional(),
++      }).strict(),
+     },
+     'draft',
+     async ({ expectedRevision, changes, ...ref }) =>
+       textResult(await MailCore.updateDraft(ref, expectedRevision, changes, paperReedAccess))
+   );
++  defineTool(server, 'add_draft_attachment', 'Copy a local file into a draft and save a new revision (25MB total limit)',
++    { ...draftRef, expectedRevision: z.number().int().min(1), path: z.string().min(1) }, 'draft',
++    async ({ expectedRevision, path, ...ref }) => textResult(await MailCore.changeDraftAttachment(ref, expectedRevision, { path }, paperReedAccess)));
++  defineTool(server, 'remove_draft_attachment', 'Remove one attachment and save a new revision; cached bytes retained for unsaved editors',
++    { ...draftRef, expectedRevision: z.number().int().min(1), fileId: z.string().min(1) }, 'draft',
++    async ({ expectedRevision, fileId, ...ref }) => textResult(await MailCore.changeDraftAttachment(ref, expectedRevision, { fileId }, paperReedAccess)));
+   defineTool(
+     server,
+     'send_draft',
+diff --git a/app/internal_packages/paper-reed/lib/draft-status.tsx b/app/internal_packages/paper-reed/lib/draft-status.tsx
+index 9d56e54..2b43ca7 100644
+--- a/app/internal_packages/paper-reed/lib/draft-status.tsx
++++ b/app/internal_packages/paper-reed/lib/draft-status.tsx
+@@ -1,5 +1,5 @@
+ import React from 'react';
+-import { Actions, DraftEditingSession, Message } from 'mailspring-exports';
++import { Actions, AttachmentStore, DraftEditingSession, Message } from 'mailspring-exports';
+ import { saveDraftCopy, desktopAccess, desktopDraftRecoveryInfo, DraftRecoveryInfo, getDraft } from '../../../src/services/mail-core';
+ 
+ export default class PaperReedDraftStatus extends React.Component<{ session: DraftEditingSession }> {
+@@ -18,24 +18,25 @@ export default class PaperReedDraftStatus extends React.Component<{ session: Dra
+   }
+   changed = () => this.forceUpdate();
+   save = async () => {
+-    try { await this.props.session.changes.commit(); } catch { /* State stays visible below. */ }
++    try { await AttachmentStore.waitForDraftAttachments(this.props.session.headerMessageId); await this.props.session.changes.commit(); } catch { /* State stays visible below. */ }
+   };
+   copy = async () => {
+     if (this.state.busy) return;
+-    const snapshot = JSON.stringify(this.props.session.draft().toJSON());
+-    if (snapshot === this.state.copySnapshot) {
+-      Actions.composePopoutDraft(this.state.copyId);
+-      return;
+-    }
+     this.setState({ busy: true, notice: '' });
+     try {
++      await AttachmentStore.waitForDraftAttachments(this.props.session.headerMessageId);
++      const snapshot = JSON.stringify(this.props.session.draft().toJSON());
++      if (snapshot === this.state.copySnapshot) {
++        Actions.composePopoutDraft(this.state.copyId);
++        return;
++      }
+       const source = new Message({}).fromJSON(JSON.parse(snapshot));
+       const copy = await saveDraftCopy(source, desktopAccess);
+       if (this.mounted) this.setState({ copyId: copy.headerMessageId, copySnapshot: snapshot,
+         notice: '副本已保存到本机。原草稿和这里的编辑仍保留。' });
+     } catch (error) {
+       if (this.mounted) this.setState({ notice: this.props.session.draft().files.length
+-        ? '含附件的副本暂未支持。请保留此窗口，附件和编辑都还在。'
++        ? '副本附件未能完整保存。请保留此窗口，检查附件后重试。'
+         : '副本尚未保存，请重试。你的编辑仍保留在这里。' });
+     } finally {
+       if (this.mounted) this.setState({ busy: false });
+diff --git a/app/internal_packages/paper-reed/lib/workspace.tsx b/app/internal_packages/paper-reed/lib/workspace.tsx
+index 10713d6..108715c 100644
+--- a/app/internal_packages/paper-reed/lib/workspace.tsx
++++ b/app/internal_packages/paper-reed/lib/workspace.tsx
+@@ -28,6 +28,7 @@ import {
+   CategoryStore,
+   DatabaseStore,
+   DraftStore,
++  AttachmentStore,
+   Message,
+   Thread,
+   MailboxPerspective,
+@@ -181,7 +182,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   }
+   accountIds = () => (this.state.accountId ? [this.state.accountId] : AccountStore.accountIds());
+   dirtySessions = () =>
+-    Object.values(DraftStore._draftSessions).filter((s) => !s._destroyed && s.changes.isDirty());
++    Object.values(DraftStore._draftSessions).filter((s) => !s._destroyed && (s.changes.isDirty() || AttachmentStore.hasPendingDraftAttachments(s.headerMessageId)));
+   scheduleRefresh = () => {
+     clearTimeout(this.refreshTimer);
+     this.refreshTimer = setTimeout(this.refresh, 100);
+@@ -295,7 +296,10 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     this.moving = true;
+     let saved = false;
+     try {
+-      for (const session of this.dirtySessions()) await session.changes.commit();
++      for (const session of this.dirtySessions()) {
++        await AttachmentStore.waitForDraftAttachments(session.headerMessageId);
++        await session.changes.commit();
++      }
+       if (this.dirtySessions().length) {
+         this.setState({ notice: '保存期间又有新编辑，请完成编辑后再切换。' });
+         return;
+@@ -773,9 +777,8 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       contacts?.[0];
+     const name = person?.displayName() || (draft ? '未填写收件人' : '未知发件人');
+     const date = draft ? row.date : row.lastMessageReceivedTimestamp;
+-    const color = this.state.accountId
+-      ? '#c6cbc2'
+-      : colors[Math.max(0, AccountStore.accountIds().indexOf(row.accountId)) % colors.length];
++    const color = AccountStore.accountForId(row.accountId)?.color ||
++      colors[Math.max(0, AccountStore.accountIds().indexOf(row.accountId)) % colors.length];
+     const content = (
+       <button
+         type="button"
+diff --git a/app/src/flux/stores/attachment-store.ts b/app/src/flux/stores/attachment-store.ts
+index 631d344..d03c8f9 100644
+--- a/app/src/flux/stores/attachment-store.ts
++++ b/app/src/flux/stores/attachment-store.ts
+@@ -33,6 +33,7 @@ class AttachmentStore extends MailspringStore {
+   _filePreviewPaths = {};
+   _filesDirectory: string = path.join(AppEnv.getConfigDirPath(), 'files');
+   _lastDownloadDirectory: string;
++  _attachmentErrorsByDraft: { [headerMessageId: string]: Error } = {};
+   _pendingAddsByDraft: { [headerMessageId: string]: Promise<void> } = {};
+ 
+   constructor() {
+@@ -50,7 +51,7 @@ class AttachmentStore extends MailspringStore {
+     this.listenTo(Actions.selectAttachment, this._onSelectAttachment);
+     this.listenTo(Actions.removeAttachment, this._onRemoveAttachment);
+     this.listenTo(Actions.destroyDraft, (draft: Message) =>
+-      this.deleteFilesOwnedByDraft(draft.files || [])
++      !AppEnv.config.get('core.paperReed.enabled') && this.deleteFilesOwnedByDraft(draft.files || [])
+     );
+     this.listenTo(Actions.draftDeliverySucceeded, ({ files }: { files: File[] }) =>
+       this.deleteFilesOwnedByDraft(files || [])
+@@ -118,7 +119,9 @@ class AttachmentStore extends MailspringStore {
+ 
+     if (await fileAccessibleAtPath(filePath)) {
+       this._ensurePreviewOfFile(file);
+-    } else {
++    } else if (!file.localFilename) {
++      // Synced legacy attachments may have a server-normalized name. Owned
++      // draft files have an exact localFilename; never substitute another file.
+       // try to find the file in the directory (it should be the only file)
+       // this allows us to handle obscure edge cases where the sync engine
+       // the file with an altered name.
+@@ -480,7 +483,7 @@ class AttachmentStore extends MailspringStore {
+     const previous = this._pendingAddsByDraft[headerMessageId] || Promise.resolve();
+     const current = previous
+       .then(() => this._addAttachmentNow({ headerMessageId, filePath, inline, onCreated }))
+-      .catch((err) => AppEnv.reportError(err));
++      .catch((err) => { this._attachmentErrorsByDraft[headerMessageId] = err; AppEnv.showErrorDialog(err.message); });
+     this._pendingAddsByDraft[headerMessageId] = current;
+     current.then(() => {
+       if (this._pendingAddsByDraft[headerMessageId] === current) {
+@@ -490,6 +493,16 @@ class AttachmentStore extends MailspringStore {
+     return current;
+   };
+ 
++  hasPendingDraftAttachments(headerMessageId: string) {
++    return !!(this._pendingAddsByDraft[headerMessageId] || this._attachmentErrorsByDraft[headerMessageId]);
++  }
++
++  async waitForDraftAttachments(headerMessageId: string) {
++    while (this._pendingAddsByDraft[headerMessageId]) await this._pendingAddsByDraft[headerMessageId];
++    const error = this._attachmentErrorsByDraft[headerMessageId];
++    if (error) { delete this._attachmentErrorsByDraft[headerMessageId]; throw error; }
++  }
++
+   // Errors are surfaced in a dialog rather than rejected so one failed file
+   // never blocks the rest of the chain for the same draft.
+   async _addAttachmentNow({
+@@ -504,6 +517,19 @@ class AttachmentStore extends MailspringStore {
+     onCreated: (file: File) => void;
+   }) {
+     try {
++      if (AppEnv.config.get('core.paperReed.enabled')) {
++        const { importDraftFile, checkAttachmentSize } = require('../../services/mail-core/draft-files');
++        const file: File = await importDraftFile(filePath);
++        if (inline) file.contentId = Utils.generateContentId();
++        try {
++          await this._applySessionChanges(headerMessageId, (files) => {
++            checkAttachmentSize([...files, file]);
++            return [...files, file];
++          });
++        } catch (error) { this.deleteFilesOwnedByDraft([file]); throw error; }
++        onCreated(file);
++        return;
++      }
+       const filename = path.basename(filePath);
+       const stats = await this._getFileStats(filePath);
+       if (stats.isDirectory()) {
+@@ -537,6 +563,7 @@ class AttachmentStore extends MailspringStore {
+       });
+       onCreated(file);
+     } catch (err) {
++      if (AppEnv.config.get('core.paperReed.enabled')) throw err;
+       AppEnv.showErrorDialog(err.message);
+     }
+   }
+@@ -577,6 +604,8 @@ class AttachmentStore extends MailspringStore {
+       files.filter(({ id }) => id !== fileToRemove.id)
+     );
+ 
++    // A different editor may still need these bytes to recover its unsaved version.
++    if (AppEnv.config.get('core.paperReed.enabled')) return;
+     try {
+       await this._deleteFile(fileToRemove);
+     } catch (err) {
+diff --git a/app/src/flux/stores/draft-store.ts b/app/src/flux/stores/draft-store.ts
+index 9cf6a69..daafcf7 100644
+--- a/app/src/flux/stores/draft-store.ts
++++ b/app/src/flux/stores/draft-store.ts
+@@ -125,6 +125,7 @@ class DraftStore extends MailspringStore {
+ 
+   async _saveSessionBeforeClose(session: DraftEditingSession) {
+     try {
++      await AttachmentStore.waitForDraftAttachments(session.headerMessageId);
+       await session.changes.commit();
+       return true;
+     } catch (error) {
+@@ -170,14 +171,16 @@ class DraftStore extends MailspringStore {
+       // Only delete pristine drafts if we're in popout composers. From the
+       // main window we can't know if the draft session may also be open in
+       // a popout and have content there.
+-      if (draft.pristine && !AppEnv.isMainWindow()) {
++      if (AttachmentStore.hasPendingDraftAttachments(session.headerMessageId)) {
++        promises.push(this._saveSessionBeforeClose(session));
++      } else if (draft.pristine && !AppEnv.isMainWindow()) {
+         Actions.queueTask(
+           new DestroyDraftTask({
+             messageIds: [draft.id],
+             accountId: draft.accountId,
+           })
+         );
+-        AttachmentStore.deleteFilesOwnedByDraft(draft.files);
++        if (!AppEnv.config.get('core.paperReed.enabled')) AttachmentStore.deleteFilesOwnedByDraft(draft.files);
+       } else if (session.changes.isDirty()) {
+         promises.push(this._saveSessionBeforeClose(session));
+       }
+@@ -574,6 +577,7 @@ class DraftStore extends MailspringStore {
+     // move the draft to another account if necessary to match the from: field
+     const accountIdBeforeEnsure = session.draft()?.accountId;
+     try {
++      await AttachmentStore.waitForDraftAttachments(headerMessageId);
+       await session.ensureCorrectAccount();
+     } catch (err) {
+       // Clear the sending flag, or the composer treats the draft as mid-send and
+@@ -615,7 +619,8 @@ class DraftStore extends MailspringStore {
+     });
+     if (files.length !== draft.files.length) {
+       // draftDeliverySucceeded only carries the files that are sent, so delete these now.
+-      AttachmentStore.deleteFilesOwnedByDraft(draft.files.filter((f) => !files.includes(f)));
++      if (!AppEnv.config.get('core.paperReed.enabled'))
++        AttachmentStore.deleteFilesOwnedByDraft(draft.files.filter((f) => !files.includes(f)));
+       session.changes.add({ files });
+     }
+ 
+@@ -627,6 +632,7 @@ class DraftStore extends MailspringStore {
+     diagnostics.dirtyFieldsBeforeCommit = session.changes.dirtyFields();
+     diagnostics.commitPromiseInFlight = !!(session.changes as any)._commitPromise;
+     try {
++      await AttachmentStore.waitForDraftAttachments(session.headerMessageId);
+       await session.changes.commit();
+     } catch (error) {
+       this._draftsSending[headerMessageId] = false;
+diff --git a/app/src/services/mail-core/draft-files.ts b/app/src/services/mail-core/draft-files.ts
+new file mode 100644
+index 0000000..6b2ed9d
+--- /dev/null
++++ b/app/src/services/mail-core/draft-files.ts
+@@ -0,0 +1,53 @@
++import fs from 'fs';
++import path from 'path';
++import { File } from '../../flux/models/file';
++import { generateTempId } from '../../flux/models/utils';
++import AttachmentStore from '../../flux/stores/attachment-store';
++
++export const MAX_DRAFT_ATTACHMENT_BYTES = 25 * 1000000;
++
++export function checkAttachmentSize(files: File[]) {
++  if (files.reduce((total, file) => total + file.size, 0) > MAX_DRAFT_ATTACHMENT_BYTES)
++    throw new Error('attachments-too-large: Attachments must total at most 25MB.');
++}
++
++// Every import owns its bytes. A recovery copy and a send snapshot must never
++// share a removable draft attachment, including inline images (preserve cid).
++export async function importDraftFile(sourcePath: string, original?: File): Promise<File> {
++  if (!path.isAbsolute(sourcePath)) throw new Error('attachment-path-must-be-absolute');
++  const stats = await fs.promises.stat(sourcePath);
++  if (!stats.isFile()) throw new Error('attachment-not-a-file');
++  if (stats.size > MAX_DRAFT_ATTACHMENT_BYTES) throw new Error('attachments-too-large');
++  const file = original ? original.clone() : new File({ filename: path.basename(sourcePath) });
++  file.id = generateTempId();
++  file.messageId = null;
++  file.localFilename = file.safeDisplayName();
++  const target = AttachmentStore.pathForFile(file);
++  await fs.promises.mkdir(path.dirname(target), { recursive: true });
++  try {
++    await fs.promises.copyFile(sourcePath, target, fs.constants.COPYFILE_FICLONE);
++    file.size = (await fs.promises.stat(target)).size;
++    checkAttachmentSize([file]);
++    return file;
++  } catch (error) {
++    AttachmentStore.deleteFilesOwnedByDraft([file]);
++    throw error;
++  }
++}
++
++export async function copyDraftFiles(files: File[]): Promise<File[]> {
++  const copies: File[] = [];
++  try {
++    for (const file of files) {
++      const source = file.localFilename
++        ? AttachmentStore.pathForFile(file)
++        : await AttachmentStore.resolvePathForFile(file);
++      copies.push(await importDraftFile(source, file));
++    }
++    checkAttachmentSize(copies);
++    return copies;
++  } catch (error) {
++    AttachmentStore.deleteFilesOwnedByDraft(copies);
++    throw new Error(`attachment-copy-failed: ${error.message}`);
++  }
++}
+diff --git a/app/src/services/mail-core/index.ts b/app/src/services/mail-core/index.ts
+index b1ce9de..891c516 100644
+--- a/app/src/services/mail-core/index.ts
++++ b/app/src/services/mail-core/index.ts
+@@ -6,6 +6,9 @@ import { Message } from '../../flux/models/message';
+ import { SyncbackDraftTask } from '../../flux/tasks/syncback-draft-task';
+ import { SendDraftTask } from '../../flux/tasks/send-draft-task';
+ import * as Actions from '../../flux/actions';
++import { Contact } from '../../flux/models/contact';
++import AttachmentStore from '../../flux/stores/attachment-store';
++import { copyDraftFiles, importDraftFile, checkAttachmentSize } from './draft-files';
+ 
+ export type Reference = { accountId: string; draftId: string };
+ export type Access = {
+@@ -38,7 +41,8 @@ export async function getDraft(ref: Reference, access: Access) {
+ export function draftResult(draft: Message) {
+   return { accountId: draft.accountId, draftId: draft.headerMessageId, revision: draft.version,
+     subject: draft.subject, body: draft.body, plaintext: draft.plaintext,
+-    to: draft.to, cc: draft.cc, bcc: draft.bcc };
++    to: draft.to, cc: draft.cc, bcc: draft.bcc, messageId: draft.id,
++    files: draft.files.map(f => ({ id: f.id, filename: f.displayName(), size: f.size, contentType: f.contentType, contentId: f.contentId })) };
+ }
+ 
+ // Desktop edits and external edits go through the same task and receipt check.
+@@ -80,7 +84,6 @@ export async function desktopDraftRecoveryInfo(drafts: Message[]): Promise<Draft
+ export async function saveDraftCopy(source: Message, access: Access) {
+   access.check(source.accountId, 'draft');
+   if (!(await access.visible(source))) throw new Error('draft-not-found');
+-  if (source.files.length) throw new Error('Recovery copies with attachments are not supported yet. Keep this window open.');
+   const copy = new Message({
+     accountId: source.accountId,
+     headerMessageId: `${randomUUID().toUpperCase()}@getmailspring.com`,
+@@ -89,6 +92,7 @@ export async function saveDraftCopy(source: Message, access: Access) {
+     replyTo: source.replyTo, replyToHeaderMessageId: source.replyToHeaderMessageId,
+     forwardedHeaderMessageId: source.forwardedHeaderMessageId,
+     subject: source.subject, body: source.body, plaintext: source.plaintext,
++    files: await copyDraftFiles(source.files),
+   });
+   const saved = await saveDraft(copy, access, {
+     sourceDraftId: source.headerMessageId, sourceRevision: source.version,
+@@ -98,13 +102,25 @@ export async function saveDraftCopy(source: Message, access: Access) {
+   return copy;
+ }
+ 
++export type DraftChanges = { subject?: string; body?: string; to?: { name?: string; email: string }[]; cc?: { name?: string; email: string }[]; bcc?: { name?: string; email: string }[] };
++
++export function draftContacts(values: { name?: string; email: string }[]) {
++  return values.map(value => {
++    const contact = new Contact({ name: value.name || '', email: value.email });
++    if (!contact.isValid() || /[\r\n]/.test(value.name || '') || /[\r\n]/.test(value.email)) throw new Error('invalid-recipient');
++    return contact;
++  });
++}
++
+ export async function updateDraft(ref: Reference, revision: number,
+-  changes: { subject?: string; body?: string }, access: Access) {
++  changes: DraftChanges, access: Access) {
+   const draft = await getDraft(ref, access);
+   access.check(ref.accountId, 'draft');
+   if (!Number.isSafeInteger(revision) || draft.version !== revision) throw new Error('draft-conflict');
+-  // Text is already in the draft's format. No account, identity, attachments or
+-  // bookkeeping fields can be overwritten through this small update interface.
++  // Text stays in the draft's format. Account and sending identity are unchanged.
++  for (const field of ['to', 'cc', 'bcc'] as const) {
++    if (changes[field] !== undefined) draft[field] = draftContacts(changes[field]);
++  }
+   if (changes.subject !== undefined) draft.subject = changes.subject;
+   if (changes.body !== undefined) draft.body = changes.body;
+   const saved = await saveDraft(draft, access);
+@@ -113,6 +129,31 @@ export async function updateDraft(ref: Reference, revision: number,
+   return draftResult(draft);
+ }
+ 
++// Both operations save a new draft revision through the same native CAS as GUI edits.
++export async function changeDraftAttachment(ref: Reference, revision: number,
++  change: { path: string } | { fileId: string }, access: Access) {
++  const draft = await getDraft(ref, access);
++  access.check(ref.accountId, 'draft');
++  if (!Number.isSafeInteger(revision) || draft.version !== revision) throw new Error('draft-conflict');
++  if ('path' in change) {
++    const file = await importDraftFile(change.path);
++    try { checkAttachmentSize([...draft.files, file]); }
++    catch (error) { AttachmentStore.deleteFilesOwnedByDraft([file]); throw error; }
++    draft.files = [...draft.files, file];
++  } else {
++    const file = draft.files.find(f => f.id === change.fileId);
++    if (!file) throw new Error('attachment-not-found');
++    if (file.contentId && draft.body.includes(`cid:${file.contentId}`))
++      throw new Error('inline-attachment-in-use: Remove the inline image from the body first.');
++    // Retain cached bytes: an unsaved GUI version may still need this attachment.
++    draft.files = draft.files.filter(f => f.id !== change.fileId);
++  }
++  const saved = await saveDraft(draft, access);
++  draft.id = saved.savedDraftId;
++  draft.version = saved.savedDraftRevision;
++  return draftResult(draft);
++}
++
+ async function ledger(accountId: string, id: string) {
+   const rows = await DatabaseStore._query(
+     'SELECT payload, phase, sentCopy FROM PaperReedSend WHERE accountId = ? AND requestId = ?',
+@@ -162,8 +203,14 @@ export async function submitSend(ref: Reference, revision: number, requestId: st
+   if (prior) { await checkRow(prior, access); return match(prior); } // Works even after the sent draft / Task was removed.
+   const draft = await getDraft(ref, access);
+   if (draft.version !== revision) throw new Error('draft-conflict');
++  const recipients = [...draft.to, ...draft.cc, ...draft.bcc];
++  if (!recipients.length) throw new Error('recipients-required');
++  draftContacts(recipients);
++  if (typeof navigator !== 'undefined' && !navigator.onLine) throw new Error('offline');
+   const task = SendDraftTask.forSending(draft);
++  task.draft.files = await copyDraftFiles(task.draft.files);
+   task.id = id;
++  if (!(await access.visible(draft))) throw new Error('draft-not-found');
+   access.check(ref.accountId, 'send');
+   if (typeof navigator !== 'undefined' && !navigator.onLine) throw new Error('offline');
+   Actions.queueTask(task);

@@ -16,7 +16,7 @@ try:
         from email.header import Header
         samples=[('Maya Chen','Design review · final notes','The revised layouts are ready. Please review the inbox spacing and reply flow.'),('Alex Morgan','Project kickoff — Thursday','Could you confirm the agenda and attendees for Thursday?'),('Billing','Your monthly receipt','Your receipt is ready. This is an isolated test message.'),('Weekly Digest','This week in product design','Three articles about typography, accessibility, and writing tools.'),('Lin Wei','Paper Reed 首版体验走查','我们先看收件箱、阅读和回复的连续体验，再检查异常状态。'),('Jordan Park','Re: Release checklist','The checklist is updated. Let me know which items need another pass.'),('Support','Account notification','Your test account is ready.'),('Sam Lee','A deliberately long subject to check how the inbox handles truncation and competing metadata','Does the row keep sender, date and unread status easy to scan?')]
         for i,(name,subject,body) in enumerate(samples):
-            server.append('INBOX',message(i+1,sender=(name,f'sender{i}@example.test'),subject=Header(subject,'utf-8').encode(),body=body))
+            server.append('INBOX',message(i+1,sender=(name,f'sender{i}@example.test'),subject=Header(subject,'utf-8').encode(),body=body, **({'attachment':('incoming.txt',b'Incoming attachment bytes\n'),'extra_headers':{'Cc':'Team <team@example.test>'}} if os.environ.get('PAPER_REED_ATTACHMENTS_CHECK') and i==0 else {})))
     else:
         server.append('INBOX',message(1))
     if os.environ.get('PAPER_REED_ORGANIZATION_CHECK'):
@@ -49,10 +49,31 @@ try:
             result_path=Path(__file__).resolve().parent.parent/'inbox-validation-2026-11-16/result.json'
         if os.environ.get('PAPER_REED_TRIAGE_CHECK'):
             result_path=Path(__file__).resolve().parent.parent/'triage-validation-2026-11-16/result.json'
+        if os.environ.get('PAPER_REED_ATTACHMENTS_CHECK'):
+            result_path=Path(__file__).resolve().parent.parent/'attachments-validation-2026-11-16/result.json'
         if os.environ.get('PAPER_REED_RULES_CHECK'):
             result_path=Path(__file__).resolve().parent.parent/'rules-validation-2026-11-16/result.json'
         result=json.loads(result_path.read_text());result['observedSMTPSubmissions']=len(sent)
         result_path.write_text(json.dumps(result,indent=2)+'\n')
+    if os.environ.get('PAPER_REED_ATTACHMENTS_CHECK'):
+        from email import policy
+        from email.parser import BytesParser
+        assert len(sent)==2,len(sent)
+        parsed=[BytesParser(policy=policy.default).parsebytes(m.raw) for m in sent]
+        first=next(m for m in parsed if m['Subject']=='Paper Reed GUI attachment copy')
+        reply=next(m for m in parsed if 'Design review' in str(m['Subject']))
+        assert list(first.iter_attachments())[0].get_payload(decode=True)==b'Frozen attachment bytes\n'
+        assert first['Bcc'] is None
+        original=next(m for m in sent if b'Paper Reed GUI attachment copy' in m.raw)
+        assert set(original.recipients)=={'recipient@example.test','bcc@example.test'},original.recipients
+        assert reply['In-Reply-To'] and reply['References']
+        assert list(reply.iter_attachments())[0].get_payload(decode=True)==b'Incoming attachment bytes\n'
+        reply_sent=next(m for m in sent if m is not original)
+        assert set(reply_sent.recipients)=={'sender0@example.test','team@example.test'},reply_sent.recipients
+        result.update({'SMTPAttachmentBytesMatch':True,'SMTPEnvelopeMatchesEditedRecipients':True,'SMTPReplyHeaders':True,'SMTPBccHidden':True})
+        result_path.write_text(json.dumps(result,indent=2)+'\n')
+        print('PASS actual SMTP MIME bytes, recipients and reply headers; submissions=2')
+        sys.exit(0)
     if a.conflict or a.close_save or a.recover or a.audit or a.controls:
         assert len(sent)==0,len(sent)
         print('PASS close/conflict verification; SMTP submissions=0')
