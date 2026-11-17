@@ -1,0 +1,10 @@
+--- a/app/internal_packages/paper-reed/lib/mail-search.tsx
++++ b/app/internal_packages/paper-reed/lib/mail-search.tsx
+@@ -37,6 +37,7 @@
+         <input id="pr-mail-search" className="pr-search-input" value={this.state.text}
+           placeholder="搜索邮件 · 发件人、主题或正文"
+           onChange={(event) => this.change(event.target.value)}
++          onBlur={() => { if (this.state.pending) this.submit(); }}
+           onCompositionStart={() => { this.composing = true; clearTimeout(this.timer); }}
+           onCompositionEnd={(event) => { this.composing = false; this.change(event.currentTarget.value); }} />
+         {this.state.pending && <span role="status">输入中 · 列表尚未更新</span>}

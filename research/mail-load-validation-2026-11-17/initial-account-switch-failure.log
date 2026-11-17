@@ -1,0 +1,4 @@
+PASS three-account scopes, foreign markers, sparse/empty folders, pin ordering, pagination, concurrent queries and grant exclusions
+Error: Timeout: ws.state.accountId==="load0001" && ws.state.query==="设计" && !ws.state.loading
+    at until (/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/harness/check-mail-load.cjs:73:134)
+    at async /Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/harness/check-mail-load.cjs:121:3

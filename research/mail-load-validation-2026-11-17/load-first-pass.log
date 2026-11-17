@@ -1,0 +1,313 @@
+PASS three-account scopes, foreign markers, sparse/empty folders, pin ordering, pagination, concurrent queries and grant exclusions
+PASS GUI pending search and account switching preserve scope
+PASS complex HTML body rendered through end marker, including table rows
+PASS 30-message conversation loaded with cached HTML content
+{
+  "synthetic": true,
+  "launchToRowsMs": 743,
+  "database": {
+    "threads": 30000
+  },
+  "queries": [
+    {
+      "accounts": [
+        "load0000",
+        "load0001",
+        "load0002"
+      ],
+      "query": "",
+      "rows": 50,
+      "elapsedMs": [
+        1.8999996185302734,
+        1.8000001907348633,
+        1.8999996185302734
+      ]
+    },
+    {
+      "accounts": [
+        "load0000",
+        "load0001",
+        "load0002"
+      ],
+      "query": "设计",
+      "rows": 50,
+      "elapsedMs": [
+        54.30000019073486,
+        51.90000057220459,
+        52.39999961853027
+      ]
+    },
+    {
+      "accounts": [
+        "load0000",
+        "load0001",
+        "load0002"
+      ],
+      "query": "账户1专属",
+      "rows": 50,
+      "elapsedMs": [
+        53,
+        53.30000019073486,
+        51.39999961853027
+      ]
+    },
+    {
+      "accounts": [
+        "load0000",
+        "load0001",
+        "load0002"
+      ],
+      "query": "quarterly",
+      "rows": 50,
+      "elapsedMs": [
+        10.699999809265137,
+        10.100000381469727,
+        10.300000190734863
+      ]
+    },
+    {
+      "accounts": [
+        "load0000",
+        "load0001",
+        "load0002"
+      ],
+      "query": "not-present-token",
+      "rows": 0,
+      "elapsedMs": [
+        4.09999942779541,
+        1,
+        0.8000001907348633
+      ]
+    },
+    {
+      "accounts": [
+        "load0000"
+      ],
+      "query": "",
+      "rows": 50,
+      "elapsedMs": [
+        1,
+        0.8000001907348633,
+        0.8999996185302734
+      ]
+    },
+    {
+      "accounts": [
+        "load0000"
+      ],
+      "query": "设计",
+      "rows": 50,
+      "elapsedMs": [
+        36.5,
+        35.19999980926514,
+        35.70000076293945
+      ]
+    },
+    {
+      "accounts": [
+        "load0000"
+      ],
+      "query": "账户1专属",
+      "rows": 0,
+      "elapsedMs": [
+        44.39999961853027,
+        44.80000019073486,
+        129.69999980926514
+      ]
+    },
+    {
+      "accounts": [
+        "load0000"
+      ],
+      "query": "quarterly",
+      "rows": 50,
+      "elapsedMs": [
+        8.5,
+        8,
+        8.800000190734863
+      ]
+    },
+    {
+      "accounts": [
+        "load0000"
+      ],
+      "query": "not-present-token",
+      "rows": 0,
+      "elapsedMs": [
+        0.5999994277954102,
+        0.40000057220458984,
+        0.39999961853027344
+      ]
+    },
+    {
+      "accounts": [
+        "load0001"
+      ],
+      "query": "",
+      "rows": 50,
+      "elapsedMs": [
+        0.8999996185302734,
+        0.8000001907348633,
+        0.8000001907348633
+      ]
+    },
+    {
+      "accounts": [
+        "load0001"
+      ],
+      "query": "设计",
+      "rows": 50,
+      "elapsedMs": [
+        35.59999942779541,
+        35.69999980926514,
+        35.40000057220459
+      ]
+    },
+    {
+      "accounts": [
+        "load0001"
+      ],
+      "query": "账户1专属",
+      "rows": 50,
+      "elapsedMs": [
+        48.30000019073486,
+        48.79999923706055,
+        48.70000076293945
+      ]
+    },
+    {
+      "accounts": [
+        "load0001"
+      ],
+      "query": "quarterly",
+      "rows": 50,
+      "elapsedMs": [
+        7.799999237060547,
+        7.5,
+        7.40000057220459
+      ]
+    },
+    {
+      "accounts": [
+        "load0001"
+      ],
+      "query": "not-present-token",
+      "rows": 0,
+      "elapsedMs": [
+        0.5,
+        0.39999961853027344,
+        0.3000001907348633
+      ]
+    },
+    {
+      "accounts": [
+        "load0002"
+      ],
+      "query": "",
+      "rows": 50,
+      "elapsedMs": [
+        0.6999998092651367,
+        0.6999998092651367,
+        0.6999998092651367
+      ]
+    },
+    {
+      "accounts": [
+        "load0002"
+      ],
+      "query": "设计",
+      "rows": 50,
+      "elapsedMs": [
+        35.80000019073486,
+        36.09999942779541,
+        35.80000019073486
+      ]
+    },
+    {
+      "accounts": [
+        "load0002"
+      ],
+      "query": "账户1专属",
+      "rows": 0,
+      "elapsedMs": [
+        44.39999961853027,
+        44.20000076293945,
+        44.29999923706055
+      ]
+    },
+    {
+      "accounts": [
+        "load0002"
+      ],
+      "query": "quarterly",
+      "rows": 50,
+      "elapsedMs": [
+        7.700000762939453,
+        7.5,
+        7.299999237060547
+      ]
+    },
+    {
+      "accounts": [
+        "load0002"
+      ],
+      "query": "not-present-token",
+      "rows": 0,
+      "elapsedMs": [
+        0.5,
+        0.3000001907348633,
+        0.3000001907348633
+      ]
+    }
+  ],
+  "accountSwitchMs": [
+    {
+      "id": "load0000",
+      "ms": 40.91337500000009
+    },
+    {
+      "id": "load0002",
+      "ms": 38.796416999999565
+    },
+    {
+      "id": "",
+      "ms": 37.48441700000012
+    }
+  ],
+  "htmlOpenToBodyMs": 119.2917910000001,
+  "htmlDOM": [
+    {
+      "textLength": 60788,
+      "rows": 160
+    }
+  ],
+  "longThreadOpenToBodyMs": 71.65979199999992,
+  "longTasks": [
+    {
+      "start": 1172.3000001907349,
+      "duration": 102
+    }
+  ],
+  "rendererMetrics": [
+    {
+      "name": "Documents",
+      "value": 12
+    },
+    {
+      "name": "Nodes",
+      "value": 9478
+    },
+    {
+      "name": "TaskDuration",
+      "value": 0.445443
+    },
+    {
+      "name": "JSHeapUsedSize",
+      "value": 72508784
+    },
+    {
+      "name": "JSHeapTotalSize",
+      "value": 131825664
+    }
+  ]
+}

@@ -1,0 +1,4 @@
+2026-11-17T15:32:29.662855+00:00
+Command: sandbox-exec -f research/harness/loopback-only.sb node research/harness/check-live-search.cjs
+PASS live typing, clear, IME, isolated input renders, unrelated events, unchanged send results, retained rows, late results and mail refresh
+Exit: 0

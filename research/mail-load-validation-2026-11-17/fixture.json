@@ -1,0 +1,29 @@
+{
+  "accounts": [
+    {
+      "id": "load0000",
+      "email": "load0@example.test",
+      "inbox": "load0000-inbox"
+    },
+    {
+      "id": "load0001",
+      "email": "load1@example.test",
+      "inbox": "load0001-inbox"
+    },
+    {
+      "id": "load0002",
+      "email": "load2@example.test",
+      "inbox": "load0002-inbox"
+    }
+  ],
+  "perAccountThreads": 10000,
+  "longThreads": [
+    "t:load0000-00000000",
+    "t:load0001-00000000",
+    "t:load0002-00000000"
+  ],
+  "messages": 30087,
+  "databaseBytes": 202485760,
+  "bodyBytes": 50653689,
+  "htmlThreadCount": 600
+}
