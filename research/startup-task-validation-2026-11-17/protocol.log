@@ -1,0 +1,12 @@
+2026-11-17T15:44:27.254302+00:00
+Command: sandbox-exec -f research/harness/loopback-only.sb python3 research/harness/check-offline-workflow.py --upstream research/.local/Mailspring --output research/startup-task-validation-2026-11-17/protocol
+PASS GUI stops before admission when Agent changes the reviewed revision; editor remains open and no SMTP submission
+PASS native connection loss is scoped to the affected mailbox; other account stays writable
+PASS cached inbox and message bodies remain readable through CLI while offline
+PASS offline GUI and CLI draft edits persist; button, keyboard and CLI cannot submit a send
+PASS normal offline restart restores the saved draft without sending it
+PASS reconnection resumes native sync and enables sending without automatically sending drafts
+PASS explicit send after reconnect submits once and remains accepted after restart
+PASS fixture submission counts and sent body; SMTP=1, all loopback
+Artifacts: /Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/offline-workflow-lhp0vn8n
+Exit: 0

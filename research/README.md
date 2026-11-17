@@ -52,3 +52,5 @@ node --test research/harness/check-feasibility.cjs
 [中文片段检索与大邮箱查询](search-scale-validation-2026-11-17/README.md) 接通中文片段和字段限定，优化普通邮箱有序分页，附十万封缓存的结果对照、实际 GUI 与回归日志。
 
 [复杂正文与多账号负载](mail-load-validation-2026-11-17/README.md) 覆盖三个账号、复杂 HTML、长会话、并发查询与本地协议断线恢复；修复待执行搜索在账号切换时丢失的问题，记录启动后长任务的未决边界。
+
+[启动后长任务定位](startup-task-validation-2026-11-17/README.md) 用原始 Chromium Trace 定位延迟模块批量激活，改为逐模块让出事件循环，附前后证据与实际回归结果。

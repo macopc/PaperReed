@@ -1,0 +1,616 @@
+{
+  "synthetic": true,
+  "launchToRowsMs": 4586,
+  "database": {
+    "threads": 30000
+  },
+  "phases": {
+    "queriesStart": 616.4000005722046,
+    "guiStart": 2143.9000005722046,
+    "htmlStart": 2804.1000003814697
+  },
+  "queries": [
+    {
+      "accounts": [
+        "load0000",
+        "load0001",
+        "load0002"
+      ],
+      "query": "",
+      "rows": 50,
+      "elapsedMs": [
+        1.8000001907348633,
+        2.1000003814697266,
+        1.6999998092651367
+      ]
+    },
+    {
+      "accounts": [
+        "load0000",
+        "load0001",
+        "load0002"
+      ],
+      "query": "设计",
+      "rows": 50,
+      "elapsedMs": [
+        54.80000019073486,
+        52,
+        54.19999980926514
+      ]
+    },
+    {
+      "accounts": [
+        "load0000",
+        "load0001",
+        "load0002"
+      ],
+      "query": "账户1专属",
+      "rows": 50,
+      "elapsedMs": [
+        61.90000057220459,
+        53.19999980926514,
+        54.30000019073486
+      ]
+    },
+    {
+      "accounts": [
+        "load0000",
+        "load0001",
+        "load0002"
+      ],
+      "query": "quarterly",
+      "rows": 50,
+      "elapsedMs": [
+        11.199999809265137,
+        10.199999809265137,
+        10.699999809265137
+      ]
+    },
+    {
+      "accounts": [
+        "load0000",
+        "load0001",
+        "load0002"
+      ],
+      "query": "not-present-token",
+      "rows": 0,
+      "elapsedMs": [
+        1.1000003814697266,
+        1,
+        1
+      ]
+    },
+    {
+      "accounts": [
+        "load0000"
+      ],
+      "query": "",
+      "rows": 50,
+      "elapsedMs": [
+        0.8000001907348633,
+        0.9000005722045898,
+        1
+      ]
+    },
+    {
+      "accounts": [
+        "load0000"
+      ],
+      "query": "设计",
+      "rows": 50,
+      "elapsedMs": [
+        35.69999980926514,
+        36.19999980926514,
+        35.89999961853027
+      ]
+    },
+    {
+      "accounts": [
+        "load0000"
+      ],
+      "query": "账户1专属",
+      "rows": 0,
+      "elapsedMs": [
+        49.60000038146973,
+        51.39999961853027,
+        49.5
+      ]
+    },
+    {
+      "accounts": [
+        "load0000"
+      ],
+      "query": "quarterly",
+      "rows": 50,
+      "elapsedMs": [
+        8.40000057220459,
+        8.800000190734863,
+        8.5
+      ]
+    },
+    {
+      "accounts": [
+        "load0000"
+      ],
+      "query": "not-present-token",
+      "rows": 0,
+      "elapsedMs": [
+        0.5,
+        0.5,
+        0.7999992370605469
+      ]
+    },
+    {
+      "accounts": [
+        "load0001"
+      ],
+      "query": "",
+      "rows": 50,
+      "elapsedMs": [
+        1.1000003814697266,
+        0.8999996185302734,
+        0.8000001907348633
+      ]
+    },
+    {
+      "accounts": [
+        "load0001"
+      ],
+      "query": "设计",
+      "rows": 50,
+      "elapsedMs": [
+        36.60000038146973,
+        37.19999980926514,
+        40.19999980926514
+      ]
+    },
+    {
+      "accounts": [
+        "load0001"
+      ],
+      "query": "账户1专属",
+      "rows": 50,
+      "elapsedMs": [
+        54.89999961853027,
+        48.60000038146973,
+        49.10000038146973
+      ]
+    },
+    {
+      "accounts": [
+        "load0001"
+      ],
+      "query": "quarterly",
+      "rows": 50,
+      "elapsedMs": [
+        10.5,
+        8,
+        7.699999809265137
+      ]
+    },
+    {
+      "accounts": [
+        "load0001"
+      ],
+      "query": "not-present-token",
+      "rows": 0,
+      "elapsedMs": [
+        0.5,
+        0.3000001907348633,
+        0.39999961853027344
+      ]
+    },
+    {
+      "accounts": [
+        "load0002"
+      ],
+      "query": "",
+      "rows": 50,
+      "elapsedMs": [
+        0.8000001907348633,
+        0.6999998092651367,
+        0.6999998092651367
+      ]
+    },
+    {
+      "accounts": [
+        "load0002"
+      ],
+      "query": "设计",
+      "rows": 50,
+      "elapsedMs": [
+        38.30000019073486,
+        51.80000019073486,
+        44
+      ]
+    },
+    {
+      "accounts": [
+        "load0002"
+      ],
+      "query": "账户1专属",
+      "rows": 0,
+      "elapsedMs": [
+        44.5,
+        43.89999961853027,
+        44.40000057220459
+      ]
+    },
+    {
+      "accounts": [
+        "load0002"
+      ],
+      "query": "quarterly",
+      "rows": 50,
+      "elapsedMs": [
+        8,
+        7.699999809265137,
+        9
+      ]
+    },
+    {
+      "accounts": [
+        "load0002"
+      ],
+      "query": "not-present-token",
+      "rows": 0,
+      "elapsedMs": [
+        0.39999961853027344,
+        0.40000057220458984,
+        0.5
+      ]
+    }
+  ],
+  "accountSwitchMs": [
+    {
+      "id": "load0000",
+      "ms": 39.25016700000015
+    },
+    {
+      "id": "load0002",
+      "ms": 36.275792000000365
+    },
+    {
+      "id": "",
+      "ms": 36.14220900000055
+    }
+  ],
+  "htmlOpenToBodyMs": 119.15354200000002,
+  "burst": {
+    "queries": 18,
+    "totalMs": 628.1999998092651
+  },
+  "htmlDOM": [
+    {
+      "textLength": 60788,
+      "rows": 160
+    }
+  ],
+  "longThreadOpenToBodyMs": 88.61679100000038,
+  "longTasks": [
+    {
+      "start": 2829.1000003814697,
+      "duration": 52
+    }
+  ],
+  "rendererMetrics": [
+    {
+      "name": "Documents",
+      "value": 12
+    },
+    {
+      "name": "Nodes",
+      "value": 9478
+    },
+    {
+      "name": "TaskDuration",
+      "value": 0.543939
+    },
+    {
+      "name": "JSHeapUsedSize",
+      "value": 75165820
+    },
+    {
+      "name": "JSHeapTotalSize",
+      "value": 132612096
+    }
+  ],
+  "rendererCPU": [
+    {
+      "name": "(idle)",
+      "file": "",
+      "ms": 2507.206
+    },
+    {
+      "name": "(program)",
+      "file": "",
+      "ms": 296.369
+    },
+    {
+      "name": "dispatchEvent",
+      "file": "",
+      "ms": 10.177
+    },
+    {
+      "name": "insertBefore",
+      "file": "",
+      "ms": 9.053
+    },
+    {
+      "name": "parseChannelMessages",
+      "file": "node:internal/child_process/serialization",
+      "ms": 8.897
+    },
+    {
+      "name": "(garbage collector)",
+      "file": "",
+      "ms": 7.867
+    },
+    {
+      "name": "PaperReedWorkspace.renderRow",
+      "file": "paper-reed/lib/workspace.js",
+      "ms": 7.477
+    },
+    {
+      "name": "removeChild",
+      "file": "",
+      "ms": 7.395
+    },
+    {
+      "name": "setTimeout",
+      "file": "",
+      "ms": 6.909
+    },
+    {
+      "name": "PaperReedWorkspace.renderRow",
+      "file": "paper-reed/lib/workspace.js",
+      "ms": 5.805
+    },
+    {
+      "name": "setTimeout",
+      "file": "",
+      "ms": 5.069
+    },
+    {
+      "name": "all",
+      "file": "",
+      "ms": 5.047
+    },
+    {
+      "name": "spawn",
+      "file": "",
+      "ms": 4.522
+    },
+    {
+      "name": "channel.onread",
+      "file": "node:internal/child_process",
+      "ms": 4.505
+    },
+    {
+      "name": "PaperReedWorkspace.renderRow",
+      "file": "paper-reed/lib/workspace.js",
+      "ms": 4.497
+    }
+  ],
+  "syncProbes": [
+    {
+      "label": "fs.readdirSync",
+      "start": 2830.800000190735,
+      "ms": 20.199999809265137,
+      "stack": "Error\n    at obj.<computed> [as readdirSync] (<anonymous>:5:227)\n    at ensureImageCacheReady (/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/flux/models/utils.js:222:36)\n    at Object.imageNamed (/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/flux/models/utils.js:234:5)\n    at pathFor (/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/components/retina-img.js:43:43)\n    at /Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/components/retina-img.js:45:31\n    at Ch (/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/node_modules/react-dom/cjs/react-dom.production.min.js:157:137)\n    at gi (/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/node_modules/react-dom/cjs/react-dom.production.min.js:176:260)\n    at ck (/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/node_modules/react-dom/cjs/react-dom.production.min.js:271:400)\n    at bk (/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/node_modules/react-dom/cjs/react-dom.production.min.js:250:347)\n    at ak (/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/node_modules/react-dom/cjs/react-dom.production.min.js:250:278)"
+    },
+    {
+      "label": "db.local",
+      "start": 3730.800000190735,
+      "ms": 6.600000381469727,
+      "stack": "Error\n    at obj.<computed> [as _executeLocally] (<anonymous>:5:227)\n    at /Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/flux/stores/database-store.js:179:44\n    at new Promise (<anonymous>)\n    at DatabaseStore._query (/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/flux/stores/database-store.js:161:16)\n    at DatabaseStore.run (/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/flux/stores/database-store.js:371:21)\n    at ModelQuery.run (/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/flux/models/query.js:198:31)\n    at ModelQuery.then (/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/flux/models/query.js:195:21)\n    at _MessageStore._fetchFromCache (/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/flux/stores/message-store.js:253:22)\n    at _MessageStore._onApplyFocusChange (/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/flux/stores/message-store.js:182:14)\n    at _MessageStore._onFocusChanged (/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/flux/stores/message-store.js:158:18)"
+    }
+  ],
+  "packageProbes": [
+    {
+      "name": "activity",
+      "start": 1183,
+      "ms": 0
+    },
+    {
+      "name": "category-mapper",
+      "start": 1183,
+      "ms": 2.1000003814697266
+    },
+    {
+      "name": "category-picker",
+      "start": 1185.5,
+      "ms": 1.8000001907348633
+    },
+    {
+      "name": "composer-grammar-check",
+      "start": 1187.4000005722046,
+      "ms": 1.5999994277954102
+    },
+    {
+      "name": "composer-signature",
+      "start": 1189,
+      "ms": 2.1000003814697266
+    },
+    {
+      "name": "composer-templates",
+      "start": 1191.1999998092651,
+      "ms": 2
+    },
+    {
+      "name": "contacts",
+      "start": 1197.6999998092651,
+      "ms": 7.100000381469727
+    },
+    {
+      "name": "custom-sounds",
+      "start": 1209.6999998092651,
+      "ms": 0.3000001907348633
+    },
+    {
+      "name": "draft-list",
+      "start": 1215.3000001907349,
+      "ms": 3.1000003814697266
+    },
+    {
+      "name": "events",
+      "start": 1223.1000003814697,
+      "ms": 2.59999942779541
+    },
+    {
+      "name": "github-contact-card",
+      "start": 1229.6999998092651,
+      "ms": 0
+    },
+    {
+      "name": "link-tracking",
+      "start": 1235.1000003814697,
+      "ms": 0
+    },
+    {
+      "name": "unsubscribe",
+      "start": 1240.3000001907349,
+      "ms": 36.5
+    },
+    {
+      "name": "mcp-server",
+      "start": 1281.9000005722046,
+      "ms": 25.5
+    },
+    {
+      "name": "message-view-on-github",
+      "start": 1313.9000005722046,
+      "ms": 0
+    },
+    {
+      "name": "mode-switch",
+      "start": 1319.1999998092651,
+      "ms": 1.9000005722045898
+    },
+    {
+      "name": "open-tracking",
+      "start": 1325.5,
+      "ms": 0
+    },
+    {
+      "name": "participant-profile",
+      "start": 1330,
+      "ms": 0
+    },
+    {
+      "name": "personal-level-indicators",
+      "start": 1334.5,
+      "ms": 0
+    },
+    {
+      "name": "phishing-detection",
+      "start": 1339.9000005722046,
+      "ms": 0.09999942779541016
+    },
+    {
+      "name": "print",
+      "start": 1344.1000003814697,
+      "ms": 1.0999994277954102
+    },
+    {
+      "name": "remove-tracking-pixels",
+      "start": 1349.3000001907349,
+      "ms": 0.39999961853027344
+    },
+    {
+      "name": "screenshot-mode",
+      "start": 1353.8000001907349,
+      "ms": 0.39999961853027344
+    },
+    {
+      "name": "send-and-archive",
+      "start": 1358.3000001907349,
+      "ms": 0.6999998092651367
+    },
+    {
+      "name": "send-later",
+      "start": 1363.6999998092651,
+      "ms": 0
+    },
+    {
+      "name": "send-reminders",
+      "start": 1368.1000003814697,
+      "ms": 0
+    },
+    {
+      "name": "system-tray",
+      "start": 1372.4000005722046,
+      "ms": 3.59999942779541
+    },
+    {
+      "name": "theme-picker",
+      "start": 1380.1000003814697,
+      "ms": 2.1999998092651367
+    },
+    {
+      "name": "thread-sharing",
+      "start": 1387.4000005722046,
+      "ms": 0
+    },
+    {
+      "name": "thread-snooze",
+      "start": 1391.9000005722046,
+      "ms": 0
+    },
+    {
+      "name": "translation",
+      "start": 1396.4000005722046,
+      "ms": 0
+    },
+    {
+      "name": "ui-automatic",
+      "start": 1400.9000005722046,
+      "ms": 0
+    },
+    {
+      "name": "ui-dark",
+      "start": 1405.4000005722046,
+      "ms": 0
+    },
+    {
+      "name": "ui-darkside",
+      "start": 1409.9000005722046,
+      "ms": 0
+    },
+    {
+      "name": "less-is-more",
+      "start": 1414.5,
+      "ms": 0
+    },
+    {
+      "name": "ui-light",
+      "start": 1418.9000005722046,
+      "ms": 0
+    },
+    {
+      "name": "ui-taiga",
+      "start": 1423.5,
+      "ms": 0
+    },
+    {
+      "name": "ui-ubuntu",
+      "start": 1428,
+      "ms": 0
+    },
+    {
+      "name": "undo-redo",
+      "start": 1432.5,
+      "ms": 2
+    },
+    {
+      "name": "unread-notifications",
+      "start": 1440.1999998092651,
+      "ms": 1.4000005722045898
+    },
+    {
+      "name": "views",
+      "start": 1445.8000001907349,
+      "ms": 21.399999618530273
+    }
+  ]
+}

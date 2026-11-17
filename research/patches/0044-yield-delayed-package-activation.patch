@@ -1,0 +1,24 @@
+--- a/app/src/package-manager.ts
++++ b/app/src/package-manager.ts
+@@ -108,12 +108,15 @@
+       }
+     }
+ 
+-    setTimeout(() => {
+-      for (const w of this.waiting) {
+-        this.activatePackage(w);
+-      }
+-      this.waiting = [];
+-    }, 800);
++    // Keep delayed activation ordered, but let input and painting run between
++    // packages instead of turning the entire batch into one renderer task.
++    const activateNext = () => {
++      const pkg = this.waiting.shift();
++      if (!pkg) return;
++      this.activatePackage(pkg);
++      if (this.waiting.length) setTimeout(activateNext, 0);
++    };
++    setTimeout(activateNext, 800);
+   }
+ 
+   activatePackage(pkg: Package) {

@@ -1,0 +1,1047 @@
+{
+  "before": {
+    "longestActivationCallbackMs": 128.711,
+    "activationCallbacks": [
+      {
+        "args": {
+          "data": {
+            "columnNumber": 20,
+            "frame": "6B32B17671523AF10E8D9CFB776490FB",
+            "functionName": "",
+            "isolate": "1793502807896917286",
+            "lineNumber": 116,
+            "sampleTraceId": 4058358766137722,
+            "scriptId": "237",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 896,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64475,
+        "tdur": 895,
+        "tid": 80445648,
+        "ts": 5145594610340,
+        "tts": 280955
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 20,
+            "frame": "7B81EAEC349D6169C448E5B429420927",
+            "functionName": "",
+            "isolate": "13732100447912006661",
+            "lineNumber": 116,
+            "sampleTraceId": 1518707791643813,
+            "scriptId": "237",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 128711,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64476,
+        "tdur": 114360,
+        "tid": 80445651,
+        "ts": 5145594759139,
+        "tts": 523870
+      }
+    ]
+  },
+  "after": {
+    "longestActivationCallbackMs": 36.589,
+    "activationCallbacks": [
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "CCEA2E694198CDFCFDE828013F84F915",
+            "functionName": "activateNext",
+            "isolate": "16636453132641811373",
+            "lineNumber": 116,
+            "sampleTraceId": 3071158304787244,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 433,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64944,
+        "tdur": 432,
+        "tid": 80450725,
+        "ts": 5145771665365,
+        "tts": 286638
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "CCEA2E694198CDFCFDE828013F84F915",
+            "functionName": "activateNext",
+            "isolate": "16636453132641811373",
+            "lineNumber": 116,
+            "sampleTraceId": 3071158304787246,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 486,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64944,
+        "tdur": 485,
+        "tid": 80450725,
+        "ts": 5145771665812,
+        "tts": 287080
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390690,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 103,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 103,
+        "tid": 80450728,
+        "ts": 5145771812643,
+        "tts": 529680
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390692,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 2079,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 2077,
+        "tid": 80450728,
+        "ts": 5145771812756,
+        "tts": 529789
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390702,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 1857,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 1855,
+        "tid": 80450728,
+        "ts": 5145771815158,
+        "tts": 532177
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390741,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 1723,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 1723,
+        "tid": 80450728,
+        "ts": 5145771817030,
+        "tts": 534041
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390742,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 2041,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 2039,
+        "tid": 80450728,
+        "ts": 5145771818764,
+        "tts": 535771
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390746,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 2086,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 2085,
+        "tid": 80450728,
+        "ts": 5145771820813,
+        "tts": 537813
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390725,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 7195,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 7192,
+        "tid": 80450728,
+        "ts": 5145771827318,
+        "tts": 540302
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390777,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 277,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 277,
+        "tid": 80450728,
+        "ts": 5145771839480,
+        "tts": 549905
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390753,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 3174,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 3172,
+        "tid": 80450728,
+        "ts": 5145771844991,
+        "tts": 550762
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390762,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 2653,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 2651,
+        "tid": 80450728,
+        "ts": 5145771852750,
+        "tts": 554248
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390548,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 15,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 14,
+        "tid": 80450728,
+        "ts": 5145771859426,
+        "tts": 557455
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390550,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 611,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 610,
+        "tid": 80450728,
+        "ts": 5145771864227,
+        "tts": 557493
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390554,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 36589,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 36466,
+        "tid": 80450728,
+        "ts": 5145771869994,
+        "tts": 558131
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390534,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 25536,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 25522,
+        "tid": 80450728,
+        "ts": 5145771911602,
+        "tts": 595123
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390569,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 92,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 91,
+        "tid": 80450728,
+        "ts": 5145771943606,
+        "tts": 625738
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390592,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 1883,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 1882,
+        "tid": 80450728,
+        "ts": 5145771948937,
+        "tts": 626973
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390599,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 43,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 42,
+        "tid": 80450728,
+        "ts": 5145771955168,
+        "tts": 628975
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390604,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 24,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 23,
+        "tid": 80450728,
+        "ts": 5145771959671,
+        "tts": 629554
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390641,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 19,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 18,
+        "tid": 80450728,
+        "ts": 5145771964181,
+        "tts": 629609
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390644,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 30,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 29,
+        "tid": 80450728,
+        "ts": 5145771969679,
+        "tts": 632525
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390650,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 1119,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 736,
+        "tid": 80450728,
+        "ts": 5145771973766,
+        "tts": 633008
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390624,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 479,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 478,
+        "tid": 80450728,
+        "ts": 5145771978941,
+        "tts": 633786
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390630,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 384,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 383,
+        "tid": 80450728,
+        "ts": 5145771983489,
+        "tts": 634920
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390637,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 792,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 793,
+        "tid": 80450728,
+        "ts": 5145771987945,
+        "tts": 635638
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390935,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 11,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 10,
+        "tid": 80450728,
+        "ts": 5145771993367,
+        "tts": 637728
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390937,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 8,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 7,
+        "tid": 80450728,
+        "ts": 5145771997738,
+        "tts": 638105
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390939,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 3652,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 2350,
+        "tid": 80450728,
+        "ts": 5145772002113,
+        "tts": 638664
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390915,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 2148,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 2146,
+        "tid": 80450728,
+        "ts": 5145772009865,
+        "tts": 641047
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390918,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 14,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 14,
+        "tid": 80450728,
+        "ts": 5145772017097,
+        "tts": 643233
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390920,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 15,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 14,
+        "tid": 80450728,
+        "ts": 5145772021609,
+        "tts": 643267
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390961,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 11,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 11,
+        "tid": 80450728,
+        "ts": 5145772026121,
+        "tts": 643638
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390963,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 9,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 7,
+        "tid": 80450728,
+        "ts": 5145772030628,
+        "tts": 643665
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390965,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 13,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 11,
+        "tid": 80450728,
+        "ts": 5145772035135,
+        "tts": 643686
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390967,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 7,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 7,
+        "tid": 80450728,
+        "ts": 5145772039646,
+        "tts": 644062
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390968,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 7,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 6,
+        "tid": 80450728,
+        "ts": 5145772044158,
+        "tts": 644087
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390970,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 13,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 11,
+        "tid": 80450728,
+        "ts": 5145772048666,
+        "tts": 644110
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390972,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 7,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 6,
+        "tid": 80450728,
+        "ts": 5145772053177,
+        "tts": 644140
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390949,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 9,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 8,
+        "tid": 80450728,
+        "ts": 5145772057689,
+        "tts": 644261
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390951,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 2006,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 2003,
+        "tid": 80450728,
+        "ts": 5145772062200,
+        "tts": 644290
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390957,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 1798,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 1125,
+        "tid": 80450728,
+        "ts": 5145772069460,
+        "tts": 646327
+      },
+      {
+        "args": {
+          "data": {
+            "columnNumber": 30,
+            "frame": "125B0B655EBA3567BEB6E7D94E04FDE7",
+            "functionName": "activateNext",
+            "isolate": "12528957884563717320",
+            "lineNumber": 116,
+            "sampleTraceId": 4588556122390998,
+            "scriptId": "236",
+            "url": "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/package-manager.js"
+          }
+        },
+        "cat": "devtools.timeline",
+        "dur": 21372,
+        "name": "FunctionCall",
+        "ph": "X",
+        "pid": 64945,
+        "tdur": 21360,
+        "tid": 80450728,
+        "ts": 5145772075503,
+        "tts": 648222
+      }
+    ]
+  }
+}

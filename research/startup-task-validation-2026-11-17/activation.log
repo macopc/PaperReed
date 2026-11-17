@@ -1,0 +1,254 @@
+{
+  "expected": [
+    "activity",
+    "category-mapper",
+    "category-picker",
+    "composer-grammar-check",
+    "composer-signature",
+    "composer-templates",
+    "contacts",
+    "custom-sounds",
+    "draft-list",
+    "events",
+    "github-contact-card",
+    "link-tracking",
+    "unsubscribe",
+    "mcp-server",
+    "message-view-on-github",
+    "mode-switch",
+    "open-tracking",
+    "participant-profile",
+    "personal-level-indicators",
+    "phishing-detection",
+    "print",
+    "remove-tracking-pixels",
+    "screenshot-mode",
+    "send-and-archive",
+    "send-later",
+    "send-reminders",
+    "system-tray",
+    "theme-picker",
+    "thread-sharing",
+    "thread-snooze",
+    "translation",
+    "ui-automatic",
+    "ui-dark",
+    "ui-darkside",
+    "less-is-more",
+    "ui-light",
+    "ui-taiga",
+    "ui-ubuntu",
+    "undo-redo",
+    "unread-notifications",
+    "views"
+  ],
+  "calls": [
+    {
+      "name": "activity",
+      "start": 1185,
+      "ms": 0.20000076293945312
+    },
+    {
+      "name": "category-mapper",
+      "start": 1185.2000007629395,
+      "ms": 7.699999809265137
+    },
+    {
+      "name": "category-picker",
+      "start": 1193.9000005722046,
+      "ms": 5.199999809265137
+    },
+    {
+      "name": "composer-grammar-check",
+      "start": 1199.8000001907349,
+      "ms": 5.300000190734863
+    },
+    {
+      "name": "composer-signature",
+      "start": 1205.1000003814697,
+      "ms": 5.199999809265137
+    },
+    {
+      "name": "composer-templates",
+      "start": 1210.4000005722046,
+      "ms": 4.199999809265137
+    },
+    {
+      "name": "contacts",
+      "start": 1220.3000001907349,
+      "ms": 11
+    },
+    {
+      "name": "custom-sounds",
+      "start": 1236.1000003814697,
+      "ms": 0.3000001907348633
+    },
+    {
+      "name": "draft-list",
+      "start": 1241.4000005722046,
+      "ms": 4.199999809265137
+    },
+    {
+      "name": "events",
+      "start": 1251.5,
+      "ms": 4.100000381469727
+    },
+    {
+      "name": "github-contact-card",
+      "start": 1260.7000007629395,
+      "ms": 0
+    },
+    {
+      "name": "link-tracking",
+      "start": 1265.6000003814697,
+      "ms": 0
+    },
+    {
+      "name": "unsubscribe",
+      "start": 1270.5,
+      "ms": 39.80000019073486
+    },
+    {
+      "name": "mcp-server",
+      "start": 1314.7000007629395,
+      "ms": 22.399999618530273
+    },
+    {
+      "name": "message-view-on-github",
+      "start": 1342.3000001907349,
+      "ms": 0
+    },
+    {
+      "name": "mode-switch",
+      "start": 1347.3000001907349,
+      "ms": 1.4000005722045898
+    },
+    {
+      "name": "open-tracking",
+      "start": 1353.7000007629395,
+      "ms": 0
+    },
+    {
+      "name": "participant-profile",
+      "start": 1358.8000001907349,
+      "ms": 0
+    },
+    {
+      "name": "personal-level-indicators",
+      "start": 1364.4000005722046,
+      "ms": 0
+    },
+    {
+      "name": "phishing-detection",
+      "start": 1369.3000001907349,
+      "ms": 0
+    },
+    {
+      "name": "print",
+      "start": 1374.4000005722046,
+      "ms": 0.8999996185302734
+    },
+    {
+      "name": "remove-tracking-pixels",
+      "start": 1380.3000001907349,
+      "ms": 0.3000001907348633
+    },
+    {
+      "name": "screenshot-mode",
+      "start": 1385.6000003814697,
+      "ms": 0.3000001907348633
+    },
+    {
+      "name": "send-and-archive",
+      "start": 1390.8000001907349,
+      "ms": 2.6000003814697266
+    },
+    {
+      "name": "send-later",
+      "start": 1398.9000005722046,
+      "ms": 0
+    },
+    {
+      "name": "send-reminders",
+      "start": 1403.9000005722046,
+      "ms": 0
+    },
+    {
+      "name": "system-tray",
+      "start": 1408.9000005722046,
+      "ms": 3.09999942779541
+    },
+    {
+      "name": "theme-picker",
+      "start": 1417,
+      "ms": 2.3000001907348633
+    },
+    {
+      "name": "thread-sharing",
+      "start": 1424.3000001907349,
+      "ms": 0.10000038146972656
+    },
+    {
+      "name": "thread-snooze",
+      "start": 1428.5,
+      "ms": 0
+    },
+    {
+      "name": "translation",
+      "start": 1433.5,
+      "ms": 0.10000038146972656
+    },
+    {
+      "name": "ui-automatic",
+      "start": 1438.6000003814697,
+      "ms": 0
+    },
+    {
+      "name": "ui-dark",
+      "start": 1443.6000003814697,
+      "ms": 0
+    },
+    {
+      "name": "ui-darkside",
+      "start": 1448.7000007629395,
+      "ms": 0
+    },
+    {
+      "name": "less-is-more",
+      "start": 1453.7000007629395,
+      "ms": 0
+    },
+    {
+      "name": "ui-light",
+      "start": 1458.7000007629395,
+      "ms": 0
+    },
+    {
+      "name": "ui-taiga",
+      "start": 1463.8000001907349,
+      "ms": 0
+    },
+    {
+      "name": "ui-ubuntu",
+      "start": 1468.8000001907349,
+      "ms": 0
+    },
+    {
+      "name": "undo-redo",
+      "start": 1473.8000001907349,
+      "ms": 3.1999998092651367
+    },
+    {
+      "name": "unread-notifications",
+      "start": 1482.2000007629395,
+      "ms": 1.6999998092651367
+    },
+    {
+      "name": "views",
+      "start": 1488.9000005722046,
+      "ms": 28.59999942779541
+    }
+  ],
+  "longTasks": []
+}
+PASS real delayed package order, event-loop yield between packages, synchronous initialization and window filtering
