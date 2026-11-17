@@ -1,0 +1,154 @@
+diff --git a/app/src/flux/models/account.ts b/app/src/flux/models/account.ts
+index 241cb40..6d09b72 100644
+--- a/app/src/flux/models/account.ts
++++ b/app/src/flux/models/account.ts
+@@ -201,7 +201,7 @@ export class Account extends ModelWithMetadata {
+   }
+
+   usesLabels() {
+-    return this.provider === 'gmail';
++    return this.provider === 'gmail' || ['imap.gmail.com', 'imap.googlemail.com'].includes(this.settings.imap_host);
+   }
+
+   usesOAuth() {
+diff --git a/app/src/flux/models/message.ts b/app/src/flux/models/message.ts
+index c1ce1fc..faed12d 100644
+--- a/app/src/flux/models/message.ts
++++ b/app/src/flux/models/message.ts
+@@ -188,6 +188,7 @@ export class Message extends ModelWithMetadata {
+       modelKey: 'forwardedHeaderMessageId',
+     }),
+
++    labels: Attributes.Collection({ modelKey: 'labels' }),
+     folders: Attributes.Obj({
+       queryable: false,
+       modelKey: 'folders',
+@@ -228,6 +229,7 @@ export class Message extends ModelWithMetadata {
+    * is not overwritten by a client that has never been told about it.
+    */
+   public folders?: { [folderId: string]: number };
++  public labels?: string[];
+   public listUnsubscribe: string;
+   public listUnsubscribePost: string;
+
+diff --git a/app/src/flux/tasks/change-folder-task.ts b/app/src/flux/tasks/change-folder-task.ts
+index 0c15ccd..bb0e7dc 100644
+--- a/app/src/flux/tasks/change-folder-task.ts
++++ b/app/src/flux/tasks/change-folder-task.ts
+@@ -14,7 +14,7 @@ let CategoryStore = null;
+  * their bytes but not their flags, so the engine uses `bits` to send each one home.
+  */
+ export type SourceFoldersByMessageId = {
+-  [messageId: string]: { folderId: string; bits: number }[];
++  [messageId: string]: { folderId: string; bits: number; labels?: string[] }[];
+ };
+
+ /*
+@@ -47,6 +47,9 @@ export class ChangeFolderTask extends ChangeMailTask {
+   static attributes = {
+     ...ChangeMailTask.attributes,
+
++    // Gmail still uses physical All Mail / Spam / Trash placements. This flag specifies
++    // the Inbox label independently of the physical destination and authentication method.
++    gmailInbox: Attributes.Boolean({ modelKey: 'gmailInbox' }),
+     folder: Attributes.Obj({
+       modelKey: 'folder',
+       itemClass: Folder,
+@@ -62,6 +65,7 @@ export class ChangeFolderTask extends ChangeMailTask {
+     }),
+   };
+
++  gmailInbox?: boolean;
+   folder: Folder;
+   sourceFolderIds: string[];
+   undoPlacements?: SourceFoldersByMessageId;
+@@ -154,7 +158,7 @@ export class ChangeFolderTask extends ChangeMailTask {
+         'ChangeFolderTask: You must provide a `threads` or `messages` Array of models or IDs.'
+       );
+     }
+-    if (this.sourceFolderIds.includes(this.folder.id)) {
++    if (this.gmailInbox === undefined && this.sourceFolderIds.includes(this.folder.id)) {
+       throw new Error('ChangeFolderTask: `sourceFolderIds` must not contain the destination');
+     }
+
+diff --git a/app/src/services/mail-core/inbox.ts b/app/src/services/mail-core/inbox.ts
+index c06286b..c411e2a 100644
+--- a/app/src/services/mail-core/inbox.ts
++++ b/app/src/services/mail-core/inbox.ts
+@@ -18,6 +18,7 @@ import { Task } from '../../flux/tasks/task';
+ import { ChangeMailTask } from '../../flux/tasks/change-mail-task';
+ import { ChangeFolderTask } from '../../flux/tasks/change-folder-task';
+ import { ChangeUnreadTask } from '../../flux/tasks/change-unread-task';
++import { Label } from '../../flux/models/label';
+ import { Folder } from '../../flux/models/folder';
+ import {
+   Grant,
+@@ -123,6 +124,9 @@ async function taskFor(accountId: string, id: string, access: InboxAccess, write
+   const task = await DatabaseStore.find<ChangeMailTask>(Task, id);
+   if (!task || task.accountId !== accountId || !task.paperReed)
+     throw new Error('operation-not-found');
++  const thread = await DatabaseStore.find<Thread>(Thread, task.paperReed.threadId);
++  if (thread && !isThreadAllowed(access.grant(), thread))
++    throw new Error('Access denied: excluded mail');
+   const messages = await DatabaseStore.findAll<Message>(Message).where(
+     Message.attributes.id.in(task.messageIds)
+   );
+@@ -158,7 +162,10 @@ async function queued(task: ChangeMailTask, key: string) {
+ }
+ export function actionAvailable(action: MailAction, accountId: string) {
+   if (action === 'read' || action === 'unread') return true;
+-  // This first adapter uses folder placements. Label-only Inbox archives need an exact label snapshot.
++  if (CategoryStore.getInboxCategory(accountId) instanceof Label) {
++    const physical = ['archive', 'inbox'].includes(action) ? 'all' : action;
++    return CategoryStore.getCategoryByRole(accountId, physical) instanceof Folder;
++  }
+   if (action === 'archive')
+     return (
+       CategoryStore.getInboxCategory(accountId) instanceof Folder &&
+@@ -227,6 +234,23 @@ export async function organizeMail(
+                 Object.values(m.folders || {}).every((bits) => !!(bits & 1) === !unread)
+               );
+               task = new ChangeUnreadTask({ messages, unread, source: 'Paper Reed' });
++            } else if (CategoryStore.getInboxCategory(target.accountId) instanceof Label) {
++              const inbox = CategoryStore.getInboxCategory(target.accountId);
++              const destination = CategoryStore.getCategoryByRole(
++                target.accountId, ['archive', 'inbox'].includes(input.action) ? 'all' : input.action
++              ) as Folder;
++              if (!isFolderAllowed(access.grant(), target.accountId, destination.id) ||
++                  !isFolderAllowed(access.grant(), target.accountId, inbox.id))
++                throw new Error('Access denied: destination excluded');
++              messages = messages.filter((m) => {
++                const inInbox = (m.labels || []).includes('\\Inbox');
++                if (input.action === 'archive') return inInbox && m.folderIds().includes(destination.id);
++                if (input.action === 'inbox') return !inInbox || !m.folderIds().includes(destination.id);
++                return m.folderIds().some((id) => id !== destination.id);
++              });
++              task = new ChangeFolderTask({
++                messages, folder: destination, gmailInbox: input.action === 'inbox', source: 'Paper Reed',
++              });
+             } else {
+               const destination =
+                 input.action === 'archive'
+@@ -237,10 +261,6 @@ export async function organizeMail(
+               let sourceFolderIds: string[] = [];
+               if (input.action === 'archive')
+                 sourceFolderIds = [CategoryStore.getInboxCategory(target.accountId).id];
+-              if (input.action === 'inbox')
+-                sourceFolderIds = ['trash', 'spam']
+-                  .map((role) => CategoryStore.getCategoryByRole(target.accountId, role)?.id)
+-                  .filter(Boolean);
+               if (sourceFolderIds.length)
+                 messages = messages.filter((m) =>
+                   m.folderIds().some((id) => sourceFolderIds.includes(id))
+@@ -306,6 +326,11 @@ export async function undoMail(ref: { accountId: string; taskId: string }, acces
+               if (!isFolderAllowed(access.grant(), task.accountId, folderId))
+                 throw new Error('Access denied: restore folder excluded');
+         }
++        if (task instanceof ChangeFolderTask && task.gmailInbox !== undefined) {
++          const inbox = CategoryStore.getInboxCategory(task.accountId);
++          if (!isFolderAllowed(access.grant(), task.accountId, inbox.id))
++            throw new Error('Access denied: restore label excluded');
++        }
+         const tasks = task.createUndoTasks() as ChangeMailTask[];
+         if (tasks.length !== 1) throw new Error('undo-unavailable');
+         const undo = tasks[0];

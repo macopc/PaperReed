@@ -1,0 +1,108 @@
+diff --git a/MailSync/TaskProcessor.cpp b/MailSync/TaskProcessor.cpp
+index 06cd61f..7699c92 100644
+--- a/MailSync/TaskProcessor.cpp
++++ b/MailSync/TaskProcessor.cpp
+@@ -563,6 +563,12 @@ static vector<PlacementMove> _movesForMessage(MailStore * store, Message * msg,
+         if (p.remoteUID == 0) {
+             continue;
+         }
++        // Gmail archive/inbox may only change the Inbox label in All Mail. Keep the
++        // existing placement in the task so both phases and undo still use one operation.
++        if (data.count("gmailInbox")) {
++            moves.push_back({p, dest});
++            continue;
++        }
+         bool pendingElsewhere = !p.pendingFolderId.empty() && p.pendingFolderId != dest;
+         bool selected;
+         if (p.pendingFolderId == dest) {
+@@ -584,9 +590,29 @@ static vector<PlacementMove> _movesForMessage(MailStore * store, Message * msg,
+ // where and how its undo sends a copy back (_restoreMovesForMessage).
+ void _applyFolder(MailStore * store, Message * msg, const vector<Placement> & placements, json & data) {
+     json shownIn = json::array();
++    bool gmail = data.count("gmailInbox");
++    if (gmail) {
++        bool inbox = data["gmailInbox"].get<bool>();
++        if (data.count("restorePlacements")) {
++            // Only Inbox is changed by these actions. Preserve other labels added later.
++            inbox = false;
++            for (auto & entry : data["restorePlacements"][msg->id()]) {
++                auto labels = entry["labels"].get<vector<string>>();
++                inbox = inbox || std::find(labels.begin(), labels.end(), "\\Inbox") != labels.end();
++            }
++        }
++        auto labels = msg->labels().get<vector<string>>();
++        labels.erase(std::remove(labels.begin(), labels.end(), "\\Inbox"), labels.end());
++        if (inbox) labels.push_back("\\Inbox");
++        sort(labels.begin(), labels.end());
++        data["gmailLabels"][msg->id()] = labels;
++        store->setPlacementLabels(*msg, labels);
++    }
+     for (auto & move : _movesForMessage(store, msg, placements, data)) {
+-        if (move.placement.reportedFolderId() != move.destFolderId) {
+-            shownIn.push_back({{"folderId", move.placement.reportedFolderId()}, {"bits", move.placement.flagBits()}});
++        if (gmail || move.placement.reportedFolderId() != move.destFolderId) {
++            json entry = {{"folderId", move.placement.reportedFolderId()}, {"bits", move.placement.flagBits()}};
++            if (gmail) entry["labels"] = move.placement.labels;
++            shownIn.push_back(entry);
+         }
+         store->beginPlacementMove(*msg, move.placement.folderId, move.placement.remoteUID, move.destFolderId);
+     }
+@@ -622,6 +648,30 @@ void _applyFolderMoveInIMAPFolder(IMAPSession * session, MailStore * store, stri
+         auto dest = _moveDestination(store, accountId, pair.first, data);
+         _moveMessagesResilient(session, AS_MCSTR(source.path()), *dest, pair.second);
+     }
++    if (data.count("gmailInbox")) {
++        for (auto item : items) {
++            if (!item->moved) continue;
++            auto dest = _moveDestination(store, accountId, item->destFolderId, data);
++            auto labels = data["gmailLabels"][item->message->id()].get<vector<string>>();
++            Array * add = Array::array();
++            for (auto & label : labels) {
++                // Sent/Drafts membership belongs to Gmail, not this organizer.
++                if (label == "\\Sent" || label == "\\Draft" || label == "\\Drafts") continue;
++                add->addObject(AS_MCSTR(label));
++            }
++            auto uids = IndexSet::indexSetWithIndex(item->movedUID);
++            ErrorCode error = ErrorNone;
++            if (add->count()) {
++                session->storeLabelsByUID(AS_MCSTR(dest->path()), uids, IMAPStoreFlagsRequestKindAdd, add, &error);
++                if (error != ErrorNone) throw SyncException(error, "Preserve Gmail labels after move");
++            }
++            if (std::find(labels.begin(), labels.end(), "\\Inbox") == labels.end()) {
++                session->storeLabelsByUID(AS_MCSTR(dest->path()), uids, IMAPStoreFlagsRequestKindRemove,
++                                         Array::arrayWithObject(AS_MCSTR(string("\\Inbox"))), &error);
++                if (error != ErrorNone) throw SyncException(error, "Remove Gmail Inbox label");
++            }
++        }
++    }
+ }
+
+ string _xgmKeyForLabel(json & label) {
+@@ -804,6 +854,7 @@ void TaskProcessor::performLocal(Task * task) {
+
+         } else if (cname == "ChangeFolderTask") {
+             task->data()["undoPlacements"] = json::object();
++            if (task->data().count("gmailInbox")) task->data()["gmailLabels"] = json::object();
+             performLocalChangeOnMessages(task, _applyFolder);
+
+         } else if (cname == "ChangeLabelsTask") {
+@@ -1143,6 +1194,10 @@ ChangeMailModels TaskProcessor::inflateMessages(json & data) {
+         models.messages = store->findLargeSet<Message>("id", messageIds);
+     }
+
++    for (auto & msg : models.messages) {
++        if (msg->accountId() != account->id())
++            throw SyncException("bad-accountid", "Message belongs to a different account.", false);
++    }
+     return models;
+ }
+
+@@ -1310,7 +1365,7 @@ void TaskProcessor::performRemoteChangeOnMessages(Task * task, bool isMove, Remo
+     }
+
+     if (failure) {
+-        if (!isMove) {
++        if (!isMove || data.count("gmailInbox")) {
+             _rescanFoldersForFlags(store, account->id(), itemsByFolder);
+         }
+         std::rethrow_exception(failure);
