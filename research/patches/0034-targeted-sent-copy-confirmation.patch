@@ -1,0 +1,77 @@
+diff --git a/MailSync/MailMutationGuard.hpp b/MailSync/MailMutationGuard.hpp
+index e8fe9be..42e7bc3 100644
+--- a/MailSync/MailMutationGuard.hpp
++++ b/MailSync/MailMutationGuard.hpp
+@@ -132,35 +132,43 @@ public:
+                                 "WHERE accountId=? AND requestId=? AND phase='attempting'");
+         q.bind(1, identity); q.bind(2, account); q.bind(3, id);
+         if (q.exec() != 1) throw Conflict("send-state-conflict", "Send phase changed; do not retry delivery.");
+-        reconcileSentCopies(account);
++        reconcileSentCopy(account, id, identity);
+     }
+
+     void recordSentIdentity(const std::string & account, const std::string & id, const std::string & identity) {
+         SQLite::Statement q(db, "UPDATE PaperReedSend SET sentIdentity=? WHERE accountId=? AND requestId=? AND phase='accepted'");
+         q.bind(1, identity); q.bind(2, account); q.bind(3, id); q.exec();
+-        reconcileSentCopies(account); // The sync worker may already have received it.
++        reconcileSentCopy(account, id, identity); // The sync worker may already have received it.
+     }
+
+-    void reconcileSentCopies(const std::string & account) {
++    // Called with a known Sent message: no search through the account's Message table.
++    void confirmSentCopy(const std::string & account, const std::string & header, const std::string & gmailId) {
+         SQLite::Statement q(db, R"SQL(
+             UPDATE PaperReedSend SET sentCopy='filed'
+-            WHERE accountId=? AND phase='accepted' AND sentCopy='pending'
+-              AND EXISTS (
+-                SELECT 1 FROM Message m
+-                WHERE m.accountId=PaperReedSend.accountId AND m.draft=0
+-                  AND (CASE WHEN substr(sentIdentity,1,6)='gmail:'
+-                       THEN m.gMsgId=substr(sentIdentity,7)
+-                       ELSE m.headerMessageId=COALESCE(sentIdentity,json_extract(payload,'$.draft.hMsgId')) END)
+-                  AND (EXISTS (SELECT 1 FROM json_each(m.data,'$.labels') l WHERE l.value='\Sent')
+-                       OR EXISTS (SELECT 1 FROM MessageFolder p JOIN Folder f ON f.id=p.folderId
+-                                  WHERE p.messageId=m.id AND p.remoteUID>0 AND json_extract(f.data,'$.role')='sent'))
+-              )
++            WHERE accountId=? AND phase='accepted' AND sentCopy IN ('pending','failed')
++              AND (sentIdentity IN (?,?) OR (sentIdentity IS NULL AND draftId=?))
+         )SQL");
+-        q.bind(1, account); q.exec();
++        q.bind(1, account); q.bind(2, header); q.bind(3, "gmail:" + gmailId); q.bind(4, header); q.exec();
++    }
++
++    // The sync worker may have received the copy before acceptance was recorded.
++    // Check this one operation once; normal message saves use confirmSentCopy above.
++    void reconcileSentCopy(const std::string & account, const std::string & id, const std::string & identity) {
++        bool gmail = identity.compare(0, 6, "gmail:") == 0;
++        std::string match = gmail ? "m.gMsgId=?" : "m.headerMessageId=?";
++        SQLite::Statement q(db,
++            "UPDATE PaperReedSend SET sentCopy='filed' "
++            "WHERE accountId=? AND requestId=? AND phase='accepted' AND sentCopy IN ('pending','failed') "
++            "AND EXISTS (SELECT 1 FROM Message m WHERE m.accountId=PaperReedSend.accountId AND m.draft=0 AND " + match + R"SQL(
++              AND (EXISTS (SELECT 1 FROM json_each(m.data,'$.labels') l WHERE l.value='\Sent')
++                   OR EXISTS (SELECT 1 FROM MessageFolder p JOIN Folder f ON f.id=p.folderId
++                              WHERE p.messageId=m.id AND p.remoteUID>0 AND json_extract(f.data,'$.role')='sent')))
++        )SQL");
++        q.bind(1, account); q.bind(2, id); q.bind(3, gmail ? identity.substr(6) : identity); q.exec();
+     }
+
+     void setCopy(const std::string & account, const std::string & id, const std::string & state) {
+-        SQLite::Statement q(db, "UPDATE PaperReedSend SET sentCopy = ? "
++        SQLite::Statement q(db, "UPDATE PaperReedSend SET sentCopy = CASE WHEN sentCopy='filed' THEN sentCopy ELSE ? END "
+                                 "WHERE accountId = ? AND requestId = ? AND phase = 'accepted'");
+         q.bind(1, state); q.bind(2, account); q.bind(3, id);
+         if (q.exec() != 1) throw Conflict("send-state-conflict", "Delivery acceptance is not recorded.");
+diff --git a/MailSync/Models/Message.cpp b/MailSync/Models/Message.cpp
+index f4bd09f..6caf90e 100644
+--- a/MailSync/Models/Message.cpp
++++ b/MailSync/Models/Message.cpp
+@@ -564,7 +564,7 @@ void Message::afterSave(MailStore * store) {
+         bool sent = false;
+         for (auto & label : labels()) sent = sent || label == "\\Sent";
+         for (auto & folderId : folderIds()) sent = sent || folderRole(store, folderId) == "sent";
+-        if (sent) PaperReed::MailMutationGuard(store->db()).reconcileSentCopies(accountId());
++        if (sent) PaperReed::MailMutationGuard(store->db()).confirmSentCopy(accountId(), headerMessageId(), gMsgId());
+     }
+
+     // if we have a thread, keep the thread's folder, label, and unread counters

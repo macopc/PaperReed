@@ -1,0 +1,86 @@
+diff --git a/app/src/flux/stores/draft-store.ts b/app/src/flux/stores/draft-store.ts
+index 655470f..131f236 100644
+--- a/app/src/flux/stores/draft-store.ts
++++ b/app/src/flux/stores/draft-store.ts
+@@ -651,11 +651,11 @@ class DraftStore extends MailspringStore {
+       return;
+     }
+     diagnostics.dirtyFieldsAfterCommit = session.changes.dirtyFields();
+-    await session.teardown();
+-
+-    // ensureCorrectAccount / commit may assign this draft a new ID. To move forward
+-    // we need to have the final object with it's final ID.
+-    draft = await DatabaseStore.findBy<Message>(Message, { headerMessageId, draft: true }).include(
++    // Keep the revision the user reviewed. An agent may save again before this read.
++    const reviewed = { accountId: session.draft().accountId, version: session.draft().version };
++    draft = await DatabaseStore.findBy<Message>(Message, {
++      accountId: reviewed.accountId, headerMessageId, draft: true,
++    }).include(
+       Message.attributes.body
+     );
+     if (!draft) {
+@@ -667,6 +667,14 @@ class DraftStore extends MailspringStore {
+       });
+     }
+
++    if (draft.version !== reviewed.version) {
++      this._draftsSending[headerMessageId] = false;
++      this.trigger({ headerMessageId });
++      AppEnv.showErrorDialog(localized('The draft changed before sending. Reload the latest draft and review it.'));
++      return;
++    }
++    await session.teardown();
++
+     // Directly update the message body cache so the user immediately sees
+     // the new message text (and never old draft text or blank text) sending.
+     await MessageBodyProcessor.updateCacheForMessage(draft);
+diff --git a/app/src/flux/tasks/send-draft-task.ts b/app/src/flux/tasks/send-draft-task.ts
+index d64efd3..0deeaf3 100644
+--- a/app/src/flux/tasks/send-draft-task.ts
++++ b/app/src/flux/tasks/send-draft-task.ts
+@@ -197,42 +197,9 @@ export class SendDraftTask extends Task {
+       errorDetail = localized(
+         'In order to send mail through Mailspring, your email account must have a Trash folder. You can specify a Trash folder manually by visiting Preferences > Folders and choosing a folder name from the dropdown menu.'
+       );
+-    } else if (key === 'send-partially-failed') {
+-      const [smtpError, emails] = debuginfo.split(':::');
+-      errorMessage = localized(
+-        "We were unable to deliver this message to some recipients. Click 'See Details' for more information."
+-      );
+-      errorDetail = localized(
+-        `We encountered an SMTP Gateway error that prevented this message from being delivered to all recipients. The message was only sent successfully to these recipients:\n%@\n\nError: %@`,
+-        emails,
+-        LocalizedErrorStrings[smtpError]
+-      );
+-    } else if (key === 'smtp-auth-disabled') {
+-      // Signing in through OAuth moves a Microsoft account to Graph sending, unless its
+-      // organization declines Mail.Send: an Office 365 or Outlook account by reconnecting, an
+-      // IMAP/SMTP account (outlook.com and Hotmail ones included) by being added again with
+-      // Microsoft sign-in. A shared mailbox sends over SMTP as its owner and never moves, so
+-      // only an administrator can help it.
+-      const account = AccountStore.accountForId(this.draft.accountId);
+-      const isSharedMailbox =
+-        account &&
+-        account.settings.smtp_username &&
+-        account.settings.smtp_username.toLowerCase() !== account.emailAddress.toLowerCase();
+-      const signsInWithMicrosoft = account && ['office365', 'outlook'].includes(account.provider);
+-      if (!account || isSharedMailbox) {
+-        errorMessage = localized(
+-          'Microsoft has turned off SMTP sending for this mailbox. An administrator must enable SMTP AUTH for it before Mailspring can send from it.'
+-        );
+-      } else if (signsInWithMicrosoft) {
+-        errorMessage = localized(
+-          "Microsoft has turned off SMTP sending for this account. Reconnect the account in Preferences > Accounts so Mailspring can send through Microsoft 365. If Microsoft asks for an administrator's approval, an administrator must approve Mailspring's mail permissions or enable SMTP AUTH."
+-        );
+-      } else {
+-        errorMessage = localized(
+-          'Microsoft has turned off SMTP sending for this account. Remove it in Preferences > Accounts and add it again by choosing Outlook.com or Office 365, so Mailspring signs in with Microsoft and can send through Microsoft 365.'
+-        );
+-      }
+-      errorDetail = debuginfo;
++    } else if (key === 'send-rejected') {
++      errorMessage = localized('The send request was rejected. Your draft can still be edited.');
++      errorDetail = LocalizedErrorStrings[debuginfo] || debuginfo;
+     } else if (key === 'send-failed') {
+       errorMessage = localized(
+         `Sorry, Mailspring was unable to deliver this message: %@`,

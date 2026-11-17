@@ -31,6 +31,28 @@ async function stop(){const p=app.process();await app.evaluate(({app})=>app.quit
  async function waitCLI(){await until(async()=>{try{return (await cli('doctor')).ok}catch{return false}},'CLI ready')}
  await waitCLI();
  for(const id of ids)await until(async()=>JSON.stringify(await cli('thread-get',{threadId:id})).includes('Cached body fixture'),'body cached');
+ // Pause the production final read, then let the CLI save a newer draft revision.
+ const raceDraft=await cli('draft-create',{accountId:accounts[0].id,to:[{email:'recipient@example.test'}],subject:'Review revision fixture',body:'GUI reviewed body'});
+ const raceRef={accountId:raceDraft.accountId,draftId:raceDraft.draftId};
+ await main.locator('[data-mailbox=drafts]').click();await main.locator(`[data-draft-id="${raceRef.draftId}"]`).click();
+ await until(()=>main.locator('.pr-send').isEnabled(),'review fixture ready');
+ await evaluate(`(()=>{const {DatabaseStore,DraftStore}=require('mailspring-exports');const original=DatabaseStore.findBy;const dialog=AppEnv.showErrorDialog;
+ window.reviewRace={waiting:false,errors:[],restore:()=>{DatabaseStore.findBy=original;AppEnv.showErrorDialog=dialog}};
+ AppEnv.showErrorDialog=(message)=>window.reviewRace.errors.push(message);
+ DatabaseStore.findBy=function(...args){const q=original.apply(this,args);if(args[1]?.headerMessageId===${JSON.stringify(raceRef.draftId)} && DraftStore._draftsSending[${JSON.stringify(raceRef.draftId)}]){
+ DatabaseStore.findBy=original;const include=q.include.bind(q);q.include=(...attrs)=>{window.reviewRace.waiting=true;return new Promise(resolve=>{window.reviewRace.release=()=>resolve(include(...attrs))})};}return q;};return true})()`);
+ await main.locator('.pr-send').click();await until(()=>evaluate('window.reviewRace.waiting'),'final GUI read paused');
+ const beforeAgent=await cli('draft-get',raceRef);
+ await cli('draft-update',{...raceRef,expectedRevision:beforeAgent.revision,changes:{body:'New body saved by Agent'}});
+ await evaluate('window.reviewRace.release();true');
+ await until(()=>evaluate('window.reviewRace.errors.length===1'),'revision conflict shown');
+ assert((await evaluate('window.reviewRace.errors[0]')).includes('draft changed'));
+ assert.equal((await sendRows()).length,0);assert.deepEqual((await fixture('counts')).smtp,[0,0]);
+ assert(await main.locator('[contenteditable=true]').first().isVisible());
+ await until(()=>main.locator('.pr-send').isEnabled(),'send flag reset after conflict');
+ await evaluate('window.reviewRace.restore();true');
+ await main.locator('[data-mailbox=inbox]').click();
+ pass('GUI stops before admission when Agent changes the reviewed revision; editor remains open and no SMTP submission');
  await fixture('disconnect',0);
  await until(()=>evaluate(`!require('mailspring-exports').OnlineStatusStore.isAccountOnline(${JSON.stringify(accounts[0].id)})`),'engine detects disconnected account');
  await until(async()=>(await main.locator('.pr-sync-status').innerText()).includes('连接暂时中断'),'connection status visible');

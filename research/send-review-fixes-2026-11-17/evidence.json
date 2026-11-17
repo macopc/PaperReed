@@ -1,0 +1,256 @@
+{
+  "baseline": "c565d5e",
+  "patches": [
+    "0034-targeted-sent-copy-confirmation.patch",
+    "0035-reviewed-send-revision.patch"
+  ],
+  "nativeSha256": "d4c7705639ff4acd40dd676ddf5a0d683f434c8065b79b8a0c95c42daabefdfb",
+  "guiAndOffline": {
+    "passed": [
+      "GUI stops before admission when Agent changes the reviewed revision; editor remains open and no SMTP submission",
+      "native connection loss is scoped to the affected mailbox; other account stays writable",
+      "cached inbox and message bodies remain readable through CLI while offline",
+      "offline GUI and CLI draft edits persist; button, keyboard and CLI cannot submit a send",
+      "normal offline restart restores the saved draft without sending it",
+      "reconnection resumes native sync and enables sending without automatically sending drafts",
+      "explicit send after reconnect submits once and remains accepted after restart"
+    ],
+    "realProviderAccounts": false,
+    "smtpSubmissions": 1
+  },
+  "smtp": [
+    {
+      "case": "auth-rejected",
+      "smtpSubmissions": 0,
+      "outcome": "rejected",
+      "draftEditable": true
+    },
+    {
+      "case": "lost-response",
+      "smtpSubmissions": 1,
+      "outcome": "unknown",
+      "draftEditable": false
+    },
+    {
+      "case": "multisend-rejected",
+      "smtpSubmissions": 0,
+      "outcome": "rejected",
+      "draftEditable": true
+    },
+    {
+      "case": "append-response-lost",
+      "smtpSubmissions": 1,
+      "outcome": "accepted",
+      "draftEditable": false
+    }
+  ],
+  "smtpAppendCopyAfterRestart": [
+    "accepted",
+    "filed"
+  ],
+  "gmail": [
+    {
+      "case": "accepted",
+      "outcome": "accepted",
+      "api_submissions": 1,
+      "smtp_submissions": 0
+    },
+    {
+      "case": "rewritten-message-id",
+      "outcome": "accepted",
+      "api_submissions": 1,
+      "smtp_submissions": 0
+    },
+    {
+      "case": "late-sent-copy",
+      "outcome": "accepted",
+      "api_submissions": 1,
+      "smtp_submissions": 0
+    },
+    {
+      "case": "rejected",
+      "outcome": "rejected",
+      "api_submissions": 1,
+      "smtp_submissions": 0
+    },
+    {
+      "case": "lost-response",
+      "outcome": "unknown",
+      "api_submissions": 1,
+      "smtp_submissions": 0
+    },
+    {
+      "case": "invalid-receipt",
+      "outcome": "unknown",
+      "api_submissions": 1,
+      "smtp_submissions": 0
+    },
+    {
+      "case": "server-error",
+      "outcome": "unknown",
+      "api_submissions": 1,
+      "smtp_submissions": 0
+    },
+    {
+      "case": "refresh-rejected",
+      "outcome": "rejected",
+      "api_submissions": 0,
+      "smtp_submissions": 0
+    }
+  ],
+  "microsoft": [
+    {
+      "case": "accepted",
+      "outcome": "accepted",
+      "api_submissions": 1,
+      "smtp_submissions": 0
+    },
+    {
+      "case": "rejected",
+      "outcome": "rejected",
+      "api_submissions": 1,
+      "smtp_submissions": 0
+    },
+    {
+      "case": "server-error",
+      "outcome": "unknown",
+      "api_submissions": 1,
+      "smtp_submissions": 0
+    },
+    {
+      "case": "lost-response",
+      "outcome": "unknown",
+      "api_submissions": 1,
+      "smtp_submissions": 0
+    },
+    {
+      "case": "refresh-rejected",
+      "outcome": "rejected",
+      "api_submissions": 0,
+      "smtp_submissions": 0
+    }
+  ],
+  "nativeGuard": [
+    "PASS recovery provenance shares transaction, rejects updates, preserves account scope",
+    "PASS stale revision, omitted id, wrong id/account, missing revision",
+    "PASS atomic admission, request reuse, changed request, duplicate draft, history cleanup",
+    "PASS account isolation and retry only after preflight rejection",
+    "PASS late failed copy converges, filed never regresses, early rewritten Gmail copy matches",
+    "PASS SIGKILL/restart, unknown stays locked, accepted distinct from failed copy",
+    "PASS concurrent admissions: exactly one winner"
+  ],
+  "queryCostBefore": {
+    "syntheticSqlBenchmark": true,
+    "results": [
+      {
+        "messages": 10000,
+        "pending": 0,
+        "sentSaveHooks": 100,
+        "elapsedSeconds": 0.0004
+      },
+      {
+        "messages": 10000,
+        "pending": 1,
+        "sentSaveHooks": 100,
+        "elapsedSeconds": 0.0992
+      },
+      {
+        "messages": 10000,
+        "pending": 10,
+        "sentSaveHooks": 100,
+        "elapsedSeconds": 0.9898
+      }
+    ],
+    "queryPlan": [
+      [
+        5,
+        0,
+        62,
+        "SEARCH PaperReedSend USING INDEX sqlite_autoindex_PaperReedSend_1 (accountId=?)"
+      ],
+      [
+        17,
+        0,
+        0,
+        "CORRELATED SCALAR SUBQUERY 3"
+      ],
+      [
+        22,
+        17,
+        61,
+        "SEARCH m USING INDEX MessageListDateIndex (accountId=?)"
+      ],
+      [
+        49,
+        17,
+        0,
+        "CORRELATED SCALAR SUBQUERY 1"
+      ],
+      [
+        53,
+        49,
+        0,
+        "SCAN l VIRTUAL TABLE INDEX 3:"
+      ],
+      [
+        67,
+        17,
+        0,
+        "CORRELATED SCALAR SUBQUERY 2"
+      ],
+      [
+        74,
+        67,
+        62,
+        "SEARCH p USING INDEX MessageFolderMessageIndex (messageId=?)"
+      ],
+      [
+        82,
+        67,
+        46,
+        "SEARCH f USING INDEX sqlite_autoindex_Folder_1 (id=?)"
+      ]
+    ]
+  },
+  "queryCostAfter": {
+    "syntheticSqlBenchmark": true,
+    "results": [
+      {
+        "messages": 10000,
+        "pending": 0,
+        "sentSaveHooks": 100,
+        "implementation": "targeted-message",
+        "elapsedSeconds": 0.0001
+      },
+      {
+        "messages": 10000,
+        "pending": 1,
+        "sentSaveHooks": 100,
+        "implementation": "targeted-message",
+        "elapsedSeconds": 0.0001
+      },
+      {
+        "messages": 10000,
+        "pending": 10,
+        "sentSaveHooks": 100,
+        "implementation": "targeted-message",
+        "elapsedSeconds": 0.0001
+      }
+    ],
+    "queryPlan": [
+      [
+        5,
+        0,
+        62,
+        "SEARCH PaperReedSend USING INDEX sqlite_autoindex_PaperReedSend_1 (accountId=?)"
+      ]
+    ]
+  },
+  "replay": {
+    "patches": 35,
+    "comparedSourceFiles": 107,
+    "cliCopiesMatch": true
+  },
+  "realMailSent": false,
+  "proxyConfigurationChanged": false
+}

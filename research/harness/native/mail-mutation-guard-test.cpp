@@ -23,7 +23,7 @@ json draft(const std::string & account = "a") {
 }
 
 void seed(SQLite::Database & db, const json & d) {
-    SQLite::Statement q(db, "INSERT OR REPLACE INTO Message VALUES (?, ?, ?, ?)");
+    SQLite::Statement q(db, "INSERT OR REPLACE INTO Message (id,accountId,headerMessageId,data) VALUES (?, ?, ?, ?)");
     q.bind(1, d["id"].get<std::string>()); q.bind(2, d["aid"].get<std::string>());
     q.bind(3, d["hMsgId"].get<std::string>()); q.bind(4, d.dump()); q.exec();
 }
@@ -39,8 +39,10 @@ int main(int argc, char ** argv) {
     {
         SQLite::Database db(path, SQLite::OPEN_READWRITE | SQLite::OPEN_CREATE, 5000);
         db.exec("PRAGMA journal_mode=WAL");
-        db.exec("CREATE TABLE Message(id TEXT PRIMARY KEY, accountId TEXT, headerMessageId TEXT, data TEXT)");
+        db.exec("CREATE TABLE Message(id TEXT PRIMARY KEY, accountId TEXT, headerMessageId TEXT, data TEXT, gMsgId TEXT, draft INTEGER DEFAULT 1)");
         db.exec("CREATE TABLE Task(id TEXT PRIMARY KEY, status TEXT)");
+        db.exec("CREATE TABLE IF NOT EXISTS Folder(id TEXT PRIMARY KEY, data TEXT)");
+        db.exec("CREATE TABLE IF NOT EXISTS MessageFolder(messageId TEXT,folderId TEXT,remoteUID INTEGER)");
         MailMutationGuard::migrate(db);
         MailMutationGuard::migrate(db); // restart/migration is repeatable
         MailMutationGuard g(db);
@@ -138,6 +140,26 @@ int main(int argc, char ** argv) {
         assert(g.request("b", "send-2")["phase"] == "accepted");
         assert(g.request("b", "send-2")["sentCopy"] == "failed");
         conflict("draft-frozen", [&] { g.requireEditable("b", "draft@example.test"); });
+        // The SMTP copy can arrive after a failed APPEND response; once observed,
+        // a delayed send worker failure must not turn it back into failed.
+        g.confirmSentCopy("unrelated", "draft@example.test", "0");
+        assert(g.request("b", "send-2")["sentCopy"] == "failed");
+        g.confirmSentCopy("b", "draft@example.test", "0");
+        assert(g.request("b", "send-2")["sentCopy"] == "filed");
+        g.setCopy("b", "send-2", "failed");
+        g.setCopy("b", "send-2", "pending");
+        assert(g.request("b", "send-2")["sentCopy"] == "filed");
+        assert(g.request("a", "send-1")["phase"] == "unknown");
+        // Gmail's copy may sync before the API receipt; its rewritten header is
+        // irrelevant to the stable Gmail id. Another request remains untouched.
+        auto copy = draft("copy"); seed(db, copy);
+        g.admit("copy", "gmail-send", copy, {{"draft", copy}});
+        g.transition("copy", "gmail-send", "queued", "attempting");
+        db.exec(R"SQL(INSERT INTO Message(id,accountId,headerMessageId,data,gMsgId,draft)
+            VALUES ('sent','copy','rewritten@example.test','{"labels":["\\Sent"]}','88',0))SQL");
+        g.accept("copy", "gmail-send", "gmail:88");
+        assert(g.request("copy", "gmail-send")["sentCopy"] == "filed");
+        std::cout << "PASS late failed copy converges, filed never regresses, early rewritten Gmail copy matches\n";
         auto race = draft("race"); seed(db, race);
     }
     std::cout << "PASS SIGKILL/restart, unknown stays locked, accepted distinct from failed copy\n";

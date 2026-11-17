@@ -27,13 +27,33 @@ def send_with_lost_response(self, line):
     return original_send(self, line)
 
 _Handler.send = send_with_lost_response
+
+# Save a real Sent copy but lose its APPEND completion response.
+from fakeimap.server import Session
+original_ok = Session.ok
+original_append = Session.cmd_append
+
+def lose_append_receipt(self, tag, text, code=None):
+    if text == 'Append completed.' and getattr(self, 'drop_sent_append', False):
+        self.connection.shutdown(2)
+        return
+    return original_ok(self, tag, text, code=code)
+
+def append(self, tag, args):
+    self.drop_sent_append = (getattr(self.server.owner, 'lose_sent_append', False) and
+                            (args.rest().lstrip().startswith(b'"Sent"') or args.rest().lstrip().startswith(b'Sent ')))
+    return original_append(self, tag, args)
+
+Session.ok = lose_append_receipt
+Session.cmd_append = append
 args.output.mkdir(parents=True, exist_ok=True)
 work = Path(tempfile.mkdtemp(prefix='smtp-send-', dir=args.output.resolve()))
 results = []
 
-for mode in ['auth-rejected', 'lost-response', 'multisend-rejected']:
+for mode in ['auth-rejected', 'lost-response', 'multisend-rejected', 'append-response-lost']:
     server = FakeServer('dovecot', smtp=True, smtp_auth_response='535 5.7.8 Authentication failed' if mode == 'auth-rejected' else None)
     server.append('INBOX', message(1))
+    server.imap.lose_sent_append = mode == 'append-response-lost'
     server.start()
     server.smtp.lose_send_response = mode == 'lost-response'
     ms = None
@@ -71,19 +91,24 @@ for mode in ['auth-rejected', 'lost-response', 'multisend-rejected']:
         ms.queue_task(submission)
         result = complete('send')
 
-        expected = 'unknown' if mode == 'lost-response' else 'rejected'
+        expected = 'accepted' if mode == 'append-response-lost' else 'unknown' if mode == 'lost-response' else 'rejected'
         assert result['sendOutcome'] == expected, result
-        count = 1 if mode == 'lost-response' else 0
+        count = 1 if mode in ('lost-response', 'append-response-lost') else 0
         assert len(server.sent_messages()) == count
-        ms.queue_task({'id': 'edit-after-failure', '__cls': 'SyncbackDraftTask', 'draft': dict(draft, body='Edit after send failure')})
-        edit = complete('edit-after-failure')
-        if expected == 'rejected':
-            assert not edit.get('error'), edit
-        else:
-            assert edit.get('error', {}).get('key') == 'draft-frozen', edit
+        if mode != 'append-response-lost':
+            ms.queue_task({'id': 'edit-after-failure', '__cls': 'SyncbackDraftTask', 'draft': dict(draft, body='Edit after send failure')})
+            edit = complete('edit-after-failure')
+            if expected == 'rejected':
+                assert not edit.get('error'), edit
+            else:
+                assert edit.get('error', {}).get('key') == 'draft-frozen', edit
         ms.stop()
         ms.start()
         ms.wait_quiescent(timeout=35)
+        if mode == 'append-response-lost':
+            assert len(server.store.get('Sent').messages) == 1
+            ms.wait_for(lambda: row("SELECT sentCopy FROM PaperReedSend WHERE requestId='send'") == ('filed',),
+                        35, 'APPEND response loss converges after sync')
         ms.queue_task(submission)
         ms.wait_quiescent(timeout=10)
         assert len(server.sent_messages()) == count, 'Restart must not submit again'
