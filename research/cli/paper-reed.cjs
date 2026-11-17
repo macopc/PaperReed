@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { createRequire } = require('node:module');
-const VERSION = '0.1.0-experimental';
+const VERSION = '0.0.1';
 const mailActions = {
   'mark-read': 'read',
   'mark-unread': 'unread',

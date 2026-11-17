@@ -1,0 +1,20 @@
+{
+  "synthetic": true,
+  "externalNetwork": false,
+  "launchToRowsMs": 713,
+  "brand": {
+    "version": "0.0.1",
+    "markLoaded": true,
+    "accounts": 3
+  },
+  "cachedThreads": 30000,
+  "cliVersion": "0.0.1",
+  "cliDoctor": {
+    "ok": true,
+    "version": "0.0.1",
+    "endpoint": "http://127.0.0.1:49805/mcp",
+    "authorizedAccounts": 3,
+    "next": "Run paper-reed accounts."
+  },
+  "cliUninstalled": true
+}

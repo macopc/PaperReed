@@ -112,7 +112,7 @@ async function install(p, connection) {
     env: cleanEnv(),
     timeout: 8000,
   });
-  if (probe.stdout.trim() !== '0.1.0-experimental')
+  if (probe.stdout.trim() !== '0.0.1')
     throw new Error('当前应用的 CLI 运行环境不可用。');
   fs.mkdirSync(path.dirname(p.command), { recursive: true });
   fs.mkdirSync(path.dirname(p.profile), { recursive: true, mode: 0o700 });

@@ -4,6 +4,7 @@
 This does not build a runnable Electron app or the native mail engine.
 """
 import argparse
+import shutil
 from pathlib import Path
 import subprocess
 
@@ -50,6 +51,11 @@ def main():
         for line in patch.read_text().splitlines():
             if line.startswith('+++ b/'):
                 touched.add(('mailsync/' if native else '') + line[6:])
+    for asset, target in [('paper-reed.icns', 'app/build/resources/mac/paper-reed.icns'),
+                          ('app-icon.png', 'app/static/paper-reed-icon.png'),
+                          ('mark.svg', 'app/static/paper-reed-mark.svg')]:
+        shutil.copy2(ROOT / 'assets/brand' / asset, dest / target)
+        touched.add(target)
     if args.compare:
         for name in sorted(touched):
             if not (dest / name).exists() and not (args.compare / name).exists():

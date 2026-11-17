@@ -1,0 +1,1060 @@
+---> Building mailspring-fm
+---> Running packager with options:
+{
+  appVersion: [32m'0.0.1'[39m,
+  platform: [32m'darwin'[39m,
+  protocols: [
+    { name: [32m'Mailto Protocol'[39m, schemes: [ [32m'mailto'[39m, [length]: [33m1[39m ] },
+    [length]: [33m1[39m
+  ],
+  dir: [32m'/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app'[39m,
+  appCategoryType: [32m'public.app-category.business'[39m,
+  tmpdir: [32m'/var/folders/yb/qg3hhldd2b95c6gvm8f07zh00000gn/T/nylas-build'[39m,
+  arch: [32m'arm64'[39m,
+  icon: [32m'/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/build/resources/mac/paper-reed.icns'[39m,
+  name: [32m'Paper Reed'[39m,
+  appCopyright: [32m'Copyright © 2026 Paper Reed contributors. Based on Mailspring © 2014–2026 Foundry 376, LLC.'[39m,
+  derefSymlinks: [33mfalse[39m,
+  asar: {
+    unpack: [32m'{mailsync,mailsync.exe,mailsync.bin,**/icu-tzdata/**,*.so,*.so.*,*.dll,*.pdb,*.node,*.ico,**/vendor/**,**/src/tasks/**,**/src/quickpreview/**,**/mcp-stdio-bridge.js,**/src/browser/local-ai-worker.js,**/node_modules/node-llama-cpp/**,**/node_modules/@huggingface/jinja/**,**/node_modules/async-retry/**,**/node_modules/retry/**,**/node_modules/bytes/**,**/node_modules/node-llama-cpp/node_modules/chalk/**,**/node_modules/chmodrp/**,**/node_modules/cmake-js/**,**/node_modules/cmake-js/node_modules/debug/**,**/node_modules/cmake-js/node_modules/ms/**,**/node_modules/fs-extra/**,**/node_modules/graceful-fs/**,**/node_modules/jsonfile/**,**/node_modules/universalify/**,**/node_modules/node-api-headers/**,**/node_modules/rc/**,**/node_modules/deep-extend/**,**/node_modules/ini/**,**/node_modules/minimist/**,**/node_modules/strip-json-comments/**,**/node_modules/semver/**,**/node_modules/tar/**,**/node_modules/@isaacs/fs-minipass/**,**/node_modules/minipass/**,**/node_modules/tar/node_modules/chownr/**,**/node_modules/minizlib/**,**/node_modules/yallist/**,**/node_modules/url-join/**,**/node_modules/cmake-js/node_modules/which/**,**/node_modules/cmake-js/node_modules/isexe/**,**/node_modules/yargs/**,**/node_modules/cliui/**,**/node_modules/cliui/node_modules/string-width/**,**/node_modules/emoji-regex/**,**/node_modules/cliui/node_modules/is-fullwidth-code-point/**,**/node_modules/cliui/node_modules/strip-ansi/**,**/node_modules/ansi-regex/**,**/node_modules/wrap-ansi/**,**/node_modules/ansi-styles/**,**/node_modules/color-convert/**,**/node_modules/color-name/**,**/node_modules/wrap-ansi/node_modules/string-width/**,**/node_modules/wrap-ansi/node_modules/is-fullwidth-code-point/**,**/node_modules/wrap-ansi/node_modules/strip-ansi/**,**/node_modules/escalade/**,**/node_modules/get-caller-file/**,**/node_modules/require-directory/**,**/node_modules/yargs/node_modules/string-width/**,**/node_modules/yargs/node_modules/is-fullwidth-code-point/**,**/node_modules/yargs/node_modules/strip-ansi/**,**/node_modules/y18n/**,**/node_modules/yargs-parser/**,**/node_modules/cross-spawn/**,**/node_modules/path-key/**,**/node_modules/shebang-command/**,**/node_modules/shebang-regex/**,**/node_modules/which/**,**/node_modules/isexe/**,**/node_modules/env-var/**,**/node_modules/filenamify/**,**/node_modules/filename-reserved-regex/**,**/node_modules/ignore/**,**/node_modules/ipull/**,**/node_modules/@tinyhttp/content-disposition/**,**/node_modules/ipull/node_modules/chalk/**,**/node_modules/ci-info/**,**/node_modules/cli-spinners/**,**/node_modules/ipull/node_modules/commander/**,**/node_modules/ipull/node_modules/eventemitter3/**,**/node_modules/is-unicode-supported/**,**/node_modules/ipull/node_modules/lifecycle-utils/**,**/node_modules/lodash.debounce/**,**/node_modules/lowdb/**,**/node_modules/steno/**,**/node_modules/pretty-bytes/**,**/node_modules/ipull/node_modules/pretty-ms/**,**/node_modules/ipull/node_modules/parse-ms/**,**/node_modules/sleep-promise/**,**/node_modules/ipull/node_modules/slice-ansi/**,**/node_modules/ipull/node_modules/ansi-styles/**,**/node_modules/is-fullwidth-code-point/**,**/node_modules/get-east-asian-width/**,**/node_modules/stdout-update/**,**/node_modules/ansi-escapes/**,**/node_modules/stdout-update/node_modules/ansi-styles/**,**/node_modules/stdout-update/node_modules/string-width/**,**/node_modules/stdout-update/node_modules/emoji-regex/**,**/node_modules/strip-ansi/**,**/node_modules/strip-ansi/node_modules/ansi-regex/**,**/node_modules/@reflink/reflink/**,**/node_modules/@reflink/reflink-darwin-arm64/**,**/node_modules/lifecycle-utils/**,**/node_modules/log-symbols/**,**/node_modules/yoctocolors/**,**/node_modules/node-llama-cpp/node_modules/nanoid/**,**/node_modules/node-addon-api/**,**/node_modules/ora/**,**/node_modules/ora/node_modules/chalk/**,**/node_modules/cli-cursor/**,**/node_modules/restore-cursor/**,**/node_modules/onetime/**,**/node_modules/mimic-function/**,**/node_modules/restore-cursor/node_modules/signal-exit/**,**/node_modules/ora/node_modules/cli-spinners/**,**/node_modules/is-interactive/**,**/node_modules/stdin-discarder/**,**/node_modules/string-width/**,**/node_modules/pretty-ms/**,**/node_modules/parse-ms/**,**/node_modules/proper-lockfile/**,**/node_modules/proper-lockfile/node_modules/retry/**,**/node_modules/signal-exit/**,**/node_modules/simple-git/**,**/node_modules/@kwsites/file-exists/**,**/node_modules/@kwsites/file-exists/node_modules/debug/**,**/node_modules/@kwsites/file-exists/node_modules/ms/**,**/node_modules/@kwsites/promise-deferred/**,**/node_modules/@simple-git/args-pathspec/**,**/node_modules/@simple-git/argv-parser/**,**/node_modules/simple-git/node_modules/debug/**,**/node_modules/simple-git/node_modules/ms/**,**/node_modules/slice-ansi/**,**/node_modules/slice-ansi/node_modules/ansi-styles/**,**/node_modules/validate-npm-package-name/**,**/node_modules/node-llama-cpp/node_modules/which/**,**/node_modules/node-llama-cpp/node_modules/isexe/**,**/node_modules/@node-llama-cpp/mac-arm64-metal/**,**/static/all_licenses.html,**/static/extensions/**,**/node_modules/spellchecker/**}'[39m
+  },
+  ignore: [
+    /^\/build.*/ { [lastIndex]: [33m0[39m },
+    /^\/dist.*/ { [lastIndex]: [33m0[39m },
+    /^\/docs.*/ { [lastIndex]: [33m0[39m },
+    /^\/docs_src.*/ { [lastIndex]: [33m0[39m },
+    /^\/native.*/ { [lastIndex]: [33m0[39m },
+    /^\/script.*/ { [lastIndex]: [33m0[39m },
+    /^\/spec.*/ { [lastIndex]: [33m0[39m },
+    /^\/internal_packages[/]+views[/]+examples/ { [lastIndex]: [33m0[39m },
+    /[/]+gh-pages$/ { [lastIndex]: [33m0[39m },
+    /[/]+docs$/ { [lastIndex]: [33m0[39m },
+    /[/]+obj[/]+gen/ { [lastIndex]: [33m0[39m },
+    /[/]+\.deps$/ { [lastIndex]: [33m0[39m },
+    /\.md$/i { [lastIndex]: [33m0[39m },
+    /\.log$/i { [lastIndex]: [33m0[39m },
+    /\.yml$/i { [lastIndex]: [33m0[39m },
+    /\.gz/i { [lastIndex]: [33m0[39m },
+    /\.zip/i { [lastIndex]: [33m0[39m },
+    /\.h$/ { [lastIndex]: [33m0[39m },
+    /\.cc$/ { [lastIndex]: [33m0[39m },
+    /\.flow$/ { [lastIndex]: [33m0[39m },
+    /\.gyp/ { [lastIndex]: [33m0[39m },
+    /\.mk/ { [lastIndex]: [33m0[39m },
+    /\.dYSM$/ { [lastIndex]: [33m0[39m },
+    /\.map$/ { [lastIndex]: [33m0[39m },
+    /node_modules[/]+less[/]+dist$/ { [lastIndex]: [33m0[39m },
+    /node_modules[/]+react[/]+dist$/ { [lastIndex]: [33m0[39m },
+    /node_modules[/].*[/]tests?$/ { [lastIndex]: [33m0[39m },
+    /node_modules[/].*[/]coverage$/ { [lastIndex]: [33m0[39m },
+    /node_modules[/].*[/]benchmark$/ { [lastIndex]: [33m0[39m },
+    /node_modules[/]+@node-llama-cpp[/]+(?!mac-arm64(-metal|-vulkan)?([/]|$))/ {
+      [lastIndex]: [33m0[39m
+    },
+    [length]: [33m30[39m
+  ],
+  out: [32m'/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist'[39m,
+  overwrite: [33mtrue[39m,
+  prune: [33mtrue[39m,
+  osxSign: [90mundefined[39m,
+  osxNotarize: [90mundefined[39m,
+  win32metadata: {
+    CompanyName: [32m'Foundry 376, LLC'[39m,
+    FileDescription: [32m'Mailspring'[39m,
+    LegalCopyright: [32m'Copyright (C) 2014-2026 Foundry 376, LLC. All rights reserved.'[39m,
+    ProductName: [32m'Mailspring'[39m
+  },
+  extendInfo: [32m'/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/build/resources/mac/extra.plist'[39m,
+  extraResource: [
+    [32m'/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/build/resources/mac/new-mail.mp3'[39m,
+    [32m'/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/native/mailspring-fm/.build/arm64-apple-macosx/release/mailspring-fm'[39m,
+    [length]: [33m2[39m
+  ],
+  appBundleId: [32m'io.github.macopc.paperreed'[39m,
+  afterCopy: [
+    [36m<ref *1>[39m [Function: runCopyPlatformSpecificResources] {
+      [length]: [33m1[39m,
+      [name]: [32m'runCopyPlatformSpecificResources'[39m,
+      [arguments]: [1mnull[22m,
+      [caller]: [1mnull[22m,
+      [prototype]: { [constructor]: [36m[Circular *1][39m }
+    },
+    [36m<ref *2>[39m [Function: runCopyGoogleClient] {
+      [length]: [33m1[39m,
+      [name]: [32m'runCopyGoogleClient'[39m,
+      [arguments]: [1mnull[22m,
+      [caller]: [1mnull[22m,
+      [prototype]: { [constructor]: [36m[Circular *2][39m }
+    },
+    [36m<ref *3>[39m [Function: runWriteCommitHashIntoPackage] {
+      [length]: [33m1[39m,
+      [name]: [32m'runWriteCommitHashIntoPackage'[39m,
+      [arguments]: [1mnull[22m,
+      [caller]: [1mnull[22m,
+      [prototype]: { [constructor]: [36m[Circular *3][39m }
+    },
+    [36m<ref *4>[39m [Function: runUpdateSandboxHelperPermissions] {
+      [length]: [33m1[39m,
+      [name]: [32m'runUpdateSandboxHelperPermissions'[39m,
+      [arguments]: [1mnull[22m,
+      [caller]: [1mnull[22m,
+      [prototype]: { [constructor]: [36m[Circular *4][39m }
+    },
+    [36m<ref *5>[39m [Function: runCopySymlinkedPackages] {
+      [length]: [33m1[39m,
+      [name]: [32m'runCopySymlinkedPackages'[39m,
+      [arguments]: [1mnull[22m,
+      [caller]: [1mnull[22m,
+      [prototype]: { [constructor]: [36m[Circular *5][39m }
+    },
+    [36m<ref *6>[39m [Function: runTranspilers] {
+      [length]: [33m1[39m,
+      [name]: [32m'runTranspilers'[39m,
+      [arguments]: [1mnull[22m,
+      [caller]: [1mnull[22m,
+      [prototype]: { [constructor]: [36m[Circular *6][39m }
+    },
+    [AsyncFunction: runUploadSourceMapsToSentry] {
+      [length]: [33m1[39m,
+      [name]: [32m'runUploadSourceMapsToSentry'[39m,
+      [2m[[32mSymbol(Symbol.toStringTag)[39m]: [32m'AsyncFunction'[39m[22m
+    },
+    [length]: [33m7[39m
+  ]
+}
+---> Resolving symlinks
+---> Packaging for 1s
+---> Packaging for 2s
+---> Packaging for 3s
+Packaging app for platform darwin arm64 using electron v44.9.1
+---> Packaging for 4s
+---> Packaging for 5s
+---> Packaging for 6s
+---> Packaging for 7s
+---> Packaging for 8s
+---> Packaging for 9s
+---> Packaging for 10s
+---> Packaging for 11s
+---> Packaging for 12s
+---> Could not find chrome-sandbox to change permissions
+---> Moving symlinked node modules / internal packages into build folder.
+---> Running TypeScript Compiler
+  ---> Compiling /internal_packages/account-sidebar/lib/account-commands.ts
+  ---> Compiling /internal_packages/account-sidebar/lib/main.ts
+  ---> Compiling /internal_packages/account-sidebar/lib/mbox-export-runner.ts
+  ---> Compiling /internal_packages/account-sidebar/lib/sidebar-actions.ts
+  ---> Compiling /internal_packages/account-sidebar/lib/sidebar-item.ts
+  ---> Compiling /internal_packages/account-sidebar/lib/sidebar-section.ts
+  ---> Compiling /internal_packages/account-sidebar/lib/sidebar-store.ts
+  ---> Compiling /internal_packages/account-sidebar/lib/types.ts
+  ---> Compiling /internal_packages/account-sidebar/specs/sidebar-item-spec.es6.ts
+  ---> Compiling /internal_packages/activity/lib/activity-actions.ts
+  ---> Compiling /internal_packages/activity/lib/activity-data-source.ts
+  ---> Compiling /internal_packages/activity/lib/activity-events.ts
+  ---> Compiling /internal_packages/activity/lib/csv-export.ts
+  ---> Compiling /internal_packages/activity/lib/engagement/engagement-stats.ts
+  ---> Compiling /internal_packages/activity/lib/engagement/engagement-tiers.ts
+  ---> Compiling /internal_packages/activity/lib/feed/feed-csv-export.ts
+  ---> Compiling /internal_packages/activity/lib/message-scan.ts
+  ---> Compiling /internal_packages/activity/lib/plugin-helpers.ts
+  ---> Compiling /internal_packages/activity/lib/timespan.ts
+  ---> Compiling /internal_packages/attachments/lib/main.ts
+  ---> Compiling /internal_packages/category-mapper/lib/main.ts
+  ---> Compiling /internal_packages/category-picker/lib/types.ts
+  ---> Compiling /internal_packages/composer-grammar-check/lib/grammar-check-service.ts
+  ---> Compiling /internal_packages/composer-grammar-check/lib/grammar-check-store.ts
+  ---> Compiling /internal_packages/composer-grammar-check/lib/main.ts
+  ---> Compiling /internal_packages/composer-signature/lib/constants.ts
+  ---> Compiling /internal_packages/composer-signature/lib/main.ts
+  ---> Compiling /internal_packages/composer-signature/lib/signature-composer-extension.ts
+  ---> Compiling /internal_packages/composer-signature/lib/signature-utils.ts
+  ---> Compiling /internal_packages/composer-signature/specs/signature-composer-extension-spec.ts
+  ---> Compiling /internal_packages/composer-signature/specs/signature-utils-spec.ts
+  ---> Compiling /internal_packages/composer-templates/lib/main.ts
+  ---> Compiling /internal_packages/composer-templates/lib/template-composer-extension.ts
+  ---> Compiling /internal_packages/composer-templates/lib/template-file.ts
+  ---> Compiling /internal_packages/composer-templates/lib/template-store.ts
+  ---> Compiling /internal_packages/composer-templates/specs/template-file-spec.ts
+  ---> Compiling /internal_packages/composer-templates/specs/template-store-spec.ts
+  ---> Compiling /internal_packages/composer/lib/fields.ts
+  ---> Compiling /internal_packages/contacts/lib/ContactDisplayName.ts
+  ---> Compiling /internal_packages/contacts/lib/ContactInfoMapping.ts
+  ---> Compiling /internal_packages/contacts/lib/ContactListContextMenu.ts
+  ---> Compiling /internal_packages/contacts/lib/GoogleSupport.ts
+  ---> Compiling /internal_packages/contacts/lib/Store.ts
+  ---> Compiling /internal_packages/contacts/lib/VCFHelpers.ts
+  ---> Compiling /internal_packages/contacts/lib/VCFImportExport.ts
+  ---> Compiling /internal_packages/contacts/specs/contact-detail-spec.ts
+  ---> Compiling /internal_packages/contacts/specs/contact-display-name-spec.ts
+  ---> Compiling /internal_packages/contacts/specs/contact-info-mapping-spec.ts
+  ---> Compiling /internal_packages/contacts/specs/store-start-spec.ts
+  ---> Compiling /internal_packages/contacts/specs/vcf-helpers-spec.ts
+  ---> Compiling /internal_packages/custom-sounds/lib/main.ts
+  ---> Compiling /internal_packages/draft-list/lib/draft-list-store.ts
+  ---> Compiling /internal_packages/draft-list/lib/main.ts
+  ---> Compiling /internal_packages/events/lib/ics-attachment.ts
+  ---> Compiling /internal_packages/events/lib/invitation-calendar-refresh.ts
+  ---> Compiling /internal_packages/events/lib/invitation-versions.ts
+  ---> Compiling /internal_packages/events/lib/rsvp-target.ts
+  ---> Compiling /internal_packages/events/specs/events-package-spec.ts
+  ---> Compiling /internal_packages/events/specs/invitation-calendar-refresh-spec.ts
+  ---> Compiling /internal_packages/events/specs/invitation-versions-spec.ts
+  ---> Compiling /internal_packages/events/specs/rsvp-target-spec.ts
+  ---> Compiling /internal_packages/github-contact-card/lib/github-user-store.ts
+  ---> Compiling /internal_packages/link-tracking/lib/link-tracking-composer-extension.ts
+  ---> Compiling /internal_packages/link-tracking/lib/link-tracking-constants.ts
+  ---> Compiling /internal_packages/link-tracking/lib/main.ts
+  ---> Compiling /internal_packages/link-tracking/lib/types.ts
+  ---> Compiling /internal_packages/list-unsubscribe/lib/unsubscribe-service.ts
+  ---> Compiling /internal_packages/list-unsubscribe/specs/unsubscribe-service-spec.ts
+  ---> Compiling /internal_packages/main-calendar/lib/core/calendar-constants.ts
+  ---> Compiling /internal_packages/main-calendar/lib/core/calendar-data-source.ts
+  ---> Compiling /internal_packages/main-calendar/lib/core/calendar-drag-types.ts
+  ---> Compiling /internal_packages/main-calendar/lib/core/calendar-drag-utils.ts
+  ---> Compiling /internal_packages/main-calendar/lib/core/calendar-event-context-menu.ts
+  ---> Compiling /internal_packages/main-calendar/lib/core/calendar-header-store.ts
+  ---> Compiling /internal_packages/main-calendar/lib/core/calendar-rsvp.ts
+  ---> Compiling /internal_packages/main-calendar/lib/core/focused-moment-store.ts
+  ---> Compiling /internal_packages/main-calendar/lib/core/month-view-helpers.ts
+  ---> Compiling /internal_packages/main-calendar/lib/core/recurring-event-actions.ts
+  ---> Compiling /internal_packages/main-calendar/lib/core/recurring-event-dialog.ts
+  ---> Compiling /internal_packages/main-calendar/lib/core/unsent-change-dialog.ts
+  ---> Compiling /internal_packages/main-calendar/lib/core/unsent-change.ts
+  ---> Compiling /internal_packages/main-calendar/lib/core/visible-range-store.ts
+  ---> Compiling /internal_packages/main-calendar/lib/core/week-view-helpers.ts
+  ---> Compiling /internal_packages/mcp-server/lib/claude-desktop-config.ts
+  ---> Compiling /internal_packages/mcp-server/lib/main.ts
+  ---> Compiling /internal_packages/mcp-server/lib/mcp-access-control.ts
+  ---> Compiling /internal_packages/mcp-server/lib/mcp-http-server.ts
+  ---> Compiling /internal_packages/mcp-server/lib/mcp-schema-runtime.ts
+  ---> Compiling /internal_packages/mcp-server/lib/mcp-serializers.ts
+  ---> Compiling /internal_packages/mcp-server/lib/mcp-server-manager.ts
+  ---> Compiling /internal_packages/mcp-server/lib/mcp-tools.ts
+  ---> Compiling /internal_packages/mcp-server/lib/paper-reed-cli.ts
+  ---> Compiling /internal_packages/mcp-server/specs/mcp-access-level-spec.ts
+  ---> Compiling /internal_packages/mcp-server/specs/mcp-attachment-tools-spec.ts
+  ---> Compiling /internal_packages/mcp-server/specs/mcp-draft-tools-spec.ts
+  ---> Compiling /internal_packages/mcp-server/specs/mcp-filter-spec.ts
+  ---> Compiling /internal_packages/mcp-server/specs/mcp-http-server-spec.ts
+  ---> Compiling /internal_packages/mcp-server/specs/mcp-stdio-bridge-spec.ts
+  ---> Compiling /internal_packages/message-autoload-images/lib/autoload-images-actions.ts
+  ---> Compiling /internal_packages/message-autoload-images/lib/autoload-images-store.ts
+  ---> Compiling /internal_packages/message-autoload-images/lib/main.ts
+  ---> Compiling /internal_packages/message-autoload-images/specs/autoload-images-extension-spec.ts
+  ---> Compiling /internal_packages/message-list/lib/adjust-images.ts
+  ---> Compiling /internal_packages/message-list/lib/email-color-detection.ts
+  ---> Compiling /internal_packages/message-list/lib/email-frame-styles-store.ts
+  ---> Compiling /internal_packages/message-list/specs/email-color-detection-spec.ts
+  ---> Compiling /internal_packages/message-list/specs/email-frame-spec.ts
+  ---> Compiling /internal_packages/message-list/specs/email-frame-styles-store-spec.ts
+  ---> Compiling /internal_packages/message-view-on-github/lib/github-store.ts
+  ---> Compiling /internal_packages/mode-switch/lib/main.ts
+  ---> Compiling /internal_packages/notifications/lib/main.ts
+  ---> Compiling /internal_packages/onboarding/lib/certificate-review.ts
+  ---> Compiling /internal_packages/onboarding/lib/main.ts
+  ---> Compiling /internal_packages/onboarding/lib/onboarding-actions.ts
+  ---> Compiling /internal_packages/onboarding/lib/onboarding-constants.ts
+  ---> Compiling /internal_packages/onboarding/lib/onboarding-helpers.ts
+  ---> Compiling /internal_packages/onboarding/lib/onboarding-store.ts
+  ---> Compiling /internal_packages/onboarding/lib/paper-reed-google-auth.ts
+  ---> Compiling /internal_packages/onboarding/specs/certificate-review-spec.ts
+  ---> Compiling /internal_packages/onboarding/specs/microsoft-graph-send-spec.ts
+  ---> Compiling /internal_packages/onboarding/specs/oauth-signin-page-spec.ts
+  ---> Compiling /internal_packages/onboarding/specs/onboarding-helpers-spec.ts
+  ---> Compiling /internal_packages/onboarding/specs/page-account-settings-spec.ts
+  ---> Compiling /internal_packages/open-tracking/lib/main.ts
+  ---> Compiling /internal_packages/open-tracking/lib/open-tracking-composer-extension.ts
+  ---> Compiling /internal_packages/open-tracking/lib/open-tracking-constants.ts
+  ---> Compiling /internal_packages/open-tracking/lib/types.ts
+  ---> Compiling /internal_packages/open-tracking/specs/graph-shared-body-spec.ts
+  ---> Compiling /internal_packages/open-tracking/specs/open-tracking-composer-extension-spec.ts
+  ---> Compiling /internal_packages/participant-profile/lib/main.ts
+  ---> Compiling /internal_packages/participant-profile/lib/participant-profile-data-source.ts
+  ---> Compiling /internal_packages/personal-level-indicators/lib/main.ts
+  ---> Compiling /internal_packages/preferences/lib/tabs/keymaps/displayed-keybindings.ts
+  ---> Compiling /internal_packages/preferences/lib/types.ts
+  ---> Compiling /internal_packages/print/lib/main.ts
+  ---> Compiling /internal_packages/print/lib/print-window.ts
+  ---> Compiling /internal_packages/print/lib/printer.ts
+  ---> Compiling /internal_packages/remove-tracking-pixels/lib/main.ts
+  ---> Compiling /internal_packages/remove-tracking-pixels/specs/tracking-pixels-extension-spec.ts
+  ---> Compiling /internal_packages/screenshot-mode/lib/main.ts
+  ---> Compiling /internal_packages/screenshot-mode/lib/screenshot-mode-message-extension.ts
+  ---> Compiling /internal_packages/send-and-archive/lib/main.ts
+  ---> Compiling /internal_packages/send-and-archive/lib/send-and-archive-extension.ts
+  ---> Compiling /internal_packages/send-and-archive/specs/send-and-archive-spec.ts
+  ---> Compiling /internal_packages/send-later/lib/main.ts
+  ---> Compiling /internal_packages/send-later/lib/send-later-constants.ts
+  ---> Compiling /internal_packages/send-reminders/lib/main.ts
+  ---> Compiling /internal_packages/send-reminders/lib/send-reminders-account-sidebar-extension.ts
+  ---> Compiling /internal_packages/send-reminders/lib/send-reminders-constants.ts
+  ---> Compiling /internal_packages/send-reminders/lib/send-reminders-mailbox-perspective.ts
+  ---> Compiling /internal_packages/send-reminders/lib/send-reminders-store.ts
+  ---> Compiling /internal_packages/send-reminders/lib/send-reminders-thread-list-extension.ts
+  ---> Compiling /internal_packages/send-reminders/lib/send-reminders-utils.ts
+  ---> Compiling /internal_packages/send-reminders/lib/types.ts
+  ---> Compiling /internal_packages/send-reminders/specs/send-reminders-store-spec.ts
+  ---> Compiling /internal_packages/system-tray/lib/main.ts
+  ---> Compiling /internal_packages/system-tray/lib/system-tray-icon-store.ts
+  ---> Compiling /internal_packages/system-tray/specs/system-tray-icon-store-spec.ts
+  ---> Compiling /internal_packages/thread-list/lib/main.ts
+  ---> Compiling /internal_packages/thread-list/lib/thread-list-aria-utils.ts
+  ---> Compiling /internal_packages/thread-list/lib/thread-list-context-menu.ts
+  ---> Compiling /internal_packages/thread-list/lib/thread-list-data-source.ts
+  ---> Compiling /internal_packages/thread-list/lib/thread-list-store.ts
+  ---> Compiling /internal_packages/thread-list/lib/thread-permalink-handler.ts
+  ---> Compiling /internal_packages/thread-list/lib/types.ts
+  ---> Compiling /internal_packages/thread-list/specs/thread-list-context-menu-spec.ts
+  ---> Compiling /internal_packages/thread-search/lib/search-bar-util.ts
+  ---> Compiling /internal_packages/thread-search/lib/search-query-subscription.ts
+  ---> Compiling /internal_packages/thread-search/lib/search-store.ts
+  ---> Compiling /internal_packages/thread-search/specs/search-bar-util-spec.ts
+  ---> Compiling /internal_packages/thread-search/specs/search-query-subscription-spec.ts
+  ---> Compiling /internal_packages/thread-snooze/lib/main.ts
+  ---> Compiling /internal_packages/thread-snooze/lib/snooze-account-sidebar-extension.ts
+  ---> Compiling /internal_packages/thread-snooze/lib/snooze-actions.ts
+  ---> Compiling /internal_packages/thread-snooze/lib/snooze-constants.ts
+  ---> Compiling /internal_packages/thread-snooze/lib/snooze-store.ts
+  ---> Compiling /internal_packages/thread-snooze/lib/snooze-utils.ts
+  ---> Compiling /internal_packages/translation/lib/service.ts
+  ---> Compiling /internal_packages/undo-redo/lib/main.ts
+  ---> Compiling /internal_packages/unread-notifications/lib/main.ts
+  ---> Compiling /internal_packages/views/lib/agent/client.ts
+  ---> Compiling /internal_packages/views/lib/agent/examples.ts
+  ---> Compiling /internal_packages/views/lib/agent/index.ts
+  ---> Compiling /internal_packages/views/lib/agent/quota.ts
+  ---> Compiling /internal_packages/views/lib/agent/signing.ts
+  ---> Compiling /internal_packages/views/lib/agent/store.ts
+  ---> Compiling /internal_packages/views/lib/agent/tools.ts
+  ---> Compiling /internal_packages/views/lib/agent/types.ts
+  ---> Compiling /internal_packages/views/lib/api-version.ts
+  ---> Compiling /internal_packages/views/lib/authoring-panel/index.ts
+  ---> Compiling /internal_packages/views/lib/authoring-panel/launch.ts
+  ---> Compiling /internal_packages/views/lib/authoring-panel/store.ts
+  ---> Compiling /internal_packages/views/lib/authoring-panel/types.ts
+  ---> Compiling /internal_packages/views/lib/authoring/diagnostics.ts
+  ---> Compiling /internal_packages/views/lib/authoring/hosts.ts
+  ---> Compiling /internal_packages/views/lib/authoring/index.ts
+  ---> Compiling /internal_packages/views/lib/authoring/preview.ts
+  ---> Compiling /internal_packages/views/lib/authoring/revisions.ts
+  ---> Compiling /internal_packages/views/lib/authoring/watcher.ts
+  ---> Compiling /internal_packages/views/lib/bridge/bodies.ts
+  ---> Compiling /internal_packages/views/lib/bridge/calendar.ts
+  ---> Compiling /internal_packages/views/lib/bridge/content.ts
+  ---> Compiling /internal_packages/views/lib/bridge/counts.ts
+  ---> Compiling /internal_packages/views/lib/bridge/credentials.ts
+  ---> Compiling /internal_packages/views/lib/bridge/errors.ts
+  ---> Compiling /internal_packages/views/lib/bridge/events.ts
+  ---> Compiling /internal_packages/views/lib/bridge/extract.ts
+  ---> Compiling /internal_packages/views/lib/bridge/generate.ts
+  ---> Compiling /internal_packages/views/lib/bridge/grant.ts
+  ---> Compiling /internal_packages/views/lib/bridge/handlers.ts
+  ---> Compiling /internal_packages/views/lib/bridge/renderable.ts
+  ---> Compiling /internal_packages/views/lib/bridge/serializers.ts
+  ---> Compiling /internal_packages/views/lib/bridge/view-events.ts
+  ---> Compiling /internal_packages/views/lib/consent.ts
+  ---> Compiling /internal_packages/views/lib/credentials/store.ts
+  ---> Compiling /internal_packages/views/lib/extraction/normalize.ts
+  ---> Compiling /internal_packages/views/lib/extraction/prompt.ts
+  ---> Compiling /internal_packages/views/lib/home/starter-posters.ts
+  ---> Compiling /internal_packages/views/lib/home/starters.ts
+  ---> Compiling /internal_packages/views/lib/home/thumbnails.ts
+  ---> Compiling /internal_packages/views/lib/home/view-actions.ts
+  ---> Compiling /internal_packages/views/lib/local-model/view-status.ts
+  ---> Compiling /internal_packages/views/lib/main.ts
+  ---> Compiling /internal_packages/views/lib/mock/mock-bridge.ts
+  ---> Compiling /internal_packages/views/lib/mock/mock-data.ts
+  ---> Compiling /internal_packages/views/lib/mock/mock-query.ts
+  ---> Compiling /internal_packages/views/lib/nav/badges.ts
+  ---> Compiling /internal_packages/views/lib/nav/pins.ts
+  ---> Compiling /internal_packages/views/lib/sharing/client.ts
+  ---> Compiling /internal_packages/views/lib/sharing/index.ts
+  ---> Compiling /internal_packages/views/lib/sharing/install.ts
+  ---> Compiling /internal_packages/views/lib/sharing/posters.ts
+  ---> Compiling /internal_packages/views/lib/sharing/publish.ts
+  ---> Compiling /internal_packages/views/lib/sharing/share-link.ts
+  ---> Compiling /internal_packages/views/lib/sidebar/sidebar-options.ts
+  ---> Compiling /internal_packages/views/lib/theme-tokens.ts
+  ---> Compiling /internal_packages/views/lib/view-bridge.ts
+  ---> Compiling /internal_packages/views/lib/view-registry.ts
+  ---> Compiling /internal_packages/views/lib/views-nav.ts
+  ---> Compiling /internal_packages/views/specs/view-agent-spec.ts
+  ---> Compiling /internal_packages/views/specs/view-api-version-spec.ts
+  ---> Compiling /internal_packages/views/specs/view-authoring-spec.ts
+  ---> Compiling /internal_packages/views/specs/view-bridge-spec.ts
+  ---> Compiling /internal_packages/views/specs/view-calendar-spec.ts
+  ---> Compiling /internal_packages/views/specs/view-consent-spec.ts
+  ---> Compiling /internal_packages/views/specs/view-credentials-spec.ts
+  ---> Compiling /internal_packages/views/specs/view-diagnostics-spec.ts
+  ---> Compiling /internal_packages/views/specs/view-extraction-spec.ts
+  ---> Compiling /internal_packages/views/specs/view-generation-spec.ts
+  ---> Compiling /internal_packages/views/specs/view-home-spec.ts
+  ---> Compiling /internal_packages/views/specs/view-mock-spec.ts
+  ---> Compiling /internal_packages/views/specs/view-nav-spec.ts
+  ---> Compiling /internal_packages/views/specs/view-panel-launch-spec.ts
+  ---> Compiling /internal_packages/views/specs/view-query-spec.ts
+  ---> Compiling /internal_packages/views/specs/view-quota-spec.ts
+  ---> Compiling /internal_packages/views/specs/view-sharing-spec.ts
+  ---> Compiling /internal_packages/views/specs/view-signing-helpers.ts
+  ---> Compiling /internal_packages/account-sidebar/lib/components/account-sidebar.tsx
+  ---> Compiling /internal_packages/account-sidebar/lib/components/account-switcher.tsx
+  ---> Compiling /internal_packages/activity/lib/account-selector.tsx
+  ---> Compiling /internal_packages/activity/lib/activity-event-store.tsx
+  ---> Compiling /internal_packages/activity/lib/dashboard/loading-cover.tsx
+  ---> Compiling /internal_packages/activity/lib/dashboard/metrics-components.tsx
+  ---> Compiling /internal_packages/activity/lib/dashboard/root.tsx
+  ---> Compiling /internal_packages/activity/lib/dashboard/share-button.tsx
+  ---> Compiling /internal_packages/activity/lib/engagement/engagement-board.tsx
+  ---> Compiling /internal_packages/activity/lib/engagement/engagement-card.tsx
+  ---> Compiling /internal_packages/activity/lib/feed/activity-feed-empty-state.tsx
+  ---> Compiling /internal_packages/activity/lib/feed/activity-feed-table.tsx
+  ---> Compiling /internal_packages/activity/lib/feed/activity-feed-toolbar.tsx
+  ---> Compiling /internal_packages/activity/lib/feed/activity-feed.tsx
+  ---> Compiling /internal_packages/activity/lib/list/activity-list-button.tsx
+  ---> Compiling /internal_packages/activity/lib/list/activity-list-empty-state.tsx
+  ---> Compiling /internal_packages/activity/lib/list/activity-list-item-container.tsx
+  ---> Compiling /internal_packages/activity/lib/list/activity-list.tsx
+  ---> Compiling /internal_packages/activity/lib/main.tsx
+  ---> Compiling /internal_packages/activity/lib/root.tsx
+  ---> Compiling /internal_packages/activity/lib/segmented-control.tsx
+  ---> Compiling /internal_packages/activity/lib/timespan-selector.tsx
+  ---> Compiling /internal_packages/attachments/lib/message-attachments.tsx
+  ---> Compiling /internal_packages/category-mapper/lib/category-selection.tsx
+  ---> Compiling /internal_packages/category-mapper/lib/preferences-category-mapper.tsx
+  ---> Compiling /internal_packages/category-picker/lib/label-picker-popover.tsx
+  ---> Compiling /internal_packages/category-picker/lib/main.tsx
+  ---> Compiling /internal_packages/category-picker/lib/move-picker-popover.tsx
+  ---> Compiling /internal_packages/category-picker/lib/toolbar-category-picker.tsx
+  ---> Compiling /internal_packages/category-picker/specs/category-picker-spec.tsx
+  ---> Compiling /internal_packages/composer-grammar-check/lib/grammar-check-toggle.tsx
+  ---> Compiling /internal_packages/composer-signature/lib/preferences-signatures.tsx
+  ---> Compiling /internal_packages/composer-signature/lib/signature-account-default-picker.tsx
+  ---> Compiling /internal_packages/composer-signature/lib/signature-composer-dropdown.tsx
+  ---> Compiling /internal_packages/composer-signature/lib/signature-photo-picker.tsx
+  ---> Compiling /internal_packages/composer-signature/lib/signature-template-picker.tsx
+  ---> Compiling /internal_packages/composer-signature/lib/templates.tsx
+  ---> Compiling /internal_packages/composer-signature/specs/preferences-signatures-spec.tsx
+  ---> Compiling /internal_packages/composer-signature/specs/signature-composer-dropdown-spec.tsx
+  ---> Compiling /internal_packages/composer-signature/specs/signature-store-spec.tsx
+  ---> Compiling /internal_packages/composer-templates/lib/preferences-templates.tsx
+  ---> Compiling /internal_packages/composer-templates/lib/template-picker.tsx
+  ---> Compiling /internal_packages/composer-templates/lib/template-status-bar.tsx
+  ---> Compiling /internal_packages/composer/lib/account-contact-field.tsx
+  ---> Compiling /internal_packages/composer/lib/action-bar-plugins.tsx
+  ---> Compiling /internal_packages/composer/lib/attachments-area.tsx
+  ---> Compiling /internal_packages/composer/lib/compose-button.tsx
+  ---> Compiling /internal_packages/composer/lib/composer-header-actions.tsx
+  ---> Compiling /internal_packages/composer/lib/composer-header.tsx
+  ---> Compiling /internal_packages/composer/lib/composer-view.tsx
+  ---> Compiling /internal_packages/composer/lib/main.tsx
+  ---> Compiling /internal_packages/composer/lib/quoted-text-control.tsx
+  ---> Compiling /internal_packages/composer/lib/send-action-button.tsx
+  ---> Compiling /internal_packages/composer/specs/composer-header-actions-spec.tsx
+  ---> Compiling /internal_packages/composer/specs/composer-header-spec.tsx
+  ---> Compiling /internal_packages/composer/specs/send-action-button-spec.tsx
+  ---> Compiling /internal_packages/contacts/lib/AddContactToolbar.tsx
+  ---> Compiling /internal_packages/contacts/lib/BirthdayInput.tsx
+  ---> Compiling /internal_packages/contacts/lib/ContactDetail.tsx
+  ---> Compiling /internal_packages/contacts/lib/ContactDetailEdit.tsx
+  ---> Compiling /internal_packages/contacts/lib/ContactDetailRead.tsx
+  ---> Compiling /internal_packages/contacts/lib/ContactDetailToolbar.tsx
+  ---> Compiling /internal_packages/contacts/lib/ContactField.tsx
+  ---> Compiling /internal_packages/contacts/lib/ContactList.tsx
+  ---> Compiling /internal_packages/contacts/lib/ContactPerspectivesList.tsx
+  ---> Compiling /internal_packages/contacts/lib/FoundInMailEnabledBar.tsx
+  ---> Compiling /internal_packages/contacts/lib/ListEditor.tsx
+  ---> Compiling /internal_packages/contacts/lib/main.tsx
+  ---> Compiling /internal_packages/contacts/lib/TypeaheadFreeInput.tsx
+  ---> Compiling /internal_packages/draft-list/lib/draft-list-columns.tsx
+  ---> Compiling /internal_packages/draft-list/lib/draft-list-send-status.tsx
+  ---> Compiling /internal_packages/draft-list/lib/draft-list-toolbar.tsx
+  ---> Compiling /internal_packages/draft-list/lib/draft-list.tsx
+  ---> Compiling /internal_packages/draft-list/lib/draft-toolbar-buttons.tsx
+  ---> Compiling /internal_packages/draft-list/lib/sending-progress-bar.tsx
+  ---> Compiling /internal_packages/events/lib/event-header.tsx
+  ---> Compiling /internal_packages/events/lib/main.tsx
+  ---> Compiling /internal_packages/events/specs/event-header-spec.tsx
+  ---> Compiling /internal_packages/github-contact-card/lib/github-contact-card-section.tsx
+  ---> Compiling /internal_packages/github-contact-card/lib/main.tsx
+  ---> Compiling /internal_packages/link-tracking/lib/link-tracking-button.tsx
+  ---> Compiling /internal_packages/link-tracking/lib/link-tracking-message-extension.tsx
+  ---> Compiling /internal_packages/link-tracking/lib/link-tracking-message-popover.tsx
+  ---> Compiling /internal_packages/list-unsubscribe/lib/main.tsx
+  ---> Compiling /internal_packages/list-unsubscribe/lib/unsubscribe-header.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/calendar-menu-commands.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/agenda-container.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/agenda-panel.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/alert-selector.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/all-day-toggle.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/attendee-status.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/calendar-color-picker.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/calendar-empty-state.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/calendar-event-container.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/calendar-event-popover.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/calendar-event.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/calendar-header.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/calendar-helpers.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/calendar-sidebar.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/calendar-source-list.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/clear-button.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/current-time-indicator.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/event-attendees-input.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/event-grid-background.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/event-panel-text-field.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/event-panel.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/event-popover-actions.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/event-property-row.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/event-search-bar.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/header-controls.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/location-video-input.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/mailspring-calendar.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/month-view-day-cell.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/month-view-event.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/month-view-week.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/month-view.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/repeat-selector.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/scroll-back-area.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/show-as-selector.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/time-grid-view.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/timezone-selector.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/week-view-all-day-events.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/week-view-event-column.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/core/weekday-header.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/main.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/quick-event-button.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/quick-event-popover.tsx
+  ---> Compiling /internal_packages/main-calendar/lib/sidebar-calendar-panel.tsx
+  ---> Compiling /internal_packages/mcp-server/lib/preferences-mcp-accounts.tsx
+  ---> Compiling /internal_packages/mcp-server/lib/preferences-mcp-audit.tsx
+  ---> Compiling /internal_packages/mcp-server/lib/preferences-mcp.tsx
+  ---> Compiling /internal_packages/mcp-server/lib/preferences-paper-reed-cli.tsx
+  ---> Compiling /internal_packages/message-autoload-images/lib/autoload-images-header.tsx
+  ---> Compiling /internal_packages/message-list/lib/email-frame.tsx
+  ---> Compiling /internal_packages/message-list/lib/find-in-thread.tsx
+  ---> Compiling /internal_packages/message-list/lib/main.tsx
+  ---> Compiling /internal_packages/message-list/lib/message-controls.tsx
+  ---> Compiling /internal_packages/message-list/lib/message-item-body.tsx
+  ---> Compiling /internal_packages/message-list/lib/message-item-container.tsx
+  ---> Compiling /internal_packages/message-list/lib/message-item.tsx
+  ---> Compiling /internal_packages/message-list/lib/message-list-hidden-messages-toggle.tsx
+  ---> Compiling /internal_packages/message-list/lib/message-list-scroll-tooltip.tsx
+  ---> Compiling /internal_packages/message-list/lib/message-list.tsx
+  ---> Compiling /internal_packages/message-list/lib/message-participants.tsx
+  ---> Compiling /internal_packages/message-list/lib/message-timestamp.tsx
+  ---> Compiling /internal_packages/message-list/lib/sidebar-panels.tsx
+  ---> Compiling /internal_packages/message-list/lib/sidebar-participant-picker.tsx
+  ---> Compiling /internal_packages/message-list/lib/sidebar-plugin-container.tsx
+  ---> Compiling /internal_packages/message-list/lib/subject-line-icons.tsx
+  ---> Compiling /internal_packages/message-list/specs/message-item-body-spec.tsx
+  ---> Compiling /internal_packages/message-list/specs/message-item-container-spec.tsx
+  ---> Compiling /internal_packages/message-list/specs/message-item-spec.tsx
+  ---> Compiling /internal_packages/message-list/specs/message-list-spec.tsx
+  ---> Compiling /internal_packages/message-list/specs/message-participants-spec.tsx
+  ---> Compiling /internal_packages/message-list/specs/message-timestamp-spec.tsx
+  ---> Compiling /internal_packages/message-list/specs/sidebar-panels-spec.tsx
+  ---> Compiling /internal_packages/message-view-on-github/lib/main.tsx
+  ---> Compiling /internal_packages/message-view-on-github/lib/view-on-github-button.tsx
+  ---> Compiling /internal_packages/mode-switch/lib/mode-toggle.tsx
+  ---> Compiling /internal_packages/notifications/lib/items/account-error-notif.tsx
+  ---> Compiling /internal_packages/notifications/lib/items/default-client-notif.tsx
+  ---> Compiling /internal_packages/notifications/lib/items/dev-mode-notif.tsx
+  ---> Compiling /internal_packages/notifications/lib/items/disabled-mail-rules-notif.tsx
+  ---> Compiling /internal_packages/notifications/lib/items/offline-notification.tsx
+  ---> Compiling /internal_packages/notifications/lib/items/please-subscribe-notif.tsx
+  ---> Compiling /internal_packages/notifications/lib/items/update-notification.tsx
+  ---> Compiling /internal_packages/notifications/lib/notif-wrapper.tsx
+  ---> Compiling /internal_packages/notifications/lib/sidebar/activity-sidebar.tsx
+  ---> Compiling /internal_packages/notifications/lib/sidebar/export-activity.tsx
+  ---> Compiling /internal_packages/notifications/lib/sidebar/sync-activity.tsx
+  ---> Compiling /internal_packages/notifications/lib/sidebar/syncback-activity.tsx
+  ---> Compiling /internal_packages/notifications/specs/account-error-notif-spec.tsx
+  ---> Compiling /internal_packages/notifications/specs/default-client-notif-spec.tsx
+  ---> Compiling /internal_packages/notifications/specs/dev-mode-notif-spec.tsx
+  ---> Compiling /internal_packages/notifications/specs/disabled-mail-rules-notif-spec.tsx
+  ---> Compiling /internal_packages/notifications/specs/priority-spec.tsx
+  ---> Compiling /internal_packages/notifications/specs/update-notification-spec.tsx
+  ---> Compiling /internal_packages/onboarding/lib/account-providers.tsx
+  ---> Compiling /internal_packages/onboarding/lib/decorators/create-page-for-form.tsx
+  ---> Compiling /internal_packages/onboarding/lib/form-error-message.tsx
+  ---> Compiling /internal_packages/onboarding/lib/form-field.tsx
+  ---> Compiling /internal_packages/onboarding/lib/newsletter-signup.tsx
+  ---> Compiling /internal_packages/onboarding/lib/oauth-signin-page.tsx
+  ---> Compiling /internal_packages/onboarding/lib/onboarding-root.tsx
+  ---> Compiling /internal_packages/onboarding/lib/page-account-certificate.tsx
+  ---> Compiling /internal_packages/onboarding/lib/page-account-choose.tsx
+  ---> Compiling /internal_packages/onboarding/lib/page-account-onboarding-success.tsx
+  ---> Compiling /internal_packages/onboarding/lib/page-account-settings-gmail.tsx
+  ---> Compiling /internal_packages/onboarding/lib/page-account-settings-imap.tsx
+  ---> Compiling /internal_packages/onboarding/lib/page-account-settings-o365.tsx
+  ---> Compiling /internal_packages/onboarding/lib/page-account-settings-outlook.tsx
+  ---> Compiling /internal_packages/onboarding/lib/page-account-settings.tsx
+  ---> Compiling /internal_packages/onboarding/lib/page-authenticate.tsx
+  ---> Compiling /internal_packages/onboarding/lib/page-initial-preferences.tsx
+  ---> Compiling /internal_packages/onboarding/lib/page-initial-subscription.tsx
+  ---> Compiling /internal_packages/onboarding/lib/page-top-bar.tsx
+  ---> Compiling /internal_packages/onboarding/lib/page-tutorial.tsx
+  ---> Compiling /internal_packages/onboarding/lib/page-welcome.tsx
+  ---> Compiling /internal_packages/onboarding/lib/paper-reed-google-page.tsx
+  ---> Compiling /internal_packages/onboarding/specs/oauth-signin-page-fallback-spec.tsx
+  ---> Compiling /internal_packages/onboarding/specs/page-account-certificate-spec.tsx
+  ---> Compiling /internal_packages/open-tracking/lib/open-tracking-button.tsx
+  ---> Compiling /internal_packages/open-tracking/lib/open-tracking-icon.tsx
+  ---> Compiling /internal_packages/open-tracking/lib/open-tracking-message-popover.tsx
+  ---> Compiling /internal_packages/open-tracking/lib/open-tracking-message-status.tsx
+  ---> Compiling /internal_packages/open-tracking/specs/open-tracking-icon-spec.tsx
+  ---> Compiling /internal_packages/open-tracking/specs/open-tracking-message-status-spec.tsx
+  ---> Compiling /internal_packages/paper-reed/lib/command-panel.tsx
+  ---> Compiling /internal_packages/paper-reed/lib/draft-status.tsx
+  ---> Compiling /internal_packages/paper-reed/lib/mail-search.tsx
+  ---> Compiling /internal_packages/paper-reed/lib/main.tsx
+  ---> Compiling /internal_packages/paper-reed/lib/rules-settings.tsx
+  ---> Compiling /internal_packages/paper-reed/lib/triage-controls.tsx
+  ---> Compiling /internal_packages/paper-reed/lib/workspace.tsx
+  ---> Compiling /internal_packages/participant-profile/lib/sidebar-participant-profile.tsx
+  ---> Compiling /internal_packages/participant-profile/lib/sidebar-related-threads.tsx
+  ---> Compiling /internal_packages/personal-level-indicators/lib/personal-level-icon.tsx
+  ---> Compiling /internal_packages/phishing-detection/lib/main.tsx
+  ---> Compiling /internal_packages/phishing-detection/specs/main-spec.tsx
+  ---> Compiling /internal_packages/preferences/lib/main.tsx
+  ---> Compiling /internal_packages/preferences/lib/preferences-root.tsx
+  ---> Compiling /internal_packages/preferences/lib/preferences-tabs-bar.tsx
+  ---> Compiling /internal_packages/preferences/lib/tabs/config-schema-item.tsx
+  ---> Compiling /internal_packages/preferences/lib/tabs/keymaps/command-item.tsx
+  ---> Compiling /internal_packages/preferences/lib/tabs/language-section.tsx
+  ---> Compiling /internal_packages/preferences/lib/tabs/preferences-account-details.tsx
+  ---> Compiling /internal_packages/preferences/lib/tabs/preferences-account-list.tsx
+  ---> Compiling /internal_packages/preferences/lib/tabs/preferences-accounts.tsx
+  ---> Compiling /internal_packages/preferences/lib/tabs/preferences-appearance.tsx
+  ---> Compiling /internal_packages/preferences/lib/tabs/preferences-general.tsx
+  ---> Compiling /internal_packages/preferences/lib/tabs/preferences-identity.tsx
+  ---> Compiling /internal_packages/preferences/lib/tabs/preferences-keymaps.tsx
+  ---> Compiling /internal_packages/preferences/lib/tabs/preferences-mail-rules.tsx
+  ---> Compiling /internal_packages/preferences/lib/tabs/sending-section.tsx
+  ---> Compiling /internal_packages/preferences/lib/tabs/workspace-section.tsx
+  ---> Compiling /internal_packages/preferences/specs/preferences-account-details-spec.tsx
+  ---> Compiling /internal_packages/send-later/lib/send-later-button.tsx
+  ---> Compiling /internal_packages/send-later/lib/send-later-popover.tsx
+  ---> Compiling /internal_packages/send-later/lib/send-later-status.tsx
+  ---> Compiling /internal_packages/send-later/specs/send-later-button-spec.tsx
+  ---> Compiling /internal_packages/send-later/specs/send-later-popover-spec.tsx
+  ---> Compiling /internal_packages/send-reminders/lib/send-reminders-composer-button.tsx
+  ---> Compiling /internal_packages/send-reminders/lib/send-reminders-headers.tsx
+  ---> Compiling /internal_packages/send-reminders/lib/send-reminders-popover-button.tsx
+  ---> Compiling /internal_packages/send-reminders/lib/send-reminders-popover.tsx
+  ---> Compiling /internal_packages/send-reminders/lib/send-reminders-thread-timestamp.tsx
+  ---> Compiling /internal_packages/send-reminders/lib/send-reminders-toolbar-button.tsx
+  ---> Compiling /internal_packages/theme-picker/lib/main.tsx
+  ---> Compiling /internal_packages/theme-picker/lib/theme-option.tsx
+  ---> Compiling /internal_packages/theme-picker/lib/theme-picker.tsx
+  ---> Compiling /internal_packages/theme-picker/specs/theme-picker-spec.tsx
+  ---> Compiling /internal_packages/thread-list/lib/injects-toolbar-buttons.tsx
+  ---> Compiling /internal_packages/thread-list/lib/message-list-toolbar.tsx
+  ---> Compiling /internal_packages/thread-list/lib/selected-items-stack.tsx
+  ---> Compiling /internal_packages/thread-list/lib/thread-list-columns.tsx
+  ---> Compiling /internal_packages/thread-list/lib/thread-list-empty-folder-bar.tsx
+  ---> Compiling /internal_packages/thread-list/lib/thread-list-icon.tsx
+  ---> Compiling /internal_packages/thread-list/lib/thread-list-participants.tsx
+  ---> Compiling /internal_packages/thread-list/lib/thread-list-quick-actions.tsx
+  ---> Compiling /internal_packages/thread-list/lib/thread-list-scroll-tooltip.tsx
+  ---> Compiling /internal_packages/thread-list/lib/thread-list-toolbar.tsx
+  ---> Compiling /internal_packages/thread-list/lib/thread-list-vertical.tsx
+  ---> Compiling /internal_packages/thread-list/lib/thread-list.tsx
+  ---> Compiling /internal_packages/thread-list/lib/thread-toolbar-buttons.tsx
+  ---> Compiling /internal_packages/thread-list/specs/thread-list-participants-spec.tsx
+  ---> Compiling /internal_packages/thread-list/specs/thread-list-spec.tsx
+  ---> Compiling /internal_packages/thread-list/specs/thread-toolbar-buttons-spec.tsx
+  ---> Compiling /internal_packages/thread-search/lib/main.tsx
+  ---> Compiling /internal_packages/thread-search/lib/search-mailbox-perspective.tsx
+  ---> Compiling /internal_packages/thread-search/lib/thread-search-bar.tsx
+  ---> Compiling /internal_packages/thread-search/lib/tokenizing-contenteditable.tsx
+  ---> Compiling /internal_packages/thread-search/specs/search-bar-spec.tsx
+  ---> Compiling /internal_packages/thread-sharing/lib/copy-button.tsx
+  ---> Compiling /internal_packages/thread-sharing/lib/main.tsx
+  ---> Compiling /internal_packages/thread-sharing/lib/thread-sharing-button.tsx
+  ---> Compiling /internal_packages/thread-sharing/lib/thread-sharing-popover.tsx
+  ---> Compiling /internal_packages/thread-snooze/lib/snooze-buttons.tsx
+  ---> Compiling /internal_packages/thread-snooze/lib/snooze-mail-label.tsx
+  ---> Compiling /internal_packages/thread-snooze/lib/snooze-popover.tsx
+  ---> Compiling /internal_packages/translation/lib/composer-button.tsx
+  ---> Compiling /internal_packages/translation/lib/main.tsx
+  ---> Compiling /internal_packages/translation/lib/message-header.tsx
+  ---> Compiling /internal_packages/undo-redo/lib/undo-redo-toast.tsx
+  ---> Compiling /internal_packages/views/lib/authoring-panel/authoring-panel.tsx
+  ---> Compiling /internal_packages/views/lib/authoring-panel/edit-view-button.tsx
+  ---> Compiling /internal_packages/views/lib/authoring-panel/markdown.tsx
+  ---> Compiling /internal_packages/views/lib/credentials/credential-sheet.tsx
+  ---> Compiling /internal_packages/views/lib/home/views-home.tsx
+  ---> Compiling /internal_packages/views/lib/local-model/model-badge.tsx
+  ---> Compiling /internal_packages/views/lib/mock/mock-render.tsx
+  ---> Compiling /internal_packages/views/lib/nav/pin-view-button.tsx
+  ---> Compiling /internal_packages/views/lib/nav/views-nav-rail.tsx
+  ---> Compiling /internal_packages/views/lib/sharing/grant-summary.tsx
+  ---> Compiling /internal_packages/views/lib/sharing/install-sheet.tsx
+  ---> Compiling /internal_packages/views/lib/sharing/share-sheet.tsx
+  ---> Compiling /internal_packages/views/lib/sharing/share-view-button.tsx
+  ---> Compiling /internal_packages/views/lib/sidebar-view.tsx
+  ---> Compiling /internal_packages/views/lib/view-host.tsx
+  ---> Compiling /internal_packages/views/lib/views-root.tsx
+  ---> Compiling /src/app-env.ts
+  ---> Compiling /src/backoff-schedulers.ts
+  ---> Compiling /src/browser/apple-fm.ts
+  ---> Compiling /src/browser/application-menu.ts
+  ---> Compiling /src/browser/application.ts
+  ---> Compiling /src/browser/autoupdate-impl-base.ts
+  ---> Compiling /src/browser/autoupdate-impl-win32.ts
+  ---> Compiling /src/browser/autoupdate-manager.ts
+  ---> Compiling /src/browser/auxiliary-window-guard.ts
+  ---> Compiling /src/browser/config-migrator.ts
+  ---> Compiling /src/browser/config-persistence-manager.ts
+  ---> Compiling /src/browser/credential-store.ts
+  ---> Compiling /src/browser/file-list-cache.ts
+  ---> Compiling /src/browser/hardware-acceleration-recovery.ts
+  ---> Compiling /src/browser/is-wayland.ts
+  ---> Compiling /src/browser/local-ai-model.ts
+  ---> Compiling /src/browser/local-ai-service.ts
+  ---> Compiling /src/browser/local-model-provider.ts
+  ---> Compiling /src/browser/local-model.ts
+  ---> Compiling /src/browser/mailspring-protocol-handler.ts
+  ---> Compiling /src/browser/mailspring-window.ts
+  ---> Compiling /src/browser/move-to-applications.ts
+  ---> Compiling /src/browser/notification-ipc.ts
+  ---> Compiling /src/browser/quickpreview-ipc.ts
+  ---> Compiling /src/browser/sni-host.ts
+  ---> Compiling /src/browser/system-accent-watcher.ts
+  ---> Compiling /src/browser/system-tray-manager.ts
+  ---> Compiling /src/browser/theme-recovery.ts
+  ---> Compiling /src/browser/trusted-ipc.ts
+  ---> Compiling /src/browser/view-credential-policy.ts
+  ---> Compiling /src/browser/view-credentials.ts
+  ---> Compiling /src/browser/view-sandbox-policy.ts
+  ---> Compiling /src/browser/view-sessions.ts
+  ---> Compiling /src/browser/window-launcher.ts
+  ---> Compiling /src/browser/window-manager.ts
+  ---> Compiling /src/browser/windows-taskbar-manager.ts
+  ---> Compiling /src/calendar-date.ts
+  ---> Compiling /src/calendar-utils.ts
+  ---> Compiling /src/canvas-utils.ts
+  ---> Compiling /src/chrome-user-agent-stylesheet-string.ts
+  ---> Compiling /src/compile-cache-less.ts
+  ---> Compiling /src/components/bind-global-commands.ts
+  ---> Compiling /src/components/composer-editor/categorized-emoji.ts
+  ---> Compiling /src/components/composer-editor/composer-support.ts
+  ---> Compiling /src/components/composer-editor/patch-chrome-ime.ts
+  ---> Compiling /src/components/composer-editor/patch-slate-normalizing.ts
+  ---> Compiling /src/components/composer-editor/plaintext.ts
+  ---> Compiling /src/components/composer-editor/types.ts
+  ---> Compiling /src/components/decorators/compose.ts
+  ---> Compiling /src/components/list-data-source.ts
+  ---> Compiling /src/components/list-selection.ts
+  ---> Compiling /src/components/multiselect-list-interaction-handler.ts
+  ---> Compiling /src/components/multiselect-split-interaction-handler.ts
+  ---> Compiling /src/components/scenario-editor-models.ts
+  ---> Compiling /src/components/table/table-data-source.ts
+  ---> Compiling /src/config-schema.ts
+  ---> Compiling /src/config-utils.ts
+  ---> Compiling /src/config.ts
+  ---> Compiling /src/date-utils.ts
+  ---> Compiling /src/default-client-helper.ts
+  ---> Compiling /src/dnd-utils-linux.ts
+  ---> Compiling /src/dnd-utils-windows.ts
+  ---> Compiling /src/dom-utils.ts
+  ---> Compiling /src/dom-walkers.ts
+  ---> Compiling /src/drag-drop-types.ts
+  ---> Compiling /src/extensions/account-sidebar-extension.ts
+  ---> Compiling /src/extensions/composer-extension.ts
+  ---> Compiling /src/extensions/extension-utils.ts
+  ---> Compiling /src/extensions/message-view-extension.ts
+  ---> Compiling /src/extensions/thread-list-extension.ts
+  ---> Compiling /src/flux/action-bridge.ts
+  ---> Compiling /src/flux/actions.ts
+  ---> Compiling /src/flux/attributes.ts
+  ---> Compiling /src/flux/attributes/attribute-boolean.ts
+  ---> Compiling /src/flux/attributes/attribute-collection.ts
+  ---> Compiling /src/flux/attributes/attribute-datetime.ts
+  ---> Compiling /src/flux/attributes/attribute-joined-data.ts
+  ---> Compiling /src/flux/attributes/attribute-number.ts
+  ---> Compiling /src/flux/attributes/attribute-object.ts
+  ---> Compiling /src/flux/attributes/attribute-string.ts
+  ---> Compiling /src/flux/attributes/attribute.ts
+  ---> Compiling /src/flux/attributes/matcher.ts
+  ---> Compiling /src/flux/attributes/sort-order.ts
+  ---> Compiling /src/flux/errors.ts
+  ---> Compiling /src/flux/mailspring-api-request.ts
+  ---> Compiling /src/flux/mailsync-bridge.ts
+  ---> Compiling /src/flux/models/account.ts
+  ---> Compiling /src/flux/models/calendar.ts
+  ---> Compiling /src/flux/models/category.ts
+  ---> Compiling /src/flux/models/contact-book.ts
+  ---> Compiling /src/flux/models/contact-group.ts
+  ---> Compiling /src/flux/models/contact.ts
+  ---> Compiling /src/flux/models/event.ts
+  ---> Compiling /src/flux/models/file.ts
+  ---> Compiling /src/flux/models/folder.ts
+  ---> Compiling /src/flux/models/label.ts
+  ---> Compiling /src/flux/models/message-utils.ts
+  ---> Compiling /src/flux/models/message.ts
+  ---> Compiling /src/flux/models/model-with-metadata.ts
+  ---> Compiling /src/flux/models/model.ts
+  ---> Compiling /src/flux/models/mutable-query-result-set.ts
+  ---> Compiling /src/flux/models/mutable-query-subscription.ts
+  ---> Compiling /src/flux/models/provider-syncback-request.ts
+  ---> Compiling /src/flux/models/query-range.ts
+  ---> Compiling /src/flux/models/query-result-set.ts
+  ---> Compiling /src/flux/models/query-subscription-pool.ts
+  ---> Compiling /src/flux/models/query-subscription.ts
+  ---> Compiling /src/flux/models/query.ts
+  ---> Compiling /src/flux/models/thread.ts
+  ---> Compiling /src/flux/models/unread-query-subscription.ts
+  ---> Compiling /src/flux/models/utils.ts
+  ---> Compiling /src/flux/stores/account-store.ts
+  ---> Compiling /src/flux/stores/attachment-store.ts
+  ---> Compiling /src/flux/stores/badge-store.ts
+  ---> Compiling /src/flux/stores/category-store.ts
+  ---> Compiling /src/flux/stores/contact-store.ts
+  ---> Compiling /src/flux/stores/database-change-record.ts
+  ---> Compiling /src/flux/stores/database-store.ts
+  ---> Compiling /src/flux/stores/draft-change-set.ts
+  ---> Compiling /src/flux/stores/draft-editing-session.ts
+  ---> Compiling /src/flux/stores/draft-factory.ts
+  ---> Compiling /src/flux/stores/draft-store.ts
+  ---> Compiling /src/flux/stores/focused-contacts-store.ts
+  ---> Compiling /src/flux/stores/focused-content-store.ts
+  ---> Compiling /src/flux/stores/focused-perspective-store.ts
+  ---> Compiling /src/flux/stores/folder-sync-progress-store.ts
+  ---> Compiling /src/flux/stores/identity-store.ts
+  ---> Compiling /src/flux/stores/local-model-prompt.ts
+  ---> Compiling /src/flux/stores/local-model-store.ts
+  ---> Compiling /src/flux/stores/local-model-summaries.ts
+  ---> Compiling /src/flux/stores/mail-rules-store.ts
+  ---> Compiling /src/flux/stores/message-body-processor.ts
+  ---> Compiling /src/flux/stores/message-store-extension.ts
+  ---> Compiling /src/flux/stores/message-store.ts
+  ---> Compiling /src/flux/stores/observable-list-data-source.ts
+  ---> Compiling /src/flux/stores/online-status-store.ts
+  ---> Compiling /src/flux/stores/outbox-store.ts
+  ---> Compiling /src/flux/stores/preferences-ui-store.ts
+  ---> Compiling /src/flux/stores/searchable-component-store.ts
+  ---> Compiling /src/flux/stores/send-actions-store.ts
+  ---> Compiling /src/flux/stores/signature-store.ts
+  ---> Compiling /src/flux/stores/task-queue.ts
+  ---> Compiling /src/flux/stores/thread-counts-store.ts
+  ---> Compiling /src/flux/stores/undo-redo-store.ts
+  ---> Compiling /src/flux/stores/workspace-store.ts
+  ---> Compiling /src/flux/tasks/change-contactgroup-membership-task.ts
+  ---> Compiling /src/flux/tasks/change-folder-task.ts
+  ---> Compiling /src/flux/tasks/change-labels-task.ts
+  ---> Compiling /src/flux/tasks/change-mail-task.ts
+  ---> Compiling /src/flux/tasks/change-role-mapping-task.ts
+  ---> Compiling /src/flux/tasks/change-starred-task.ts
+  ---> Compiling /src/flux/tasks/change-unread-task.ts
+  ---> Compiling /src/flux/tasks/destroy-category-task.ts
+  ---> Compiling /src/flux/tasks/destroy-contact-task.ts
+  ---> Compiling /src/flux/tasks/destroy-contactgroup-task.ts
+  ---> Compiling /src/flux/tasks/destroy-draft-task.ts
+  ---> Compiling /src/flux/tasks/destroy-event-task.ts
+  ---> Compiling /src/flux/tasks/destroy-model-task.ts
+  ---> Compiling /src/flux/tasks/event-rsvp-task.ts
+  ---> Compiling /src/flux/tasks/expunge-all-in-folder-task.ts
+  ---> Compiling /src/flux/tasks/get-many-rfc2822-task.ts
+  ---> Compiling /src/flux/tasks/get-message-rfc2822-task.ts
+  ---> Compiling /src/flux/tasks/send-draft-task.ts
+  ---> Compiling /src/flux/tasks/send-feature-usage-event-task.ts
+  ---> Compiling /src/flux/tasks/syncback-category-task.ts
+  ---> Compiling /src/flux/tasks/syncback-contact-task.ts
+  ---> Compiling /src/flux/tasks/syncback-contactgroup-task.ts
+  ---> Compiling /src/flux/tasks/syncback-draft-task.ts
+  ---> Compiling /src/flux/tasks/syncback-event-task.ts
+  ---> Compiling /src/flux/tasks/syncback-metadata-task.ts
+  ---> Compiling /src/flux/tasks/task-factory.ts
+  ---> Compiling /src/flux/tasks/task.ts
+  ---> Compiling /src/fs-utils.ts
+  ---> Compiling /src/global/mailspring-observables.ts
+  ---> Compiling /src/global/mailspring-store.ts
+  ---> Compiling /src/ics-event-helpers.ts
+  ---> Compiling /src/intl.ts
+  ---> Compiling /src/key-manager.ts
+  ---> Compiling /src/keymap-manager.ts
+  ---> Compiling /src/linux-theme-utils.ts
+  ---> Compiling /src/mail-rules-processor.ts
+  ---> Compiling /src/mail-rules-templates.ts
+  ---> Compiling /src/mailbox-perspective.ts
+  ---> Compiling /src/mailsync-process.ts
+  ---> Compiling /src/menu-helpers.ts
+  ---> Compiling /src/menu-manager.ts
+  ---> Compiling /src/native-notifications.ts
+  ---> Compiling /src/oauth-revocation.ts
+  ---> Compiling /src/package-manager.ts
+  ---> Compiling /src/package.ts
+  ---> Compiling /src/promise-extensions.ts
+  ---> Compiling /src/quickpreview/index.ts
+  ---> Compiling /src/regexp-utils.ts
+  ---> Compiling /src/registries/command-registry.ts
+  ---> Compiling /src/registries/component-registry.ts
+  ---> Compiling /src/registries/database-object-registry.ts
+  ---> Compiling /src/registries/extension-registry.ts
+  ---> Compiling /src/registries/serializable-registry.ts
+  ---> Compiling /src/registries/service-registry.ts
+  ---> Compiling /src/registries/sound-registry.ts
+  ---> Compiling /src/safe-shell.ts
+  ---> Compiling /src/searchable-components/iframe-searcher.ts
+  ---> Compiling /src/searchable-components/real-dom-parser.ts
+  ---> Compiling /src/searchable-components/search-constants.ts
+  ---> Compiling /src/searchable-components/unified-dom-parser.ts
+  ---> Compiling /src/searchable-components/virtual-dom-parser.ts
+  ---> Compiling /src/secondary-window-bootstrap.ts
+  ---> Compiling /src/services/autolinker.ts
+  ---> Compiling /src/services/eml-utils.ts
+  ---> Compiling /src/services/inline-style-transformer.ts
+  ---> Compiling /src/services/mail-access/audit.ts
+  ---> Compiling /src/services/mail-access/counts.ts
+  ---> Compiling /src/services/mail-access/filter.ts
+  ---> Compiling /src/services/mail-access/grant.ts
+  ---> Compiling /src/services/mail-access/identity.ts
+  ---> Compiling /src/services/mail-access/queries.ts
+  ---> Compiling /src/services/mail-core/draft-files.ts
+  ---> Compiling /src/services/mail-core/inbox.ts
+  ---> Compiling /src/services/mail-core/index.ts
+  ---> Compiling /src/services/mail-core/local-triage.ts
+  ---> Compiling /src/services/mbox-utils.ts
+  ---> Compiling /src/services/quote-string-detector.ts
+  ---> Compiling /src/services/quoted-html-transformer.ts
+  ---> Compiling /src/services/sanitize-transformer.ts
+  ---> Compiling /src/services/search/search-query-ast.ts
+  ---> Compiling /src/services/search/search-query-backend-local.ts
+  ---> Compiling /src/services/search/search-query-backend-remote.ts
+  ---> Compiling /src/services/search/search-query-parser.ts
+  ---> Compiling /src/services/unwrapped-signature-detector.ts
+  ---> Compiling /src/sheet-context.ts
+  ---> Compiling /src/spellchecker.ts
+  ---> Compiling /src/style-manager.ts
+  ---> Compiling /src/system-start-service.ts
+  ---> Compiling /src/theme-manager.ts
+  ---> Compiling /src/utils/imap-utf7.ts
+  ---> Compiling /src/utils/package.ts
+  ---> Compiling /src/utils/xdg-paths.ts
+  ---> Compiling /src/virtual-dom-utils.ts
+  ---> Compiling /src/window-bootstrap.ts
+  ---> Compiling /src/window-event-handler.ts
+  ---> Compiling /src/components/account-color-bar.tsx
+  ---> Compiling /src/components/answer-section.tsx
+  ---> Compiling /src/components/attachment-items.tsx
+  ---> Compiling /src/components/bolded-search-result.tsx
+  ---> Compiling /src/components/button-dropdown.tsx
+  ---> Compiling /src/components/code-snippet.tsx
+  ---> Compiling /src/components/composer-editor/base-block-plugins.tsx
+  ---> Compiling /src/components/composer-editor/base-mark-plugins.tsx
+  ---> Compiling /src/components/composer-editor/composer-editor-plaintext.tsx
+  ---> Compiling /src/components/composer-editor/composer-editor-toolbar.tsx
+  ---> Compiling /src/components/composer-editor/composer-editor.tsx
+  ---> Compiling /src/components/composer-editor/conversion.tsx
+  ---> Compiling /src/components/composer-editor/emoji-plugins.tsx
+  ---> Compiling /src/components/composer-editor/emoji-toolbar-popover.tsx
+  ---> Compiling /src/components/composer-editor/grammar-check-plugins.tsx
+  ---> Compiling /src/components/composer-editor/inline-attachment-plugins.tsx
+  ---> Compiling /src/components/composer-editor/link-plugins.tsx
+  ---> Compiling /src/components/composer-editor/markdown-plugins.tsx
+  ---> Compiling /src/components/composer-editor/paper-reed-emoji-picker.tsx
+  ---> Compiling /src/components/composer-editor/template-plugins.tsx
+  ---> Compiling /src/components/composer-editor/toolbar-component-factories.tsx
+  ---> Compiling /src/components/composer-editor/uneditable-plugins.tsx
+  ---> Compiling /src/components/config-prop-container.tsx
+  ---> Compiling /src/components/contact-profile-photo.tsx
+  ---> Compiling /src/components/copy-button.tsx
+  ---> Compiling /src/components/date-input.tsx
+  ---> Compiling /src/components/date-picker-popover.tsx
+  ---> Compiling /src/components/date-picker.tsx
+  ---> Compiling /src/components/decorators/auto-focuses.tsx
+  ---> Compiling /src/components/decorators/create-button-group.tsx
+  ---> Compiling /src/components/decorators/has-tutorial-tip.tsx
+  ---> Compiling /src/components/decorators/listens-to-flux-store.tsx
+  ---> Compiling /src/components/decorators/listens-to-movement-keys.tsx
+  ---> Compiling /src/components/decorators/listens-to-observable.tsx
+  ---> Compiling /src/components/disclosure-triangle.tsx
+  ---> Compiling /src/components/drop-zone.tsx
+  ---> Compiling /src/components/dropdown-menu.tsx
+  ---> Compiling /src/components/editable-list.tsx
+  ---> Compiling /src/components/editable-table.tsx
+  ---> Compiling /src/components/empty-list-state.tsx
+  ---> Compiling /src/components/evented-iframe.tsx
+  ---> Compiling /src/components/feature-used-up-modal.tsx
+  ---> Compiling /src/components/fixed-popover.tsx
+  ---> Compiling /src/components/flexbox.tsx
+  ---> Compiling /src/components/flux-container.tsx
+  ---> Compiling /src/components/focus-container.tsx
+  ---> Compiling /src/components/injected-component-error-boundary.tsx
+  ---> Compiling /src/components/injected-component-label.tsx
+  ---> Compiling /src/components/injected-component-set.tsx
+  ---> Compiling /src/components/injected-component.tsx
+  ---> Compiling /src/components/key-commands-region.tsx
+  ---> Compiling /src/components/lazy-rendered-list.tsx
+  ---> Compiling /src/components/list-tabular-item.tsx
+  ---> Compiling /src/components/list-tabular.tsx
+  ---> Compiling /src/components/mail-important-icon.tsx
+  ---> Compiling /src/components/mail-label-set.tsx
+  ---> Compiling /src/components/mail-label.tsx
+  ---> Compiling /src/components/menu.tsx
+  ---> Compiling /src/components/metadata-composer-toggle-button.tsx
+  ---> Compiling /src/components/mini-month-view.tsx
+  ---> Compiling /src/components/modal.tsx
+  ---> Compiling /src/components/multiselect-dropdown.tsx
+  ---> Compiling /src/components/multiselect-list.tsx
+  ---> Compiling /src/components/multiselect-toolbar.tsx
+  ---> Compiling /src/components/nav-rail.tsx
+  ---> Compiling /src/components/new-item-button.tsx
+  ---> Compiling /src/components/notification.tsx
+  ---> Compiling /src/components/open-identity-page-button.tsx
+  ---> Compiling /src/components/outline-view-item.tsx
+  ---> Compiling /src/components/outline-view.tsx
+  ---> Compiling /src/components/participants-text-field.tsx
+  ---> Compiling /src/components/propose-time-popover.tsx
+  ---> Compiling /src/components/resizable-region.tsx
+  ---> Compiling /src/components/retina-img.tsx
+  ---> Compiling /src/components/roving-tab-index-toolbar.tsx
+  ---> Compiling /src/components/scenario-editor-row.tsx
+  ---> Compiling /src/components/scenario-editor.tsx
+  ---> Compiling /src/components/scroll-region.tsx
+  ---> Compiling /src/components/scrollbar-ticks.tsx
+  ---> Compiling /src/components/selectable-table.tsx
+  ---> Compiling /src/components/sending-spinner.tsx
+  ---> Compiling /src/components/small-meridiem.tsx
+  ---> Compiling /src/components/snap-scroller.tsx
+  ---> Compiling /src/components/spinner.tsx
+  ---> Compiling /src/components/svg-icons.tsx
+  ---> Compiling /src/components/swipe-container.tsx
+  ---> Compiling /src/components/switch.tsx
+  ---> Compiling /src/components/syncing-list-state.tsx
+  ---> Compiling /src/components/tab-group-region.tsx
+  ---> Compiling /src/components/table/table.tsx
+  ---> Compiling /src/components/text-select.tsx
+  ---> Compiling /src/components/time-picker.tsx
+  ---> Compiling /src/components/tokenizing-text-field.tsx
+  ---> Compiling /src/components/webview.tsx
+  ---> Compiling /src/decorators/inflates-draft-client-id.tsx
+  ---> Compiling /src/flux/stores/feature-usage-store.tsx
+  ---> Compiling /src/flux/stores/modal-store.tsx
+  ---> Compiling /src/flux/stores/popover-store.tsx
+  ---> Compiling /src/searchable-components/search-match.tsx
+  ---> Compiling /src/searchable-components/searchable-component-maker.tsx
+  ---> Compiling /src/sheet-container.tsx
+  ---> Compiling /src/sheet-toolbar.tsx
+  ---> Compiling /src/sheet.tsx
+---> Skipping Sentry source map upload (set SENTRY_AUTH_TOKEN, SENTRY_ORG, SENTRY_PROJECT to enable)
+---> Cleaned up 899 source map files
+---> Packaging for 15s
+---> Packaging for 16s
+---> Packaging for 19s
+---> Packaging for 21s
+---> Packaging for 22s
+---> Packaging for 23s
+---> Packaging for 24s
+---> Packaging for 25s
+---> Packaging for 26s
+---> Packaging for 27s
+---> Packaging for 29s
+---> Packaging for 30s
+---> Packaging for 34s
+---> Packaging for 35s
+WARNING: Could not find icon "/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/build/resources/mac/paper-reed.icns" with extension ".icon", skipping this app icon format
+---> Done Successfully. Built into: /Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64
+>> Created /Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper-Reed-0.0.1-macOS-arm64.zip
+Built Paper Reed 0.0.1 from 84526aacc3cc6aaa6d5149a93fd6266d1dd88356-dirty; signing/notarization depend on build configuration.
