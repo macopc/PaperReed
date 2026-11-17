@@ -1,0 +1,154 @@
+diff --git a/app/internal_packages/paper-reed/lib/workspace.tsx b/app/internal_packages/paper-reed/lib/workspace.tsx
+index c68a60d..c21c787 100644
+--- a/app/internal_packages/paper-reed/lib/workspace.tsx
++++ b/app/internal_packages/paper-reed/lib/workspace.tsx
+@@ -143,6 +143,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   operationTimer: ReturnType<typeof setInterval>;
+   moving = false;
+   receiptStarted = 0;
++  operationGeneration = 0;
+   componentDidMount() {
+     this.mounted = true;
+     this.unlisten = [
+@@ -290,28 +291,29 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     }
+   };
+   refreshOperations = async () => {
++    const generation = ++this.operationGeneration;
++    const accountId = this.state.accountId;
++    const ids = this.accountIds();
+     this.refreshMailReceipt();
+     try {
+       const rows = await DatabaseStore._query(
+-        'SELECT accountId, requestId, phase, sentCopy, payload FROM PaperReedSend ORDER BY rowid DESC LIMIT 10'
++        `SELECT accountId, requestId, phase, sentCopy, payload FROM PaperReedSend
++         WHERE accountId IN (${ids.map(() => '?').join(',')}) ORDER BY rowid DESC LIMIT 10`, ids
+       );
+-      const ids = this.accountIds();
+-      if (this.mounted)
++      if (this.mounted && generation === this.operationGeneration && accountId === this.state.accountId)
+         this.setState({
+           operationsError: '',
+-          operations: rows
+-            .filter((r) => ids.includes(r.accountId))
+-            .map((r) => ({
+-              accountId: r.accountId,
+-              requestId: r.requestId,
+-              phase: r.phase,
+-              sentCopy: r.sentCopy,
+-              subject: JSON.parse(r.payload).draft.subject || '无主题',
+-            })),
++          operations: rows.map((r) => ({
++            accountId: r.accountId,
++            requestId: r.requestId,
++            phase: r.phase,
++            sentCopy: r.sentCopy,
++            subject: JSON.parse(r.payload).draft.subject || '无主题',
++          })),
+         });
+     } catch (error) {
+       console.error('Paper Reed send results:', error);
+-      if (this.mounted)
++      if (this.mounted && generation === this.operationGeneration && accountId === this.state.accountId)
+         this.setState({ operations: [], operationsError: '发送结果暂时无法读取。' });
+     }
+   };
+diff --git a/app/src/flux/stores/draft-store.ts b/app/src/flux/stores/draft-store.ts
+index 1beaf4c..655470f 100644
+--- a/app/src/flux/stores/draft-store.ts
++++ b/app/src/flux/stores/draft-store.ts
+@@ -658,24 +658,12 @@ class DraftStore extends MailspringStore {
+     draft = await DatabaseStore.findBy<Message>(Message, { headerMessageId, draft: true }).include(
+       Message.attributes.body
+     );
+-    if (!draft) {
+-      // waitForPerformLocal() above resolves as soon as the SyncbackDraftTask's status
+-      // leaves 'local' — including when the sync engine cancels it — which can happen
+-      // before the draft row's own SQLite transaction has actually committed. Retry once
+-      // after a short delay to absorb that race before reporting a real failure.
+-      await new Promise((resolve) => setTimeout(resolve, 150));
+-      draft = await DatabaseStore.findBy<Message>(Message, {
+-        headerMessageId,
+-        draft: true,
+-      }).include(Message.attributes.body);
+-      diagnostics.foundOnRetry = !!draft;
+-    }
+     if (!draft) {
+       this._draftsSending[headerMessageId] = false;
+       this.trigger({ headerMessageId });
+       return this._onUnexpectedNotFoundDuringSend(headerMessageId, {
+         ...diagnostics,
+-        failedAt: 'DatabaseStore.findBy returned null after commit (and retry)',
++        failedAt: 'DatabaseStore.findBy returned null after commit',
+       });
+     }
+
+diff --git a/app/src/services/mail-core/local-triage.ts b/app/src/services/mail-core/local-triage.ts
+index ae89ae8..3135de2 100644
+--- a/app/src/services/mail-core/local-triage.ts
++++ b/app/src/services/mail-core/local-triage.ts
+@@ -1,7 +1,7 @@
+ import Sqlite3 from 'better-sqlite3';
+ import { z } from 'zod';
+ import { randomUUID, createHash } from 'crypto';
+-import { AccountStore, DatabaseStore, Message, Thread } from 'mailspring-exports';
++import { AccountStore, CategoryStore, DatabaseStore, Label, Message, Thread } from 'mailspring-exports';
+ import type { InboxAccess, MailTarget } from './inbox';
+ import { isThreadAllowed } from '../mail-access/grant';
+
+@@ -208,10 +208,18 @@ export async function localStates(
+   })();
+   return result;
+ }
++function inboxSyncRole(accountId: string) {
++  return CategoryStore.getInboxCategory(accountId) instanceof Label ? 'all' : 'inbox';
++}
++function isInboxMessage(message: Message) {
++  return inboxSyncRole(message.accountId) === 'all'
++    ? (message.labels || []).includes('\\Inbox')
++    : message.categories().some((c) => c.role === 'inbox');
++}
+ function inboxBaseline(accountId: string) {
+   const rows = sql(
+-    "SELECT id,data FROM Folder WHERE accountId=? AND json_extract(data,'$.role')='inbox'",
+-    [accountId]
++    "SELECT id,data FROM Folder WHERE accountId=? AND json_extract(data,'$.role')=?",
++    [accountId, inboxSyncRole(accountId)]
+   );
+   const folder = rows[0];
+   const status = folder && JSON.parse(folder.data).localStatus;
+@@ -354,7 +362,7 @@ export async function reconcileLocalSnoozes() {
+         for (const c of candidates) {
+           if (baseline.knownIds.includes(c.id)) continue;
+           const message = await DatabaseStore.find<Message>(Message, c.id);
+-          if (message?.from.length && !message.isFromMe()) {
++          if (message?.from.length && isInboxMessage(message) && !message.isFromMe()) {
+             wake = true;
+             break;
+           }
+@@ -448,7 +456,7 @@ export async function listLocalRules(accountId: string, access: InboxAccess) {
+       const baseline = r.baseline && JSON.parse(r.baseline);
+       const folder = baseline && folders.find((f) => f.id === baseline.folderId);
+       const status =
+-        folder && JSON.parse(folder.data).role === 'inbox' && JSON.parse(folder.data).localStatus;
++        folder && JSON.parse(folder.data).role === inboxSyncRole(accountId) && JSON.parse(folder.data).localStatus;
+       const syncState = !r.enabled
+         ? 'paused'
+         : !status?.uidvalidity
+@@ -658,7 +666,7 @@ export function processLocalRules() {
+           f = folders.find((f) => f.id === b.folderId);
+         return (
+           f &&
+-          JSON.parse(f.data).role === 'inbox' &&
++          JSON.parse(f.data).role === inboxSyncRole(accountId) &&
+           JSON.parse(f.data).localStatus?.uidvalidity === b.validity
+         );
+       });
+@@ -676,6 +684,7 @@ export function processLocalRules() {
+         const thread = await DatabaseStore.find<Thread>(Thread, message.threadId);
+         if (!thread) continue;
+         const usable =
++          isInboxMessage(message) &&
+           thread.categories.some((c) => c.role === 'inbox') &&
+           !thread.categories.some((c) => ['spam', 'trash'].includes(c.role));
+         const effects = ruleEffects(

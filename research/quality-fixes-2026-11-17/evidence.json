@@ -1,0 +1,158 @@
+{
+  "baseline": "e8c0c8c",
+  "patches": [
+    "0032-send-result-reconciliation.patch",
+    "0033-local-mail-quality.patch"
+  ],
+  "nativeSha256": "44e518a92ce801f363aeb4687c8b42b1743cfebf81c7aa7e68ee31a911844347",
+  "gmail": [
+    {
+      "case": "accepted",
+      "outcome": "accepted",
+      "api_submissions": 1,
+      "smtp_submissions": 0
+    },
+    {
+      "case": "rewritten-message-id",
+      "outcome": "accepted",
+      "api_submissions": 1,
+      "smtp_submissions": 0
+    },
+    {
+      "case": "late-sent-copy",
+      "outcome": "accepted",
+      "api_submissions": 1,
+      "smtp_submissions": 0
+    },
+    {
+      "case": "rejected",
+      "outcome": "rejected",
+      "api_submissions": 1,
+      "smtp_submissions": 0
+    },
+    {
+      "case": "lost-response",
+      "outcome": "unknown",
+      "api_submissions": 1,
+      "smtp_submissions": 0
+    },
+    {
+      "case": "invalid-receipt",
+      "outcome": "unknown",
+      "api_submissions": 1,
+      "smtp_submissions": 0
+    },
+    {
+      "case": "server-error",
+      "outcome": "unknown",
+      "api_submissions": 1,
+      "smtp_submissions": 0
+    },
+    {
+      "case": "refresh-rejected",
+      "outcome": "rejected",
+      "api_submissions": 0,
+      "smtp_submissions": 0
+    }
+  ],
+  "smtp": [
+    {
+      "case": "auth-rejected",
+      "smtpSubmissions": 0,
+      "outcome": "rejected",
+      "draftEditable": true
+    },
+    {
+      "case": "lost-response",
+      "smtpSubmissions": 1,
+      "outcome": "unknown",
+      "draftEditable": false
+    },
+    {
+      "case": "multisend-rejected",
+      "smtpSubmissions": 0,
+      "outcome": "rejected",
+      "draftEditable": true
+    }
+  ],
+  "microsoft": [
+    {
+      "case": "accepted",
+      "outcome": "accepted",
+      "api_submissions": 1,
+      "smtp_submissions": 0
+    },
+    {
+      "case": "rejected",
+      "outcome": "rejected",
+      "api_submissions": 1,
+      "smtp_submissions": 0
+    },
+    {
+      "case": "server-error",
+      "outcome": "unknown",
+      "api_submissions": 1,
+      "smtp_submissions": 0
+    },
+    {
+      "case": "lost-response",
+      "outcome": "unknown",
+      "api_submissions": 1,
+      "smtp_submissions": 0
+    },
+    {
+      "case": "refresh-rejected",
+      "outcome": "rejected",
+      "api_submissions": 0,
+      "smtp_submissions": 0
+    }
+  ],
+  "mixed": {
+    "passed": [
+      "unified inbox, account filters, identical Message-ID isolated",
+      "GUI mixed-provider archive changes correct server state and preserves custom labels",
+      "GUI mixed-provider undo restores original placements",
+      "per-message archive undo preserves mixed Inbox membership",
+      "spam and exact undo preserve Gmail custom labels and mixed Inbox membership",
+      "trash and exact undo preserve Gmail custom labels and mixed Inbox membership",
+      "CLI restore inbox for Gmail and ordinary Archive",
+      "wrong-account reference and excluded account rejected without moving mail",
+      "drafts remain bound to their account",
+      "changed Gmail label grant blocks historical undo",
+      "one provider authentication failure does not block the other account",
+      "restart retains both accounts, CLI and exact Gmail undo",
+      "archive and undo preserve Sent membership without writing read-only system labels",
+      "explicit draft account controls sender and automatic recipients",
+      "unified composer honors configured sender and CLI exposes the same identity",
+      "selected mailbox overrides default sender without importing another account Bcc",
+      "reply stays with original account and its automatic recipients",
+      "changing default sender and restarting does not change an existing draft identity",
+      "removed default account falls back to an available account for new mail",
+      "Gmail archived and Sent siblings do not wake snooze or run incoming rules",
+      "Gmail snooze and enabled rules follow new incoming mail",
+      "ordinary IMAP snooze and enabled rules follow new incoming mail"
+    ],
+    "realProviderAccounts": false,
+    "smtpSubmissions": 0
+  },
+  "offline": {
+    "passed": [
+      "native connection loss is scoped to the affected mailbox; other account stays writable",
+      "cached inbox and message bodies remain readable through CLI while offline",
+      "offline GUI and CLI draft edits persist; button, keyboard and CLI cannot submit a send",
+      "normal offline restart restores the saved draft without sending it",
+      "reconnection resumes native sync and enables sending without automatically sending drafts",
+      "explicit send after reconnect submits once and remains accepted after restart"
+    ],
+    "realProviderAccounts": false,
+    "smtpSubmissions": 1
+  },
+  "sendStatus": {
+    "lateSuccessIgnored": true,
+    "lateErrorIgnored": true,
+    "accountSwitchIgnored": true,
+    "sqlAccountFilterBeforeLimit": true
+  },
+  "realMailSent": false,
+  "proxyConfigurationChanged": false
+}

@@ -52,6 +52,14 @@ try:
                 server.imap.credentials=(server.username,check['password'])
                 (work/'truth-result.json').write_text(json.dumps({'ok':True}))
                 continue
+            if 'append' in check:
+                item=check['append']
+                raw=message(item['number'],subject='Re: Shared subject',
+                            message_id='<'+item['id']+'>',
+                            in_reply_to='<same-message@example.test>',references=['<same-message@example.test>'])
+                server.store.append(item['folder'],raw)
+                (work/'truth-result.json').write_text(json.dumps({'ok':True}))
+                continue
             if check.get('markSent'):
                 box=server.store.get('[Gmail]/All Mail')
                 for item in box.messages:

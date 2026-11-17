@@ -136,6 +136,32 @@ async function stop(){const p=app.process();await app.evaluate(({app})=>app.quit
  await evaluate(`AppEnv.config.set('core.sending.defaultAccountIdForSend','removed-account');true`);
  await composeFor('',0,'Removed default sender fixture');
  pass('removed default account falls back to an available account for new mail');
+ // Gmail uses All Mail UIDs, but only each message's Inbox membership is incoming evidence.
+ const triage="require(AppEnv.getLoadSettings().resourcePath+'/src/services/mail-core/local-triage')";
+ async function appendFixture(account,folder,id,number){
+  fs.writeFileSync(path.join(work,'truth-request.json'),JSON.stringify({account,append:{folder,id,number}}));
+  const file=path.join(work,'truth-result.json');await until(()=>fs.existsSync(file),'append fixture');fs.unlinkSync(file);
+  await until(()=>evaluate(`require('mailspring-exports').DatabaseStore._query('SELECT id FROM Message WHERE accountId=? AND headerMessageId=?',[${JSON.stringify(accounts[account].id)},${JSON.stringify(id)}]).then(rows=>rows.length===1)`),'new fixture synced');
+  await evaluate(`${triage}.processLocalRules()`);await evaluate(`${triage}.reconcileLocalSnoozes()`);
+ }
+ for(let index=0;index<accounts.length;index++){
+  const target=targets[index],state=async()=>(await cli('local-state',{targets:[target]}))[target.threadId];
+  const label=await cli('label-create',{name:'Incoming '+index,color:'#688177'});
+  await cli('rule-save',{accountId:target.accountId,name:'Incoming fixture',field:'subject',query:'Shared',action:'label',value:label.id,enabled:true});
+  await cli('snooze',{targets:[target],until:new Date(Date.now()+3600000).toISOString()});
+  assert((await state()).snoozeUntil);assert(!(await state()).labels.some(l=>l.id===label.id));
+  if(index===0){
+   for(const [folder,suffix,n] of [['[Gmail]/All Mail','archived',21],['[Gmail]/Sent Mail','sent',22]]){
+    await appendFixture(index,folder,`rule-${suffix}@example.test`,n);
+    const current=await state();assert(current.snoozeUntil,suffix+' sibling must not wake snooze');
+    assert(!current.labels.some(l=>l.id===label.id),suffix+' sibling must not trigger incoming rule');
+   }
+   pass('Gmail archived and Sent siblings do not wake snooze or run incoming rules');
+  }
+  await appendFixture(index,'INBOX',`rule-incoming-${index}@example.test`,23+index);
+  await until(async()=>{const v=await state();return !v.snoozeUntil && v.labels.some(l=>l.id===label.id)},'incoming wakes snooze and applies rule');
+  pass((index===0?'Gmail':'ordinary IMAP')+' snooze and enabled rules follow new incoming mail');
+ }
  fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({passed:results,realProviderAccounts:false,smtpSubmissions:0},null,2)+'\n');
  await stop();
 })().catch(async e=>{console.error(e.stack);if(main){await main.screenshot({path:path.join(work,'failure.png')}).catch(()=>{});fs.writeFileSync(path.join(work,'failure.txt'),await main.locator('body').innerText().catch(()=>''));}process.exitCode=1}).finally(()=>{if(app)app.process().kill('SIGKILL')});

@@ -1,0 +1,305 @@
+diff --git a/MailSync/MailMutationGuard.hpp b/MailSync/MailMutationGuard.hpp
+index 2e901b7..e8fe9be 100644
+--- a/MailSync/MailMutationGuard.hpp
++++ b/MailSync/MailMutationGuard.hpp
+@@ -31,6 +31,12 @@ public:
+                 "accountId TEXT NOT NULL, requestId TEXT NOT NULL, draftId TEXT NOT NULL, "
+                 "payload TEXT NOT NULL, phase TEXT NOT NULL, sentCopy TEXT NOT NULL DEFAULT 'pending', "
+                 "PRIMARY KEY (accountId, requestId))");
++        bool hasIdentity = false;
++        {
++            SQLite::Statement columns(db, "PRAGMA table_info(PaperReedSend)");
++            while (columns.executeStep()) hasIdentity = hasIdentity || columns.getColumn(1).getString() == "sentIdentity";
++        }
++        if (!hasIdentity) db.exec("ALTER TABLE PaperReedSend ADD COLUMN sentIdentity TEXT");
+         db.exec("CREATE UNIQUE INDEX IF NOT EXISTS PaperReedSendActiveDraft "
+                 "ON PaperReedSend(accountId, draftId) WHERE phase != 'rejected'");
+     }
+@@ -119,6 +125,40 @@ public:
+         if (q.exec() != 1) throw Conflict("send-state-conflict", "Send phase changed; do not retry delivery.");
+     }
+
++    // This receipt is separate from the immutable draft payload. Gmail's API id
++    // identifies the IMAP message even when Google rewrites its Message-ID.
++    void accept(const std::string & account, const std::string & id, const std::string & identity) {
++        SQLite::Statement q(db, "UPDATE PaperReedSend SET phase='accepted', sentIdentity=? "
++                                "WHERE accountId=? AND requestId=? AND phase='attempting'");
++        q.bind(1, identity); q.bind(2, account); q.bind(3, id);
++        if (q.exec() != 1) throw Conflict("send-state-conflict", "Send phase changed; do not retry delivery.");
++        reconcileSentCopies(account);
++    }
++
++    void recordSentIdentity(const std::string & account, const std::string & id, const std::string & identity) {
++        SQLite::Statement q(db, "UPDATE PaperReedSend SET sentIdentity=? WHERE accountId=? AND requestId=? AND phase='accepted'");
++        q.bind(1, identity); q.bind(2, account); q.bind(3, id); q.exec();
++        reconcileSentCopies(account); // The sync worker may already have received it.
++    }
++
++    void reconcileSentCopies(const std::string & account) {
++        SQLite::Statement q(db, R"SQL(
++            UPDATE PaperReedSend SET sentCopy='filed'
++            WHERE accountId=? AND phase='accepted' AND sentCopy='pending'
++              AND EXISTS (
++                SELECT 1 FROM Message m
++                WHERE m.accountId=PaperReedSend.accountId AND m.draft=0
++                  AND (CASE WHEN substr(sentIdentity,1,6)='gmail:'
++                       THEN m.gMsgId=substr(sentIdentity,7)
++                       ELSE m.headerMessageId=COALESCE(sentIdentity,json_extract(payload,'$.draft.hMsgId')) END)
++                  AND (EXISTS (SELECT 1 FROM json_each(m.data,'$.labels') l WHERE l.value='\Sent')
++                       OR EXISTS (SELECT 1 FROM MessageFolder p JOIN Folder f ON f.id=p.folderId
++                                  WHERE p.messageId=m.id AND p.remoteUID>0 AND json_extract(f.data,'$.role')='sent'))
++              )
++        )SQL");
++        q.bind(1, account); q.exec();
++    }
++
+     void setCopy(const std::string & account, const std::string & id, const std::string & state) {
+         SQLite::Statement q(db, "UPDATE PaperReedSend SET sentCopy = ? "
+                                 "WHERE accountId = ? AND requestId = ? AND phase = 'accepted'");
+diff --git a/MailSync/Models/Message.cpp b/MailSync/Models/Message.cpp
+index aacd283..f4bd09f 100644
+--- a/MailSync/Models/Message.cpp
++++ b/MailSync/Models/Message.cpp
+@@ -16,6 +16,7 @@
+ #include "File.hpp"
+ #include "Thread.hpp"
+ #include "Placement.hpp"
++#include "../MailMutationGuard.hpp"
+
+ using namespace std;
+
+@@ -559,6 +560,13 @@ void Message::_updateRulesReady(MailStore * store) {
+ void Message::afterSave(MailStore * store) {
+     MailModel::afterSave(store);
+
++    if (!isDraft()) {
++        bool sent = false;
++        for (auto & label : labels()) sent = sent || label == "\\Sent";
++        for (auto & folderId : folderIds()) sent = sent || folderRole(store, folderId) == "sent";
++        if (sent) PaperReed::MailMutationGuard(store->db()).reconcileSentCopies(accountId());
++    }
++
+     // if we have a thread, keep the thread's folder, label, and unread counters
+     // in sync by providing it with a before + after snapshot of this message.
+     if (_skipThreadUpdatesAfterSave) {
+diff --git a/MailSync/TaskProcessor.cpp b/MailSync/TaskProcessor.cpp
+index c210cf8..299d931 100644
+--- a/MailSync/TaskProcessor.cpp
++++ b/MailSync/TaskProcessor.cpp
+@@ -2440,60 +2440,19 @@ static string _waitForGraphSentCopy(shared_ptr<Account> account, const string &
+     return "";
+ }
+
+-/*
+-To do multisend, we need to hit the SMTP gateway more than once. If one request fails we stop and
+-mark the task as failed, but keep track of who got the message.
+-*/
+-static void _sendViaSMTP(shared_ptr<Account> account, MessageBuilder & builder, Data * messageDataForSent, json & perRecipientBodies, bool plaintext, bool multisend) {
++// One SMTP submission for the frozen MIME. Authentication refusal happens before
++// DATA, so it can release the draft; transport loss during submission stays unknown.
++static void _sendViaSMTP(shared_ptr<Account> account, Data * messageDataForSent) {
+     auto logger = spdlog::get("logger");
+     ErrorCode err = ErrorNone;
+     SMTPSession smtp;
+     SMTPProgress sprogress;
+     MailUtils::configureSessionForAccount(smtp, account);
+-    string succeeded;
+-
+-    if (multisend) {
+-        logger->info("-- Sending customized message bodies to each recipient:");
+-
+-        for (json::iterator it = perRecipientBodies.begin(); it != perRecipientBodies.end(); ++it) {
+-            if (it.key() == "self") {
+-                continue;
+-            }
+-        
+-            logger->info("--- Sending to {}", it.key());
+-            if (plaintext) {
+-                builder.setTextBody(AS_MCSTR(it.value().get<string>()));
+-            } else {
+-                builder.setHTMLBody(AS_MCSTR(it.value().get<string>()));
+-            }
+-            Address * to = Address::addressWithMailbox(AS_MCSTR(it.key()));
+-            Data * messageData = builder.data();
+-            smtp.sendMessage(builder.header()->from(), Array::arrayWithObject(to), messageData, &sprogress, &err);
+-            if (err != ErrorNone) {
+-                break;
+-            }
+-            succeeded += "\n - " + it.key();
+-        }
+-
+-    } else {
+-        logger->info("-- Sending a single message body to all recipients:");
+-        smtp.sendMessage(messageDataForSent, &sprogress, &err);
+-    }
+-
++    smtp.sendMessage(messageDataForSent, &sprogress, &err);
+     if (err != ErrorNone) {
+-        int e = smtp.lastLibetpanError();
+-        string es = LibEtPanCodeToTypeMap.count(e) ? LibEtPanCodeToTypeMap[e] : to_string(e);
+-        logger->info("-X An SMTP error occurred: {} LibEtPan code: {}", ErrorCodeToTypeMap[err], es);
+-        String * response = smtp.lastSMTPResponse();
+-        if (succeeded.size() > 0) {
+-            throw SyncException("send-partially-failed", ErrorCodeToTypeMap[err] + ":::" + succeeded, false);
+-        } else if (response != nullptr && string(response->UTF8Characters()).find("5.7.139") != string::npos) {
+-            // Exchange Online refuses SMTP AUTH for this tenant or mailbox (or under security
+-            // defaults). Reconnecting the account switches it to Graph. https://aka.ms/smtp_auth_disabled
+-            throw SyncException("smtp-auth-disabled", response->UTF8Characters(), false);
+-        } else {
+-            throw SyncException("send-failed", ErrorCodeToTypeMap[err], false);
+-        }
++        logger->info("-X SMTP error: {} LibEtPan code: {}", ErrorCodeToTypeMap[err], smtp.lastLibetpanError());
++        const bool authenticationRefused = err == ErrorAuthentication || err == ErrorAuthenticationRequired;
++        throw SyncException(authenticationRefused ? "send-rejected" : "send-failed", ErrorCodeToTypeMap[err], false);
+     }
+ }
+
+@@ -2560,7 +2519,8 @@ void TaskProcessor::performRemoteSendDraft(Task * task) {
+     string body = draftJSON["body"].get<string>();
+     
+     bool plaintext = draftJSON["plaintext"].get<bool>();
+-    bool multisend = perRecipientBodies.is_object();
++    if (perRecipientBodies.is_object())
++        throw SyncException("send-rejected", "Per-recipient bodies are not supported by this experiment.", false);
+
+     shared_ptr<Message> existing = nullptr;
+     if (draftJSON.count("id")) {
+@@ -2583,22 +2543,8 @@ void TaskProcessor::performRemoteSendDraft(Task * task) {
+     
+     // build the MIME message
+     MessageBuilder builder;
+-    if (multisend) {
+-        if (!perRecipientBodies.count("self")) {
+-            throw SyncException("no-self-body", "If `perRecipientBodies` is populated, you must provide a `self` entry.", false);
+-        }
+-        if (plaintext) {
+-            builder.setTextBody(AS_MCSTR(perRecipientBodies["self"].get<string>()));
+-        } else {
+-            builder.setHTMLBody(AS_MCSTR(perRecipientBodies["self"].get<string>()));
+-        }
+-    } else {
+-        if (plaintext) {
+-            builder.setTextBody(AS_MCSTR(body));
+-        } else {
+-            builder.setHTMLBody(AS_MCSTR(body));
+-        }
+-    }
++    if (plaintext) builder.setTextBody(AS_MCSTR(body));
++    else builder.setHTMLBody(AS_MCSTR(body));
+
+     builder.header()->setSubject(AS_MCSTR(draft.subject()));
+     builder.header()->setMessageID(AS_MCSTR(draft.headerMessageId()));
+@@ -2689,9 +2635,6 @@ void TaskProcessor::performRemoteSendDraft(Task * task) {
+     uint64_t gmailMessageId = 0;
+     string sentMessageId = draft.headerMessageId();
+
+-    // First version has one submission per operation; partial multi-send needs
+-    // per-recipient receipts and is intentionally rejected before any network I/O.
+-    if (multisend) throw SyncException("send-rejected", "Per-recipient bodies are not supported by this experiment.", false);
+     guard.transition(account->id(), task->id(), "queued", "attempting");
+     task->data()["_performRemoteRan"] = true;
+     task->data()["sendOutcome"] = "attempting";
+@@ -2711,19 +2654,14 @@ void TaskProcessor::performRemoteSendDraft(Task * task) {
+             }
+             throw;
+         }
+-        guard.transition(account->id(), task->id(), "attempting", "accepted");
++        // Gmail can rewrite Message-ID. Its API hex id is the IMAP X-GM-MSGID in decimal.
++        gmailMessageId = stoull(gmailReceipt, nullptr, 16);
++        guard.accept(account->id(), task->id(), "gmail:" + to_string(gmailMessageId));
+         task->data()["sendOutcome"] = "accepted";
+         task->data()["sentCopy"] = "pending";
+         task->data()["gmailMessageId"] = gmailReceipt;
+         store->save(task);
+-        // Gmail can rewrite Message-ID. Its API hex id is the IMAP X-GM-MSGID in decimal.
+-        gmailMessageId = stoull(gmailReceipt, nullptr, 16);
+     } else if (viaGraph) {
+-        // Graph delivers to every To/Cc/Bcc in the MIME and has no separate envelope, so it
+-        // cannot send each recipient their own body. The client does not ask it to.
+-        if (multisend) {
+-            throw SyncException("send-failed", "Separate per-recipient bodies cannot be sent through Microsoft Graph.", false);
+-        }
+         logger->info("-- Sending through Microsoft Graph:");
+         bool submitted = false;
+         string graphId;
+@@ -2736,17 +2674,26 @@ void TaskProcessor::performRemoteSendDraft(Task * task) {
+             }
+             throw;
+         }
+-        guard.transition(account->id(), task->id(), "attempting", "accepted");
++        guard.accept(account->id(), task->id(), sentMessageId);
+         task->data()["sendOutcome"] = "accepted";
+         task->data()["sentCopy"] = "pending";
+         store->save(task);
+         string filedMessageId = _waitForGraphSentCopy(account, graphId);
+         if (filedMessageId != "") {
+             sentMessageId = filedMessageId;
++            guard.recordSentIdentity(account->id(), task->id(), sentMessageId);
+         }
+     } else {
+-        _sendViaSMTP(account, builder, messageDataForSent, perRecipientBodies, plaintext, multisend);
+-        guard.transition(account->id(), task->id(), "attempting", "accepted");
++        try {
++            _sendViaSMTP(account, messageDataForSent);
++        } catch (SyncException & ex) {
++            if (ex.key == "send-rejected") {
++                guard.transition(account->id(), task->id(), "attempting", "rejected");
++                task->data()["sendOutcome"] = "rejected";
++            }
++            throw;
++        }
++        guard.accept(account->id(), task->id(), sentMessageId);
+         task->data()["sendOutcome"] = "accepted";
+         task->data()["sentCopy"] = "pending";
+         store->save(task);
+@@ -2779,11 +2726,9 @@ void TaskProcessor::performRemoteSendDraft(Task * task) {
+         // was seen to take ~3 min (76 sends, 2026-09-27); Gmail, Yahoo and Zoho file one too,
+         // iCloud and Fastmail by default do not. A Sent folder where a copy has turned up
+         // before is given longer, so providers that never file one don't slow every send.
+-        // A multisend is one SMTP submission per recipient, and the server files one copy each.
+         bool serverSaves = sent->localStatus().count(LS_SERVER_SAVES_SENT) > 0;
+         vector<int> delays = serverSaves ? vector<int>{0, 1, 1, 2, 2, 3, 3} : vector<int>{0, 1, 1, 2};
+-        size_t expected = multisend ? perRecipientBodies.size() - 1 : 1;
+-        IndexSet * uids = _waitForSentCopies(session, sentPath, draft.headerMessageId(), delays, expected);
++        IndexSet * uids = _waitForSentCopies(session, sentPath, draft.headerMessageId(), delays, 1);
+
+         if (uids->count() > 0 && !serverSaves) {
+             json initialLocalStatus = sent->localStatus();
+@@ -2791,25 +2736,7 @@ void TaskProcessor::performRemoteSendDraft(Task * task) {
+             store->saveFolderStatus(sent.get(), initialLocalStatus);
+         }
+
+-        if (multisend && (uids->count() > 0)) {
+-            // If we sent separate messages to each recipient, we end up with a bunch of sent
+-            // messages. Delete all of them since they contain the targeted bodies with link/open tracking.
+-            logger->info("-- Deleting {} messages added to {} by the SMTP gateway.", uids->count(), sentPath->UTF8Characters());
+-            _removeSentCopies(session, store, account, *sent, uids);
+-            
+-            // In Gmail, moving the messages from Sent -> Trash and expunging them just places them in All Mail
+-            // for some reason. Deleting them AGAIN from All Mail works properly, so we do that here.
+-            auto all = store->find<Folder>(Query().equal("accountId", account->id()).equal("role", "all"));
+-            if (all != nullptr) {
+-                uids->removeAllIndexes();
+-                session->findUIDsOfRecentHeaderMessageID(AS_MCSTR(all->path()), AS_MCSTR(draft.headerMessageId()), uids);
+-                if (uids->count() > 0) {
+-                    logger->info("-- Deleting {} messages just moved to {} by the SMTP gateway.", uids->count(), all->path());
+-                    _removeMessagesResilient(session, store, account->id(), AS_MCSTR(all->path()), uids);
+-                }
+-            }
+-
+-        } else if (!multisend && (uids->count() > 0)) {
++        if (uids->count() > 0) {
+             sentFolderMessageUID = (uint32_t)uids->allRanges()[0].location;
+             logger->info("-- Found a message added to the sent folder by the SMTP gateway (UID {}, {} copies)", sentFolderMessageUID, uids->count());
+             
+@@ -2861,8 +2788,8 @@ void TaskProcessor::performRemoteSendDraft(Task * task) {
+     }
+
+     string copyState = sentFolderMessageUID != 0 ? "filed" : ((viaGraph || viaGmail) ? "pending" : "failed");
+-    guard.setCopy(account->id(), task->id(), copyState);
+-    task->data()["sentCopy"] = copyState;
++    if (copyState != "pending") guard.setCopy(account->id(), task->id(), copyState);
++    task->data()["sentCopy"] = guard.request(account->id(), task->id())["sentCopy"];
+     store->save(task);
+
+     if (sentFolderMessageUID == 0) {

@@ -155,7 +155,7 @@ def run_case(mode):
         submission = {'id': 'send', '__cls': 'SendDraftTask', 'draft': draft, 'perRecipientBodies': None}
         ms.queue_task(submission)
         result = complete('send')
-        expected = 'accepted' if mode in ('accepted', 'rewritten-message-id') else 'rejected' if mode in ('rejected', 'refresh-rejected') else 'unknown'
+        expected = 'accepted' if mode in ('accepted', 'rewritten-message-id', 'late-sent-copy') else 'rejected' if mode in ('rejected', 'refresh-rejected') else 'unknown'
         assert result['sendOutcome'] == expected, result
         if mode == 'accepted':
             assert result['sentCopy'] == 'pending', result
@@ -165,6 +165,14 @@ def run_case(mode):
             assert result['sentCopy'] == 'filed', result
             assert row("SELECT COUNT(*) FROM Message WHERE headerMessageId='rewritten-by-google@example.test'")[0] == 1
             assert len(server.store.get('[Gmail]/Sent Mail').messages) == 1
+        if mode == 'late-sent-copy':
+            assert result['sentCopy'] == 'pending', result
+            # A rewritten header must still match the durable Gmail API receipt.
+            raw = message(9, message_id='<late-rewritten@example.test>')
+            saved = server.store.append('[Gmail]/Sent Mail', raw)
+            saved.gm_msgid = int('123456789abcdef', 16)
+            ms.wait_for(lambda: row("SELECT sentCopy FROM PaperReedSend WHERE requestId='send'") == ('filed',),
+                        45, 'late Sent sync reconciles receipt')
         expected_requests = 0 if mode == 'refresh-rejected' else 1
         assert len(requests) == expected_requests, requests
         ms.stop()
@@ -173,6 +181,8 @@ def run_case(mode):
         ms.queue_task(submission)
         ms.wait_quiescent(timeout=10)
         assert len(requests) == expected_requests, 'Restart/resubmit must not deliver twice'
+        if mode == 'late-sent-copy':
+            assert row("SELECT sentCopy FROM PaperReedSend WHERE requestId='send'") == ('filed',)
         assert len(server.sent_messages()) == 0, 'Gmail API must not fall back to SMTP'
         results.append({'case': mode, 'outcome': expected, 'api_submissions': len(requests), 'smtp_submissions': 0})
         print('PASS', mode, flush=True)
@@ -184,7 +194,7 @@ def run_case(mode):
         google.server_close()
 
 
-for mode in ('accepted', 'rewritten-message-id', 'rejected', 'lost-response', 'invalid-receipt', 'server-error', 'refresh-rejected'):
+for mode in ('accepted', 'rewritten-message-id', 'late-sent-copy', 'rejected', 'lost-response', 'invalid-receipt', 'server-error', 'refresh-rejected'):
     run_case(mode)
 (work / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
 print('Results:', work)
