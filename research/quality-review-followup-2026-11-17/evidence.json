@@ -1,0 +1,97 @@
+{
+  "baseline": "9dbc8f4c832537e1bba287e4166334447a94a1c1",
+  "guiSendRace": {
+    "reviewedRevision": 4,
+    "submittedRevision": 5,
+    "reviewedBody": "Reviewed GUI text",
+    "submittedBody": "New text saved by external agent"
+  },
+  "smtpSentCopy": [
+    {
+      "case": "append-response-lost",
+      "smtpSubmissions": 1,
+      "sentCopiesOnServer": 1,
+      "sentSyncedLocally": true,
+      "ledgerAfterRestart": [
+        "accepted",
+        "failed"
+      ]
+    }
+  ],
+  "reconcileCost": {
+    "syntheticSqlBenchmark": true,
+    "results": [
+      {
+        "messages": 10000,
+        "pending": 0,
+        "sentSaveHooks": 100,
+        "elapsedSeconds": 0.0004
+      },
+      {
+        "messages": 10000,
+        "pending": 1,
+        "sentSaveHooks": 100,
+        "elapsedSeconds": 0.0992
+      },
+      {
+        "messages": 10000,
+        "pending": 10,
+        "sentSaveHooks": 100,
+        "elapsedSeconds": 0.9898
+      }
+    ],
+    "queryPlan": [
+      [
+        5,
+        0,
+        62,
+        "SEARCH PaperReedSend USING INDEX sqlite_autoindex_PaperReedSend_1 (accountId=?)"
+      ],
+      [
+        17,
+        0,
+        0,
+        "CORRELATED SCALAR SUBQUERY 3"
+      ],
+      [
+        22,
+        17,
+        61,
+        "SEARCH m USING INDEX MessageListDateIndex (accountId=?)"
+      ],
+      [
+        49,
+        17,
+        0,
+        "CORRELATED SCALAR SUBQUERY 1"
+      ],
+      [
+        53,
+        49,
+        0,
+        "SCAN l VIRTUAL TABLE INDEX 3:"
+      ],
+      [
+        67,
+        17,
+        0,
+        "CORRELATED SCALAR SUBQUERY 2"
+      ],
+      [
+        74,
+        67,
+        62,
+        "SEARCH p USING INDEX MessageFolderMessageIndex (messageId=?)"
+      ],
+      [
+        82,
+        67,
+        46,
+        "SEARCH f USING INDEX sqlite_autoindex_Folder_1 (id=?)"
+      ]
+    ]
+  },
+  "nativeSha256": "44e518a92ce801f363aeb4687c8b42b1743cfebf81c7aa7e68ee31a911844347",
+  "realProviderAccounts": false,
+  "productCodeChanged": false
+}
