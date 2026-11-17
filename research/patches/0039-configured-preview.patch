@@ -1,0 +1,120 @@
+diff --git a/app/build/build.js b/app/build/build.js
+index 32383dd..926bf39 100644
+--- a/app/build/build.js
++++ b/app/build/build.js
+@@ -26,6 +26,9 @@ const buildDir = path.join(appDir, 'build');
+ const outputDir = path.join(appDir, 'dist');
+ const tmpdir = path.resolve(os.tmpdir(), 'nylas-build');
+ const packageJSON = require(path.join(appDir, 'package.json'));
++const upstreamVersion = packageJSON.version;
++packageJSON.version = process.env.PAPER_REED_VERSION || '0.1.0-preview.1';
++let googleClient = null;
+ const { compilerOptions } = require(path.join(appDir, 'tsconfig.json'));
+
+ /**
+@@ -153,24 +156,30 @@ function runCopyPlatformSpecificResources({ buildPath, platform }) {
+   }
+ }
+
+-function runCopyGoogleClient({ buildPath }) {
++function loadGoogleClient() {
+   const source = process.env.PAPER_REED_GOOGLE_CLIENT_FILE;
+   if (!source) return;
+   const { installed } = JSON.parse(fs.readFileSync(source, 'utf8'));
+   if (!installed?.client_id || !installed?.client_secret) {
+     throw new Error('PAPER_REED_GOOGLE_CLIENT_FILE must be a Google Desktop OAuth client JSON.');
+   }
+-  fs.writeFileSync(path.join(buildPath, 'paper-reed-google-client.json'), JSON.stringify({
+-    installed: { client_id: installed.client_id, client_secret: installed.client_secret },
+-  }));
++  googleClient = { installed: { client_id: installed.client_id, client_secret: installed.client_secret } };
++}
++
++function runCopyGoogleClient({ buildPath }) {
++  if (googleClient) {
++    fs.writeFileSync(path.join(buildPath, 'paper-reed-google-client.json'), JSON.stringify(googleClient));
++  }
+ }
+
+ function runWriteCommitHashIntoPackage({ buildPath }) {
+-  const commit = execSync('git rev-parse HEAD').toString();
+   const jsonPath = path.resolve(buildPath, 'package.json');
+-  let jsonString = fs.readFileSync(jsonPath).toString();
+-  jsonString = jsonString.replace('COMMIT_INSERTED_DURING_PACKAGING', commit.substr(0, 8));
+-  fs.writeFileSync(jsonPath, jsonString);
++  const metadata = JSON.parse(fs.readFileSync(jsonPath, 'utf8'));
++  metadata.version = packageJSON.version;
++  metadata.commitHash = process.env.PAPER_REED_SOURCE_COMMIT || 'development';
++  metadata.upstreamVersion = upstreamVersion;
++  metadata.repository = { type: 'git', url: 'https://github.com/macopc/PaperReed.git' };
++  fs.writeFileSync(jsonPath, JSON.stringify(metadata, null, 2) + '\n');
+ }
+
+ // For Electron versions that support the setuid sandbox on Linux, the
+@@ -558,6 +567,7 @@ async function createRpmInstaller() {
+ }
+
+ async function main() {
++  loadGoogleClient();
+   await runPackager();
+
+   if (process.argv.includes('--skip-installers')) {
+diff --git a/app/internal_packages/onboarding/lib/paper-reed-google-page.tsx b/app/internal_packages/onboarding/lib/paper-reed-google-page.tsx
+index b6d062a..3373277 100644
+--- a/app/internal_packages/onboarding/lib/paper-reed-google-page.tsx
++++ b/app/internal_packages/onboarding/lib/paper-reed-google-page.tsx
+@@ -5,7 +5,7 @@ import { authorizeGoogle } from './paper-reed-google-auth';
+ import { buildPaperReedGmailAccount } from './onboarding-helpers';
+
+ export default class PaperReedGooglePage extends React.Component<{ account: Account }> {
+-  state = { busy: false, error: '' };
++  state = { phase: 'idle', error: '' };
+   authorization?: AbortController;
+
+   componentWillUnmount() {
+@@ -15,9 +15,11 @@ export default class PaperReedGooglePage extends React.Component<{ account: Acco
+   connect = async () => {
+     const controller = new AbortController();
+     this.authorization = controller;
+-    this.setState({ busy: true, error: '' });
++    this.setState({ phase: 'authorizing', error: '' });
+     try {
+       const authorization = await authorizeGoogle(this.props.account.emailAddress, controller.signal);
++      controller.signal.throwIfAborted();
++      this.setState({ phase: 'connecting' });
+       const existing = AccountStore.accounts().find(a =>
+         a.emailAddress.toLowerCase() === authorization.emailAddress.toLowerCase()
+       );
+@@ -27,22 +29,27 @@ export default class PaperReedGooglePage extends React.Component<{ account: Acco
+     } catch (error) {
+       if (!controller.signal.aborted) this.setState({ error: error.message });
+     } finally {
+-      if (!controller.signal.aborted) this.setState({ busy: false });
++      if (!controller.signal.aborted) this.setState({ phase: 'idle' });
+     }
+   };
+
+   render() {
++    const busy = this.state.phase !== 'idle';
++    const reconnect = AccountStore.accounts().some(a => a.emailAddress === this.props.account.emailAddress);
+     return <div className="page account-setup">
+       <div className="pr-onboarding-brand">Paper Reed<span>让邮件回归从容</span></div>
+-      <h2>{this.props.account.emailAddress ? '重新连接 Google 邮箱' : '连接 Google 邮箱'}</h2>
++      <h2>{reconnect ? '重新连接 Google 邮箱' : '连接 Google 邮箱'}</h2>
+       <p className="message">{this.props.account.emailAddress || 'Gmail 和 Google Workspace'}<br />
+         在浏览器中登录 Google，一次授权即可收发邮件。</p>
++      {busy && <p className="message" role="status">{this.state.phase === 'authorizing'
++        ? '请在浏览器中完成 Google 登录。完成后将自动返回连接流程。'
++        : 'Google 已授权，正在连接邮件服务器…'}</p>}
+       {this.state.error && <p className="message error" role="alert">{this.state.error}</p>}
+       <div className="pr-onboarding-actions">
+-        <button className="btn btn-large" onClick={() => OnboardingActions.moveToPreviousPage()}>返回邮箱选择</button>
++        <button className="btn btn-large" onClick={() => OnboardingActions.moveToPreviousPage()}>{busy ? '取消连接' : '返回邮箱选择'}</button>
+         {' '}
+-        <button className="btn btn-large btn-add-account" data-google-connect disabled={this.state.busy} onClick={this.connect}>
+-          {this.state.busy ? '正在授权并连接…' : '使用 Google 登录'}
++        <button className="btn btn-large btn-add-account" data-google-connect disabled={busy} onClick={this.connect}>
++          {busy ? '连接中…' : '使用 Google 登录'}
+         </button>
+       </div>
+       <p className="pr-onboarding-note">凭据加密保存在本机</p>

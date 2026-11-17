@@ -1,0 +1,430 @@
+{
+  "scope": "Synthetic cached short plaintext mail. No real provider network or message sends. Automation timings, not p95.",
+  "appVersion": "0.1.0-preview.1",
+  "source": "05474a4f plus uncommitted configured-preview patch 0039",
+  "instrumentation": "CDP wrapper around workspace render and DatabaseStore._query; long tasks observed only after first rows. Queries from local-triage writer are not counted.",
+  "runs": [
+    {
+      "synthetic": true,
+      "launchToRowsMs": 716,
+      "threadCount": 10002,
+      "initialRows": 50,
+      "rowsAfterTyping": 50,
+      "liveSearch": false,
+      "submitToEmptyMs": 22,
+      "idle": {
+        "renders": 6,
+        "longTasks": [],
+        "databaseStoreQueryCount": 5
+      },
+      "unrelatedEvent": {
+        "renders": 1,
+        "longTasks": [],
+        "databaseStoreQueryCount": 3
+      },
+      "folderRuns": [
+        55,
+        59,
+        59
+      ],
+      "openMessageMs": 91,
+      "messageState": {
+        "loading": false,
+        "iframes": 1
+      },
+      "typing": {
+        "renders": 8
+      },
+      "matchingSearchMs": [
+        {
+          "query": "project",
+          "ms": 92,
+          "rows": 50
+        },
+        {
+          "query": "subject:note",
+          "ms": 34,
+          "rows": 50
+        },
+        {
+          "query": "from:alex",
+          "ms": 32,
+          "rows": 50
+        },
+        {
+          "query": "产品设计",
+          "ms": 32,
+          "rows": 50
+        },
+        {
+          "query": "设计",
+          "ms": 14,
+          "rows": 0
+        }
+      ],
+      "keyboard": {
+        "appleMailJMovesFocus": true,
+        "appleMailSearchBindingWorks": true,
+        "commandKChangedUI": false,
+        "commandFFocusSearch": true
+      }
+    },
+    {
+      "synthetic": true,
+      "launchToRowsMs": 933,
+      "threadCount": 100002,
+      "initialRows": 50,
+      "rowsAfterTyping": 50,
+      "liveSearch": false,
+      "submitToEmptyMs": 8,
+      "idle": {
+        "renders": 5,
+        "longTasks": [],
+        "databaseStoreQueryCount": 5
+      },
+      "unrelatedEvent": {
+        "renders": 1,
+        "longTasks": [],
+        "databaseStoreQueryCount": 3
+      },
+      "folderRuns": [
+        212,
+        214,
+        212
+      ],
+      "openMessageMs": 82,
+      "messageState": {
+        "loading": false,
+        "iframes": 1
+      },
+      "typing": {
+        "renders": 7
+      },
+      "matchingSearchMs": [
+        {
+          "query": "project",
+          "ms": 536,
+          "rows": 50
+        },
+        {
+          "query": "subject:note",
+          "ms": 299,
+          "rows": 50
+        },
+        {
+          "query": "from:alex",
+          "ms": 166,
+          "rows": 50
+        },
+        {
+          "query": "产品设计",
+          "ms": 183,
+          "rows": 50
+        },
+        {
+          "query": "设计",
+          "ms": 32,
+          "rows": 0
+        }
+      ],
+      "keyboard": {
+        "appleMailJMovesFocus": true,
+        "appleMailSearchBindingWorks": true,
+        "commandKChangedUI": false,
+        "commandFFocusSearch": true
+      }
+    },
+    {
+      "synthetic": true,
+      "launchToRowsMs": 842,
+      "threadCount": 100002,
+      "initialRows": 50,
+      "rowsAfterTyping": 50,
+      "liveSearch": false,
+      "submitToEmptyMs": 9,
+      "idle": {
+        "renders": 5,
+        "longTasks": [],
+        "databaseStoreQueryCount": 5
+      },
+      "unrelatedEvent": {
+        "renders": 1,
+        "longTasks": [],
+        "databaseStoreQueryCount": 3
+      },
+      "folderRuns": [
+        212,
+        214,
+        214
+      ],
+      "openMessageMs": 85,
+      "messageState": {
+        "loading": false,
+        "iframes": 1
+      },
+      "typing": {
+        "renders": 7
+      },
+      "matchingSearchMs": [
+        {
+          "query": "project",
+          "ms": 183,
+          "rows": 50
+        },
+        {
+          "query": "subject:note",
+          "ms": 384,
+          "rows": 50
+        },
+        {
+          "query": "from:alex",
+          "ms": 365,
+          "rows": 50
+        },
+        {
+          "query": "产品设计",
+          "ms": 266,
+          "rows": 50
+        },
+        {
+          "query": "设计",
+          "ms": 32,
+          "rows": 0
+        }
+      ],
+      "keyboard": {
+        "appleMailJMovesFocus": true,
+        "appleMailSearchBindingWorks": true,
+        "commandKChangedUI": false,
+        "commandFFocusSearch": true
+      },
+      "interactionTrace": {
+        "renders": 24,
+        "longTasks": [],
+        "maxDatabaseMs": 376.80000019073486
+      }
+    }
+  ],
+  "sqlDiagnostic": {
+    "10000": {
+      "production": {
+        "medianMs": 14.8,
+        "rows": 51,
+        "plan": [
+          [
+            8,
+            0,
+            92,
+            "SEARCH Thread USING INDEX sqlite_autoindex_Thread_1 (id=?)"
+          ],
+          [
+            12,
+            0,
+            0,
+            "LIST SUBQUERY 1"
+          ],
+          [
+            15,
+            12,
+            56,
+            "SEARCH ThreadCategory USING COVERING INDEX ThreadCategory_val_id (value=?)"
+          ],
+          [
+            23,
+            12,
+            0,
+            "CREATE BLOOM FILTER"
+          ],
+          [
+            36,
+            0,
+            0,
+            "CORRELATED SCALAR SUBQUERY 2"
+          ],
+          [
+            41,
+            36,
+            39,
+            "SEARCH s USING INDEX sqlite_autoindex_PaperReedLocalThread_1 (accountId=? AND threadId=?)"
+          ],
+          [
+            57,
+            0,
+            0,
+            "CORRELATED SCALAR SUBQUERY 3"
+          ],
+          [
+            62,
+            57,
+            39,
+            "SEARCH s USING INDEX sqlite_autoindex_PaperReedLocalThread_1 (accountId=? AND threadId=?)"
+          ],
+          [
+            87,
+            0,
+            0,
+            "USE TEMP B-TREE FOR ORDER BY"
+          ]
+        ]
+      },
+      "without_pin_order": {
+        "medianMs": 13.98,
+        "rows": 51,
+        "plan": [
+          [
+            8,
+            0,
+            92,
+            "SEARCH Thread USING INDEX sqlite_autoindex_Thread_1 (id=?)"
+          ],
+          [
+            12,
+            0,
+            0,
+            "LIST SUBQUERY 1"
+          ],
+          [
+            15,
+            12,
+            56,
+            "SEARCH ThreadCategory USING COVERING INDEX ThreadCategory_val_id (value=?)"
+          ],
+          [
+            23,
+            12,
+            0,
+            "CREATE BLOOM FILTER"
+          ],
+          [
+            36,
+            0,
+            0,
+            "CORRELATED SCALAR SUBQUERY 2"
+          ],
+          [
+            41,
+            36,
+            39,
+            "SEARCH s USING INDEX sqlite_autoindex_PaperReedLocalThread_1 (accountId=? AND threadId=?)"
+          ],
+          [
+            67,
+            0,
+            0,
+            "USE TEMP B-TREE FOR ORDER BY"
+          ]
+        ]
+      }
+    },
+    "100000": {
+      "production": {
+        "medianMs": 154.16,
+        "rows": 51,
+        "plan": [
+          [
+            8,
+            0,
+            92,
+            "SEARCH Thread USING INDEX sqlite_autoindex_Thread_1 (id=?)"
+          ],
+          [
+            12,
+            0,
+            0,
+            "LIST SUBQUERY 1"
+          ],
+          [
+            15,
+            12,
+            56,
+            "SEARCH ThreadCategory USING COVERING INDEX ThreadCategory_val_id (value=?)"
+          ],
+          [
+            23,
+            12,
+            0,
+            "CREATE BLOOM FILTER"
+          ],
+          [
+            36,
+            0,
+            0,
+            "CORRELATED SCALAR SUBQUERY 2"
+          ],
+          [
+            41,
+            36,
+            39,
+            "SEARCH s USING INDEX sqlite_autoindex_PaperReedLocalThread_1 (accountId=? AND threadId=?)"
+          ],
+          [
+            57,
+            0,
+            0,
+            "CORRELATED SCALAR SUBQUERY 3"
+          ],
+          [
+            62,
+            57,
+            39,
+            "SEARCH s USING INDEX sqlite_autoindex_PaperReedLocalThread_1 (accountId=? AND threadId=?)"
+          ],
+          [
+            87,
+            0,
+            0,
+            "USE TEMP B-TREE FOR ORDER BY"
+          ]
+        ]
+      },
+      "without_pin_order": {
+        "medianMs": 146.53,
+        "rows": 51,
+        "plan": [
+          [
+            8,
+            0,
+            92,
+            "SEARCH Thread USING INDEX sqlite_autoindex_Thread_1 (id=?)"
+          ],
+          [
+            12,
+            0,
+            0,
+            "LIST SUBQUERY 1"
+          ],
+          [
+            15,
+            12,
+            56,
+            "SEARCH ThreadCategory USING COVERING INDEX ThreadCategory_val_id (value=?)"
+          ],
+          [
+            23,
+            12,
+            0,
+            "CREATE BLOOM FILTER"
+          ],
+          [
+            36,
+            0,
+            0,
+            "CORRELATED SCALAR SUBQUERY 2"
+          ],
+          [
+            41,
+            36,
+            39,
+            "SEARCH s USING INDEX sqlite_autoindex_PaperReedLocalThread_1 (accountId=? AND threadId=?)"
+          ],
+          [
+            67,
+            0,
+            0,
+            "USE TEMP B-TREE FOR ORDER BY"
+          ]
+        ]
+      }
+    }
+  }
+}

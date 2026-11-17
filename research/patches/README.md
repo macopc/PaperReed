@@ -44,7 +44,7 @@
 
 在干净的固定版本 checkout 中，使用补丁的绝对路径分别执行 `git apply --check <patch>`、`git apply <patch>`。0001、0008、0023、0024、0026、0028、0032、0034、0036 按顺序在子模块根目录应用；其余补丁按编号在桌面根目录应用。应用全部原生补丁后重新构建引擎，并替换实验桌面 `app/mailsync`；0010 不要求额外原生构建。本轮已在临时目录恢复各文件的基线版本、实际应用补丁，并逐字节比对测试过的源码。
 
-当前工作区的 `research/.local/Mailspring` 已应用三十八份补丁，**不要重复应用**。安装过程中产生的上游 `app/package-lock.json` 变化不在补丁内。
+当前工作区的 `research/.local/Mailspring` 已应用三十九份补丁，**不要重复应用**。安装过程中产生的上游 `app/package-lock.json` 变化不在补丁内。
 
 接入方式：新增一个 `MailMutationGuard.hpp`，只依赖现有 SQLiteCpp / nlohmann。它由 `TaskProcessor.cpp` 和 `MailStore.cpp` 直接包含，不新增构建目标、服务、数据库或任务调度器。迁移在原数据库中建立 `PaperReedSend` 表和活动草稿唯一索引；实验阶段不改变上游 `user_version`。正式分支需要接入自己的版本化迁移。
 
@@ -111,3 +111,5 @@
 0036 / 0037 将 Gmail 收信与 HTTPS 发信合为一次项目 OAuth 登录；复用既有 token 缓存、凭据加密和重连流程，旧 send-only 账号保持可用。0036 需要重新编译引擎。实现、验证与真实重授权边界见 [Gmail 统一登录](../gmail-oauth-validation-2026-11-17/README.md)。Microsoft 项目方注册步骤见 [填写清单](../provider-integration-2026-11-17/MICROSOFT-SETUP.md)。
 
 0038 移除 Paper Reed 的 Microsoft 选择入口和专用登录页，保留上游协议实现及历史补丁。其他 IMAP 表单识别 Gmail 地址后引导 Google 登录，不再要求应用密码。不需要重编译原生引擎。验证见 [范围收敛记录](../provider-scope-validation-2026-11-17/README.md)。
+
+0039 补齐项目 Google 配置打包、Paper Reed 预览版版本／源码归属与 Google 登录阶段提示。无原生改动。见 [发行配置验证](../distribution-validation-2026-11-17/README.md)。

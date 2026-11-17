@@ -80,6 +80,7 @@ async function waitFor(fn){const end=Date.now()+10000;while(Date.now()<end){if(f
  }).default;
  const googlePage=new GooglePage({account:old});googlePage.setState=next=>Object.assign(googlePage.state,next);
  const connecting=googlePage.connect();await waitFor(()=>finishValidation);
+ assert.equal(googlePage.state.phase,'connecting');
  googlePage.componentWillUnmount();finishValidation(reconnected);await connecting;
  assert.equal(finishCount,0);pass('Leaving Google login during connection validation cannot save the account');
  ownClient='';assert.throws(()=>helpers.buildO365AuthURL(),/未配置/);assert.equal(exchanged,0);
