@@ -1,0 +1,19 @@
+{
+  "realProviderAccounts": false,
+  "passed": [
+    "own Microsoft identity, PKCE and mail-only scopes; no upstream fallback",
+    "Microsoft success",
+    "Microsoft missing-scope",
+    "Microsoft no-refresh",
+    "Microsoft wrong-account",
+    "Microsoft token-error",
+    "existing configuration icloud icloud.com",
+    "existing configuration icloud company.example.test",
+    "existing configuration imap qq.com",
+    "existing configuration imap 163.com",
+    "existing configuration imap fastmail.com",
+    "existing configuration imap custom.example.test",
+    "loopback callback, state rejection, single code exchange and local completion page",
+    "Microsoft consent cancellation does not create an account"
+  ]
+}

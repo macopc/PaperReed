@@ -1,0 +1,39 @@
+{
+  "realProviderAccounts": false,
+  "accountChecks": [
+    "graph-account-test",
+    "graph-account-test-not-consented"
+  ],
+  "sending": [
+    {
+      "case": "accepted",
+      "outcome": "accepted",
+      "api_submissions": 1,
+      "smtp_submissions": 0
+    },
+    {
+      "case": "rejected",
+      "outcome": "rejected",
+      "api_submissions": 1,
+      "smtp_submissions": 0
+    },
+    {
+      "case": "server-error",
+      "outcome": "unknown",
+      "api_submissions": 1,
+      "smtp_submissions": 0
+    },
+    {
+      "case": "lost-response",
+      "outcome": "unknown",
+      "api_submissions": 1,
+      "smtp_submissions": 0
+    },
+    {
+      "case": "refresh-rejected",
+      "outcome": "rejected",
+      "api_submissions": 0,
+      "smtp_submissions": 0
+    }
+  ]
+}

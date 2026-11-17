@@ -1,0 +1,90 @@
+diff --git a/MailSync/NetworkRequestUtils.cpp b/MailSync/NetworkRequestUtils.cpp
+index 50af124..144ea06 100644
+--- a/MailSync/NetworkRequestUtils.cpp
++++ b/MailSync/NetworkRequestUtils.cpp
+@@ -489,11 +489,11 @@ static GraphResponse _performGraphRequestOnce(const string & method, const strin
+     return resp;
+ }
+
+-GraphResponse PerformGraphRequest(const string & method, const string & url, const string & accessToken, const string & body, const string & contentType, const vector<string> & headers) {
++GraphResponse PerformGraphRequest(const string & method, const string & url, const string & accessToken, const string & body, const string & contentType, const vector<string> & headers, bool retryTransient) {
+     GraphResponse resp;
+     for (int attempt = 0; attempt < 3; attempt ++) {
+         resp = _performGraphRequestOnce(method, url, accessToken, body, contentType, headers);
+-        if (resp.status != 429 && resp.status != 503) {
++        if (!retryTransient || (resp.status != 429 && resp.status != 503)) {
+             break;
+         }
+         long wait = (std::min)((std::max)(resp.retryAfter, 1L), 30L); // parenthesized for <windows.h>'s min/max macros
+diff --git a/MailSync/NetworkRequestUtils.hpp b/MailSync/NetworkRequestUtils.hpp
+index f909053..ec6849c 100644
+--- a/MailSync/NetworkRequestUtils.hpp
++++ b/MailSync/NetworkRequestUtils.hpp
+@@ -59,11 +59,11 @@ struct GraphResponse {
+ string MicrosoftGraphURL();
+
+ // One Graph request. Throws SyncException only when no HTTP response arrives; the caller
+-// interprets the status. 429 and 503 are retried after Retry-After (at most twice), since
+-// Graph returns them without processing the request. An empty accessToken sends neither
++// interprets the status. Unless retryTransient is false, 429 and 503 are retried after
++// Retry-After (at most twice). Final send submissions disable retries. An empty accessToken sends neither
+ // Authorization nor Prefer, as upload session URLs require. Separate from CreateJSONRequest
+ // because bodies may be binary (upload chunks, base64 MIME) and requests carry extra headers.
+-GraphResponse PerformGraphRequest(const string & method, const string & url, const string & accessToken, const string & body = "", const string & contentType = "application/json", const vector<string> & headers = {});
++GraphResponse PerformGraphRequest(const string & method, const string & url, const string & accessToken, const string & body = "", const string & contentType = "application/json", const vector<string> & headers = {}, bool retryTransient = true);
+
+ // "<code>: <message>" from a Graph error response, for logs and the client's error dialog.
+ string GraphErrorDescription(const GraphResponse & resp);
+diff --git a/MailSync/TaskProcessor.cpp b/MailSync/TaskProcessor.cpp
+index 7699c92..c210cf8 100644
+--- a/MailSync/TaskProcessor.cpp
++++ b/MailSync/TaskProcessor.cpp
+@@ -2226,7 +2226,8 @@ static string _graphMessageURL(const string & graphId) {
+ static void _throwGraphSendFailed(const string & step, const GraphResponse & resp, const string & advice = "") {
+     string description = GraphErrorDescription(resp);
+     spdlog::get("logger")->error("-X Microsoft Graph could not {} (HTTP {}): {}", step, resp.status, description);
+-    throw SyncException("send-failed", "Microsoft could not " + step + ". " + advice + description, false);
++    throw SyncException(resp.status >= 400 && resp.status < 500 ? "send-rejected" : "send-failed",
++                        "Microsoft could not " + step + ". " + advice + description, false);
+ }
+
+ static void _graphDeleteQuietly(const string & token, const string & messageURL) {
+@@ -2342,7 +2343,7 @@ static vector<Attachment *> _detachAttachmentsForGraph(MessageBuilder & builder)
+
+ // Creates, fills and sends a Graph draft. Returns the draft's immutable id, which the copy
+ // Exchange files in Sent Items keeps.
+-static string _sendViaGraph(shared_ptr<Account> account, MessageBuilder & builder) {
++static string _sendViaGraph(shared_ptr<Account> account, MessageBuilder & builder, bool & submitted) {
+     auto logger = spdlog::get("logger");
+     string token;
+     try {
+@@ -2382,7 +2383,9 @@ static string _sendViaGraph(shared_ptr<Account> account, MessageBuilder & builde
+     logger->info("-- Sending Graph draft");
+     GraphResponse sent;
+     try {
+-        sent = PerformGraphRequest("POST", messageURL + "/send", token);
++        // Sending is the irreversible boundary. A 503 or lost response must not trigger a retry.
++        submitted = true;
++        sent = PerformGraphRequest("POST", messageURL + "/send", token, "", "application/json", {}, false);
+     } catch (SyncException & ex) {
+         throw SyncException("send-failed", "The connection to Microsoft was lost while sending. " + CHECK_SENT + ex.debuginfo, false);
+     }
+@@ -2722,7 +2725,17 @@ void TaskProcessor::performRemoteSendDraft(Task * task) {
+             throw SyncException("send-failed", "Separate per-recipient bodies cannot be sent through Microsoft Graph.", false);
+         }
+         logger->info("-- Sending through Microsoft Graph:");
+-        string graphId = _sendViaGraph(account, builder);
++        bool submitted = false;
++        string graphId;
++        try {
++            graphId = _sendViaGraph(account, builder, submitted);
++        } catch (SyncException & ex) {
++            if (!submitted || ex.key == "send-rejected") {
++                guard.transition(account->id(), task->id(), "attempting", "rejected");
++                task->data()["sendOutcome"] = "rejected";
++            }
++            throw;
++        }
+         guard.transition(account->id(), task->id(), "attempting", "accepted");
+         task->data()["sendOutcome"] = "accepted";
+         task->data()["sentCopy"] = "pending";

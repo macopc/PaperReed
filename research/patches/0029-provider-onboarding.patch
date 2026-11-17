@@ -1,0 +1,473 @@
+diff --git a/app/internal_packages/onboarding/lib/decorators/create-page-for-form.tsx b/app/internal_packages/onboarding/lib/decorators/create-page-for-form.tsx
+index e5fe161..25f08e1 100644
+--- a/app/internal_packages/onboarding/lib/decorators/create-page-for-form.tsx
++++ b/app/internal_packages/onboarding/lib/decorators/create-page-for-form.tsx
+@@ -116,7 +116,9 @@ const CreatePageForForm = (FormComponent: React.ComponentType<any> & Record<stri
+       OnboardingActions.setAccount(this.state.account);
+       if (this._formEl.submit) {
+         this.setState({ submitting: true });
+-        this._formEl.submit();
++        Promise.resolve(this._formEl.submit()).catch(err => {
++          this.setState({ submitting: false, errorMessage: err.message });
++        });
+       } else {
+         this.onConnect();
+       }
+@@ -378,8 +380,6 @@ const CreatePageForForm = (FormComponent: React.ComponentType<any> & Record<stri
+             onConnect={this.onConnect}
+           />
+           <div className="pr-onboarding-actions">
+-            {(!AppEnv.config.get('core.paperReed.enabled') ||
+-              FormComponent.displayName !== 'AccountBasicSettingsForm') && (
+               <button
+                 className="btn btn-large btn-gradient"
+                 disabled={submitting}
+@@ -387,11 +387,10 @@ const CreatePageForForm = (FormComponent: React.ComponentType<any> & Record<stri
+               >
+                 {AppEnv.config.get('core.paperReed.enabled') ? '返回' : localized('Back')}
+               </button>
+-            )}
+             {this._renderButton()}
+           </div>
+           {AppEnv.config.get('core.paperReed.enabled') && (
+-            <p className="pr-onboarding-note">开发预览 · 目前支持 IMAP / SMTP 邮箱</p>
++            <p className="pr-onboarding-note">开发预览 · 凭据仅存储在本机</p>
+           )}
+         </div>
+       );
+diff --git a/app/internal_packages/onboarding/lib/oauth-signin-page.tsx b/app/internal_packages/onboarding/lib/oauth-signin-page.tsx
+index ac7b37c..df6e484 100644
+--- a/app/internal_packages/onboarding/lib/oauth-signin-page.tsx
++++ b/app/internal_packages/onboarding/lib/oauth-signin-page.tsx
+@@ -99,6 +99,7 @@ export default class OAuthSignInPage extends React.Component<
+   _startTimer: NodeJS.Timeout;
+   _warnTimer: NodeJS.Timeout;
+   _mounted = false;
++  _receivedCode = false;
+
+   state: OAuthSignInPageState = {
+     authStage: 'initial',
+@@ -109,10 +110,6 @@ export default class OAuthSignInPage extends React.Component<
+     // Show the "Sign in to ..." prompt for a moment before bouncing
+     // to URL. (400msec animation + 200msec to read)
+     this._mounted = true;
+-    this._startTimer = setTimeout(() => {
+-      if (!this._mounted) return;
+-      shell.openExternal(this.props.providerAuthPageUrl);
+-    }, 600);
+     this._warnTimer = setTimeout(() => {
+       if (!this._mounted) return;
+       this.setState({ showAlternative: true });
+@@ -127,7 +124,8 @@ export default class OAuthSignInPage extends React.Component<
+         response.end('Unknown Request');
+         return;
+       }
+-      if (!oauthStateIsValid(extractOAuthStateFromUrl(request.url))) {
++      if (!oauthStateIsValid(extractOAuthStateFromUrl(request.url),
++          new URL(this.props.providerAuthPageUrl).searchParams.get('state'))) {
+         this._onStateMismatch();
+         response.writeHead(400);
+         response.end('Invalid State');
+@@ -135,12 +133,24 @@ export default class OAuthSignInPage extends React.Component<
+       }
+       if (authError) {
+         this._onAuthorizationDeclined(authError);
+-        response.end(localized('Sign-in was not completed. Return to Mailspring to continue.'));
++        response.end(AppEnv.config.get('core.paperReed.enabled')
++          ? 'Sign-in was not completed. Return to Paper Reed to continue.'
++          : localized('Sign-in was not completed. Return to Mailspring to continue.'));
++        return;
++      }
++      if (this._receivedCode) {
++        response.writeHead(409).end('This sign-in response has already been received.');
+         return;
+       }
++      this._receivedCode = true;
+       this._onReceivedCode(code);
+-      response.writeHead(302, { Location: 'https://id.getmailspring.com/oauth/finished' });
+-      response.end();
++      if (AppEnv.config.get('core.paperReed.enabled')) {
++        response.writeHead(200, { 'Content-Type': 'text/plain; charset=utf-8', 'Cache-Control': 'no-store' });
++        response.end('已收到 Microsoft 授权，请返回 Paper Reed。');
++      } else {
++        response.writeHead(302, { Location: 'https://id.getmailspring.com/oauth/finished' });
++        response.end();
++      }
+     });
+     this._server.once('error', (err) => {
+       AppEnv.showErrorDialog({
+@@ -152,7 +162,12 @@ export default class OAuthSignInPage extends React.Component<
+         ),
+       });
+     });
+-    this._server.listen(LOCAL_SERVER_PORT);
++    this._server.listen(LOCAL_SERVER_PORT, '127.0.0.1', () => {
++      this._startTimer = setTimeout(() => {
++        if (!this._mounted) return;
++        shell.openExternal(this.props.providerAuthPageUrl).catch(err => this._onError(err));
++      }, 600);
++    });
+   }
+
+   componentWillUnmount() {
+diff --git a/app/internal_packages/onboarding/lib/onboarding-helpers.ts b/app/internal_packages/onboarding/lib/onboarding-helpers.ts
+index b90a19a..60d8a42 100644
+--- a/app/internal_packages/onboarding/lib/onboarding-helpers.ts
++++ b/app/internal_packages/onboarding/lib/onboarding-helpers.ts
+@@ -142,7 +142,9 @@ async function srvServerFor(domain: string, services: SRVService[]): Promise<SRV
+ // Matches the account type presets ("yahoo") and common domains against data derived
+ // from Thunderbird's ISPDB.
+ function mailspringTemplateFor(domain: string, provider: string) {
+-  const match = MailspringProviderSettings[domain] || MailspringProviderSettings[provider];
++  const match = AppEnv.config.get('core.paperReed.enabled') && provider !== 'imap'
++    ? MailspringProviderSettings[provider]
++    : MailspringProviderSettings[domain] || MailspringProviderSettings[provider];
+   if (!match) return null;
+   return match.alias ? MailspringProviderSettings[match.alias] : match;
+ }
+@@ -192,7 +194,10 @@ export async function expandAccountWithCommonSettings(account: Account) {
+
+ export async function expandAccountForSetup(account: Account): Promise<ExpandedAccount> {
+   const domain = account.emailAddress.split('@').pop().toLowerCase();
+-  const mxRecords = await mxRecordsForDomain(domain);
++  const explicitProvider = AppEnv.config.get('core.paperReed.enabled') && account.provider !== 'imap';
++  const knownTemplate = mailspringTemplateFor(domain, account.provider);
++  const preferKnownTemplate = AppEnv.config.get('core.paperReed.enabled') && !!knownTemplate;
++  const mxRecords = explicitProvider || preferKnownTemplate ? [] : await mxRecordsForDomain(domain);
+   const populated = account.clone();
+
+   const usernameWithFormat = (format: string) => {
+@@ -205,6 +210,9 @@ export async function expandAccountForSetup(account: Account): Promise<ExpandedA
+   // email's domain and the mx records for the domain, which means it will identify that
+   // "foundry376.com" uses Google Apps, for example.
+   const template = Object.values(MailcoreProviderSettings).find((p) => {
++    // Exact provider/domain settings take precedence over Mailcore's broad matches
++    // (notably qq.com, which its table also matches to Tencent enterprise mail).
++    if (explicitProvider || preferKnownTemplate) return false;
+     for (const test of p['domain-match'] || []) {
+       if (new RegExp(`^${test}$`).test(domain)) {
+         return true;
+@@ -246,11 +254,11 @@ export async function expandAccountForSetup(account: Account): Promise<ExpandedA
+
+   // Resolved before autoconfig is attempted: autoconfig describes IMAP/SMTP connectivity
+   // only, so any key the provider table owns has to come from the template either way.
+-  let mstemplate = mailspringTemplateFor(domain, account.provider);
++  let mstemplate = knownTemplate;
+
+   // An OAuth token is only accepted by its provider's servers. The servers in the domain's
+   // autoconfig file can be different ones, such as a mail server the domain used before.
+-  if (!account.usesOAuth() && (await TryThunderbirdAutoconfig(populated, account, mstemplate))) {
++  if (!explicitProvider && !account.usesOAuth() && (await TryThunderbirdAutoconfig(populated, account, mstemplate))) {
+     return { account: applyContainerFolderDefault(populated), confirmServers: false };
+   }
+
+@@ -372,9 +380,20 @@ export async function buildGmailAccountFromAuthResponse(code: string) {
+ // on a scope the user was not asked to approve. `withGraphSend: false` is the sign-in for
+ // organizations that decline the Graph mail scopes.
+ function o365Scopes({ withGraphSend }: { withGraphSend: boolean }) {
++  if (AppEnv.config.get('core.paperReed.enabled')) {
++    return ['openid', 'email', 'profile', 'User.Read', 'offline_access',
++      'https://outlook.office.com/IMAP.AccessAsUser.All',
++      'https://outlook.office.com/SMTP.Send', ...O365_GRAPH_SEND_SCOPES];
++  }
+   return withGraphSend ? [...O365_SCOPES, ...O365_GRAPH_SEND_SCOPES] : O365_SCOPES;
+ }
+
++export function microsoftClientId(): string {
++  if (!AppEnv.config.get('core.paperReed.enabled')) return O365_CLIENT_ID;
++  return process.env.PAPER_REED_MICROSOFT_CLIENT_ID ||
++    AppEnv.config.get('core.paperReed.microsoftClientId') || '';
++}
++
+ export async function buildO365AccountFromAuthResponse(
+   code: string,
+   {
+@@ -413,8 +432,12 @@ export function grantsGraphSend(scope: string | undefined) {
+ export async function buildMicrosoftAccountFromAuthResponse(
+   code: string,
+   provider: 'outlook' | 'office365',
+-  { sharedMailboxAddress, withGraphSend }: { sharedMailboxAddress?: string; withGraphSend: boolean }
++  { sharedMailboxAddress, withGraphSend, expectedEmail }: {
++    sharedMailboxAddress?: string; withGraphSend: boolean; expectedEmail?: string;
++  }
+ ) {
++  const clientId = microsoftClientId();
++  if (!clientId) throw new Error('此构建尚未配置 Paper Reed 的 Microsoft 登录。');
+   /// Exchange code for an access token
+   const { access_token, refresh_token, id_token, scope } =
+     await fetchPostWithFormBody<TokenResponse>(
+@@ -424,13 +447,18 @@ export async function buildMicrosoftAccountFromAuthResponse(
+         scope: o365Scopes({ withGraphSend })
+           .filter((f) => !f.startsWith('https://outlook.office.com'))
+           .join(' '),
+-        client_id: O365_CLIENT_ID,
++        client_id: clientId,
+         code_verifier: CODE_VERIFIER,
+         grant_type: `authorization_code`,
+         redirect_uri: `http://localhost:${LOCAL_SERVER_PORT}/desktop`,
+       }
+     );
+
++  if (AppEnv.config.get('core.paperReed.enabled') &&
++      (!refresh_token || !grantsGraphSend(scope))) {
++    throw new Error('Microsoft 未授予所需的邮件权限，请重新登录并完成授权。');
++  }
++
+   // get the user's email address
+   const meResp = await fetch('https://graph.microsoft.com/v1.0/me', {
+     headers: { Authorization: `Bearer ${access_token}` },
+@@ -473,6 +501,10 @@ export async function buildMicrosoftAccountFromAuthResponse(
+     throw err;
+   }
+
++  if (expectedEmail && emailAddress.toLowerCase() !== expectedEmail.toLowerCase()) {
++    throw new Error('登录的 Microsoft 账号与正在重新连接的邮箱不同。');
++  }
++
+   // A shared mailbox has no credentials of its own — it is accessed with the signed-in
+   // user's OAuth refresh token. IMAP accepts the shared mailbox as the XOAUTH2 identity
+   // (requires "Full Access"), but SMTP AUTH only accepts the signed-in user, who then
+@@ -488,7 +520,7 @@ export async function buildMicrosoftAccountFromAuthResponse(
+   // disable SMTP AUTH. Shared mailboxes keep SMTP: Graph would file the sent copy in the
+   // signed-in user's Sent Items rather than the shared mailbox's.
+   const settings: any = {
+-    refresh_client_id: O365_CLIENT_ID,
++    refresh_client_id: clientId,
+     refresh_token: refresh_token,
+     graph_send: !sharedMailboxAddress && grantsGraphSend(scope),
+   };
+@@ -499,14 +531,25 @@ export async function buildMicrosoftAccountFromAuthResponse(
+     emailAddress = sharedMailboxAddress;
+   }
+
+-  const account = await expandAccountWithCommonSettings(
+-    new Account({
++  const baseAccount = new Account({
+       name: me.displayName,
+       emailAddress: emailAddress,
+       provider: provider,
+       settings,
+-    })
+-  );
++    });
++  let account: Account;
++  if (AppEnv.config.get('core.paperReed.enabled')) {
++    Object.assign(baseAccount.settings, {
++      imap_host: 'outlook.office365.com', imap_port: 993, imap_security: 'SSL / TLS',
++      smtp_host: 'smtp.office365.com', smtp_port: 587, smtp_security: 'STARTTLS',
++      imap_username: emailAddress, smtp_username: emailAddress,
++      imap_allow_insecure_ssl: false, smtp_allow_insecure_ssl: false,
++      create_helper_folders: false, container_folder: '', smtp_verification: 'login',
++    });
++    account = baseAccount;
++  } else {
++    account = await expandAccountWithCommonSettings(baseAccount);
++  }
+
+   account.id = idForAccount(emailAddress, account.settings);
+
+@@ -532,9 +575,11 @@ export function buildGmailAuthURL() {
+ }
+
+ export function buildO365AuthURL({ withGraphSend = true }: { withGraphSend?: boolean } = {}) {
++  const clientId = microsoftClientId();
++  if (!clientId) throw new Error('此构建尚未配置 Paper Reed 的 Microsoft 登录。');
+   const scopes = o365Scopes({ withGraphSend });
+   return `https://login.microsoftonline.com/common/oauth2/v2.0/authorize?${qs.stringify({
+-    client_id: O365_CLIENT_ID,
++    client_id: clientId,
+     redirect_uri: `http://localhost:${LOCAL_SERVER_PORT}/desktop`,
+     response_type: 'code',
+     scope: scopes.join(' '),
+diff --git a/app/internal_packages/onboarding/lib/onboarding-root.tsx b/app/internal_packages/onboarding/lib/onboarding-root.tsx
+index 185bf6f..dca0dac 100644
+--- a/app/internal_packages/onboarding/lib/onboarding-root.tsx
++++ b/app/internal_packages/onboarding/lib/onboarding-root.tsx
+@@ -17,6 +17,7 @@ import InitialPreferencesPage from './page-initial-preferences';
+ import InitialSubscriptionPage from './page-initial-subscription';
+ import AccountSettingsPageOutlook from './page-account-settings-outlook';
+ import AccountCertificatePage from './page-account-certificate';
++import PaperReedMicrosoftPage from './paper-reed-microsoft-page';
+ import { RejectedCertificate } from './certificate-review';
+
+ const PageComponents = {
+@@ -24,6 +25,7 @@ const PageComponents = {
+   tutorial: TutorialPage,
+   authenticate: AuthenticatePage,
+   'account-choose': AccountChoosePage,
++  'paper-reed-microsoft': PaperReedMicrosoftPage,
+   'account-settings': AccountSettingsPage,
+   'account-settings-gmail': AccountSettingsPageGmail,
+   'account-settings-o365': AccountSettingsPageO365,
+diff --git a/app/internal_packages/onboarding/lib/onboarding-store.ts b/app/internal_packages/onboarding/lib/onboarding-store.ts
+index 8809df3..9853f2a 100644
+--- a/app/internal_packages/onboarding/lib/onboarding-store.ts
++++ b/app/internal_packages/onboarding/lib/onboarding-store.ts
+@@ -45,8 +45,8 @@ class OnboardingStore extends MailspringStore {
+         ? new Account({}).fromJSON(existingAccountJSON)
+         : new Account({ name: '', emailAddress: '', provider: 'imap', settings: {} });
+       this._pageStack = existingAccountJSON
+-        ? ['account-settings', 'account-settings-imap']
+-        : ['account-settings'];
++        ? ['account-choose', ['outlook', 'office365'].includes(this._account.provider) ? 'paper-reed-microsoft' : 'account-settings-imap']
++        : ['account-choose'];
+       return;
+     }
+
+@@ -100,6 +100,16 @@ class OnboardingStore extends MailspringStore {
+   };
+
+   _onChooseAccountProvider = (provider: string) => {
++    if (AppEnv.config.get('core.paperReed.enabled')) {
++      const microsoft = provider === 'outlook' || provider === 'office365';
++      this._onSetAccount(new Account({
++        name: '', emailAddress: '',
++        provider: provider === 'gmail' ? 'imap' : provider,
++        settings: provider === 'gmail' ? { imap_host: 'imap.gmail.com', smtp_host: 'smtp.gmail.com' } : {},
++      }));
++      this._onMoveToPage(microsoft ? 'paper-reed-microsoft' : 'account-settings');
++      return;
++    }
+     const nextPage =
+       provider === 'gmail'
+         ? 'account-settings-gmail'
+diff --git a/app/internal_packages/onboarding/lib/page-account-choose.tsx b/app/internal_packages/onboarding/lib/page-account-choose.tsx
+index 988bd80..228b524 100644
+--- a/app/internal_packages/onboarding/lib/page-account-choose.tsx
++++ b/app/internal_packages/onboarding/lib/page-account-choose.tsx
+@@ -8,6 +8,19 @@ export default class AccountChoosePage extends React.Component<{ account?: objec
+   static displayName = 'AccountChoosePage';
+
+   _renderProviders() {
++    if (AppEnv.config.get('core.paperReed.enabled')) {
++      return [
++        ['gmail', 'Gmail'],
++        ['office365', 'Outlook / Microsoft 365'],
++        ['icloud', 'iCloud Mail'],
++        ['imap', '其他 IMAP 邮箱'],
++      ].map(([provider, name]) => (
++        <button type="button" key={provider} className={`provider ${provider}`}
++          data-provider={provider} onClick={() => OnboardingActions.chooseAccountProvider(provider)}>
++          <span className="provider-name">{name}</span>
++        </button>
++      ));
++    }
+     return AccountProviders.map(({ icon, displayName, provider }) => (
+       <div
+         key={provider}
+@@ -25,7 +38,7 @@ export default class AccountChoosePage extends React.Component<{ account?: objec
+   render() {
+     return (
+       <div className="page account-choose">
+-        <h2>{localized('Connect an email account')}</h2>
++        <h2>{AppEnv.config.get('core.paperReed.enabled') ? '连接你的邮箱' : localized('Connect an email account')}</h2>
+         <div className="provider-list">{this._renderProviders()}</div>
+       </div>
+     );
+diff --git a/app/internal_packages/onboarding/lib/page-account-settings.tsx b/app/internal_packages/onboarding/lib/page-account-settings.tsx
+index a2d0323..37db9ea 100644
+--- a/app/internal_packages/onboarding/lib/page-account-settings.tsx
++++ b/app/internal_packages/onboarding/lib/page-account-settings.tsx
+@@ -11,13 +11,14 @@ interface AccountBasicSettingsFormProps {
+   errorFieldNames: string[];
+   submitting: boolean;
+   onConnect: (account: Account) => void;
+-  onFieldChange: () => void;
++  onFieldChange: (event: { target: { id: string; value: any } }) => void;
+   onFieldKeyPress: () => void;
+ }
+ export class AccountBasicSettingsForm extends React.Component<AccountBasicSettingsFormProps> {
+   static displayName = 'AccountBasicSettingsForm';
+
+   static submitLabel = (account: Account) => {
++    if (AppEnv.config.get('core.paperReed.enabled')) return localized('Continue');
+     return account.provider === 'imap' ? localized('Continue') : localized('Connect Account');
+   };
+
+@@ -71,9 +72,12 @@ export class AccountBasicSettingsForm extends React.Component<AccountBasicSettin
+     return { errorMessage, errorFieldNames, populated: true };
+   };
+
+-  async submit() {
++  async submit(manual = false) {
+     if (AppEnv.config.get('core.paperReed.enabled')) {
+-      const account = this.props.account.clone();
++      const expanded = manual
++        ? { account: this.props.account.clone(), confirmServers: false }
++        : await expandAccountForSetup(this.props.account);
++      const account = expanded.account;
+       account.settings = {
+         imap_username: account.emailAddress,
+         smtp_username: account.emailAddress,
+@@ -89,7 +93,7 @@ export class AccountBasicSettingsForm extends React.Component<AccountBasicSettin
+         smtp_verification: 'login',
+         ...account.settings,
+       };
+-      OnboardingActions.setAccount(account);
++      OnboardingActions.setAccount(account, { confirmServers: expanded.confirmServers });
+       OnboardingActions.moveToPage('account-settings-imap');
+       return;
+     }
+@@ -117,11 +121,14 @@ export class AccountBasicSettingsForm extends React.Component<AccountBasicSettin
+   render() {
+     return (
+       <form className="settings">
++        {AppEnv.config.get('core.paperReed.enabled') && this.props.account.provider === 'icloud' &&
++          <p>使用 Apple 账户生成的应用专用密码。服务器设置会自动填写。</p>}
+         <FormField
+           field="name"
+           title={AppEnv.config.get('core.paperReed.enabled') ? '发件人姓名' : localized('Name')}
+           {...this.props}
+         />
++
+         <FormField
+           field="emailAddress"
+           title={AppEnv.config.get('core.paperReed.enabled') ? '邮箱地址' : localized('Email')}
+@@ -137,6 +144,10 @@ export class AccountBasicSettingsForm extends React.Component<AccountBasicSettin
+           type="password"
+           {...this.props}
+         />
++        {AppEnv.config.get('core.paperReed.enabled') && this.props.account.provider === 'imap' &&
++          <button type="button" className="btn" data-manual-setup
++            disabled={this.props.submitting || (!AccountBasicSettingsForm.validateAccount(this.props.account).populated || this.props.errorFieldNames.length > 0)}
++            onClick={() => this.submit(true)}>手动填写服务器</button>}
+       </form>
+     );
+   }
+diff --git a/app/internal_packages/onboarding/lib/paper-reed-microsoft-page.tsx b/app/internal_packages/onboarding/lib/paper-reed-microsoft-page.tsx
+new file mode 100644
+index 0000000..63c2438
+--- /dev/null
++++ b/app/internal_packages/onboarding/lib/paper-reed-microsoft-page.tsx
+@@ -0,0 +1,31 @@
++import React from 'react';
++import { Account } from 'mailspring-exports';
++import OAuthSignInPage from './oauth-signin-page';
++import AccountProviders from './account-providers';
++import * as OnboardingActions from './onboarding-actions';
++import { buildMicrosoftAccountFromAuthResponse, buildO365AuthURL, microsoftClientId } from './onboarding-helpers';
++
++// Reuse the upstream browser/PKCE flow and native Graph transport. The application
++// registration is configured by the distributor, never borrowed from upstream.
++export default class PaperReedMicrosoftPage extends React.Component<{ account: Account }> {
++  authURL = microsoftClientId() ? buildO365AuthURL() : null;
++
++  render() {
++    if (!this.authURL) return <div className="page account-choose">
++      <h2>Microsoft 登录尚未配置</h2>
++      <p>此开发构建需要由维护者配置 Paper Reed 的 Microsoft 应用。</p>
++      <p>配置完成后，可直接使用 Outlook、Hotmail 或 Microsoft 365 账号登录。</p>
++      <button className="btn" onClick={() => OnboardingActions.moveToPreviousPage()}>返回邮箱选择</button>
++    </div>;
++    return <OAuthSignInPage
++      serviceName="Microsoft" providerAuthPageUrl={this.authURL}
++      providerConfig={AccountProviders.find(p => p.provider === 'office365')}
++      buildAccountFromAuthResponse={code => buildMicrosoftAccountFromAuthResponse(
++        code, this.props.account.provider === 'outlook' ? 'outlook' : 'office365',
++        { withGraphSend: true, expectedEmail: this.props.account.emailAddress || undefined }
++      )}
++      onSuccess={account => OnboardingActions.finishAndAddAccount(account)}
++      onTryAgain={() => OnboardingActions.moveToPreviousPage()}
++    />;
++  }
++}

@@ -10,7 +10,7 @@ const run=expression=>evaluate(cdp,expression);
 async function until(fn,label,timeout=45000){const end=Date.now()+timeout;while(Date.now()<end){const value=await fn();if(value)return value;await new Promise(resolve=>setTimeout(resolve,200));}throw new Error('Timeout: '+label);}
 const type=page=>{try{return JSON.parse(new URL(page.url()).searchParams.get('loadSettings')).windowType;}catch{return null;}};
 async function start(){
- const env={...process.env,PAPER_REED_CLI_BIN_DIR:path.join(work,'bin')};delete env.PLAYWRIGHT;delete env.ELECTRON_RUN_AS_NODE;
+ const env={...process.env,PAPER_REED_CLI_BIN_DIR:path.join(work,'bin')};delete env.PLAYWRIGHT;delete env.ELECTRON_RUN_AS_NODE;delete env.PAPER_REED_MICROSOFT_CLIENT_ID;
  app=await _electron.launch({executablePath:packaged||r('electron'),args:[...(packaged?[]:[path.join(upstream,'app'),'--dev']),'--no-sandbox','--config-dir-path',config],env,timeout:45000});
  app.process().stderr.on('data',b=>fs.appendFileSync(path.join(work,'electron.log'),b));
  app.on('window',p=>{p.on('dialog',()=>{});p.on('console',msg=>fs.appendFileSync(path.join(work,'renderer.log'),msg.type()+': '+msg.text()+'\n'));});
@@ -21,7 +21,24 @@ async function click(selector){await main.locator(selector).first().click();}
 async function stop(){const process=app.process();await app.evaluate(({app})=>app.quit());await until(async()=>process.exitCode!==null,'normal quit');app=null;}
 (async()=>{
  assert(!fs.existsSync(config));await start();await selectWindow('onboarding');
+ await main.locator('[data-provider=office365]').click();
+ await main.getByText('Microsoft 登录尚未配置',{exact:true}).waitFor();
+ await main.getByRole('button',{name:'返回邮箱选择',exact:true}).click();
+ await main.locator('[data-provider=icloud]').click();
+ await main.locator('#name').fill('iCloud fixture');
+ await main.locator('#emailAddress').fill('fixture@icloud.com');
+ await main.locator('[id="settings.imap_password"]').fill('fixture-app-password');
+ await main.getByRole('button',{name:'下一步',exact:true}).click();
+ await main.locator('[id="settings.imap_host"]').waitFor();
+ assert.equal(await main.locator('[id="settings.imap_host"]').inputValue(),'imap.mail.me.com');
+ assert.equal(await main.locator('[id="settings.smtp_host"]').inputValue(),'smtp.mail.me.com');
+ assert.equal(await main.locator('[id="settings.smtp_port"]').inputValue(),'587');
+ assert.equal(await main.locator('[id="settings.smtp_security"]').inputValue(),'STARTTLS');
+ await main.locator('.AccountIMAPSettingsForm').getByRole('button',{name:'返回',exact:true}).click();
+ await main.locator('.AccountBasicSettingsForm').getByRole('button',{name:'返回',exact:true}).click();
+ await main.locator('[data-provider=imap]').click();
  await main.locator('#name').waitFor();
+ console.log('PASS provider selection, missing Microsoft app configuration, iCloud settings and back navigation');
  assert.equal(await app.evaluate(({app})=>app.getName()),'Paper Reed');
  assert.equal(await app.evaluate(({app})=>app.getPath('userData')),config);
  assert.equal((JSON.parse(fs.readFileSync(path.join(config,'config.json')))['*'].accounts||[]).length,0);
@@ -29,7 +46,7 @@ async function stop(){const process=app.process();await app.evaluate(({app})=>ap
  await main.locator('#name').fill('Paper Reed Test');
  await main.locator('#emailAddress').fill(fixture.emailAddress);
  await main.locator('[id="settings.imap_password"]').fill('wrong-password');
- await main.getByRole('button',{name:'下一步',exact:true}).click();
+ await main.locator('[data-manual-setup]').click();
  await main.locator('[id="settings.imap_host"]').waitFor();
  for(const protocol of ['imap','smtp']){
    await main.locator(`[id="settings.${protocol}_host"]`).fill(fixture.settings[protocol+'_host']);
@@ -55,6 +72,11 @@ async function stop(){const process=app.process();await app.evaluate(({app})=>ap
  assert.equal(savedConfig.accounts.length,1);assert(!fs.readFileSync(path.join(config,'config.json'),'utf8').includes('imap_password'));
  assert(!savedConfig.identity);assert.equal(await app.evaluate(()=>global.application.autoUpdateManager.getState()),'unsupported');
  await shot('inbox');console.log('PASS blank profile / wrong credentials / native connection / initial inbox');
+ // Reserve a fixture port so another running Paper Reed profile is unaffected.
+ const reservation=require('node:net').createServer();
+ await new Promise(resolve=>reservation.listen(0,'127.0.0.1',resolve));
+ const mcpPort=reservation.address().port;await new Promise(resolve=>reservation.close(resolve));
+ await run(`AppEnv.config.set('core.mcp.port',${mcpPort});true`);
  // Establish read-only access and install the real CLI through settings.
  await main.locator('.pr-sidebar button').filter({hasText:'设置'}).click();await click('[data-settings-tab=MCP]');
  await main.locator('#pr-agent-enabled').check();await click('input[name=agent-access][value=read-only]');
