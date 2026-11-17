@@ -1,0 +1,5 @@
+2026-11-17T15:05:45.081528+00:00
+Command: sandbox-exec -f research/harness/loopback-only.sb node research/harness/check-live-search.cjs
+Fixture: 10000 synthetic cached messages
+PASS live typing, clear, IME, isolated input renders, unrelated events, unchanged send results, retained rows, late results and mail refresh
+Exit: 0

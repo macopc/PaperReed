@@ -115,3 +115,5 @@
 0039 补齐项目 Google 配置打包、Paper Reed 预览版版本／源码归属与 Google 登录阶段提示。无原生改动。见 [发行配置验证](../distribution-validation-2026-11-17/README.md)。
 
 0040 接通即时搜索与中文组词处理，缩小输入渲染和数据库事件刷新范围，发送记录未变时不重绘。复用现有查询、轮询与 generation，无原生改动。见 [第一阶段验证](../search-performance-review-2026-11-17/IMPLEMENTATION.md)。
+
+0041 将邮件列表接回预设和自定义命令绑定，提供轻量命令面板，保留编辑器链接快捷键。无原生改动。见 [按键与命令面板验证](../command-panel-validation-2026-11-17/README.md)。

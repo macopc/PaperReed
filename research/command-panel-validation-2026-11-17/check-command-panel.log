@@ -1,0 +1,13 @@
+2026-11-17T15:05:41.250339+00:00
+Command: sandbox-exec -f research/harness/loopback-only.sb node research/harness/check-command-panel.cjs
+Fixture: 10000 synthetic cached messages
+PASS command palette with no list row focused
+PASS Gmail J moves to next row; X selects and Escape clears
+PASS Apple Mail ignores J and honors ArrowDown
+PASS custom N binding changes actual list behavior
+PASS Cmd+K, filtered command and Enter navigate to drafts
+PASS Cmd+Shift+P, Escape and focus restoration
+PASS typing action letters in search does not activate list commands
+PASS editor Cmd+K does not open palette; Cmd+Shift+P does
+PASS command-panel workflow in isolated synthetic profile; no mail sent
+Exit: 0
