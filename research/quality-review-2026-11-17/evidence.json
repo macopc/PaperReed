@@ -1,0 +1,65 @@
+{
+  "baseline": "46a5756",
+  "scope": "Paper Reed patches 0001–0031 and their direct upstream call paths; no production edits",
+  "gmailLocalFeatures": [
+    {
+      "accountId": "c-mixed-0",
+      "snooze": {
+        "items": [
+          {
+            "accountId": "c-mixed-0",
+            "threadId": "t:bnepfQr6X36ouG3TswFaPx9f85uMUeodXjv86V44T",
+            "status": "rejected",
+            "error": "snooze-needs-synced-inbox"
+          }
+        ]
+      },
+      "rule": {
+        "error": "snooze-needs-synced-inbox"
+      }
+    },
+    {
+      "accountId": "c-mixed-1",
+      "snooze": {
+        "items": [
+          {
+            "accountId": "c-mixed-1",
+            "threadId": "t:FyrxJGWSfvEvEoQ3ZNqcZjZGbpfXiVnf1XySA2kSw",
+            "status": "succeeded"
+          }
+        ]
+      },
+      "rule": {
+        "id": "936d2683-7cdb-4bc4-88ef-400dedb11080"
+      }
+    }
+  ],
+  "smtpAuthentication": [
+    {
+      "smtpResponse": "535 5.7.8 Authentication failed",
+      "smtpSubmissions": 0,
+      "outcome": "unknown",
+      "editError": "draft-frozen"
+    }
+  ],
+  "lateSentCopy": [
+    {
+      "case": "accepted",
+      "outcome": "accepted",
+      "api_submissions": 1,
+      "smtp_submissions": 0,
+      "sentCopyAfterLateSyncAndRestart": "pending",
+      "lateMessageInDatabase": true
+    }
+  ],
+  "refreshRace": {
+    "newerResult": "accepted",
+    "stateAfterOlderQueryResolves": "queued"
+  },
+  "nativeBinarySHA256": "47420e31722d7a06e87e87a635867f3d51f5fca5ba4b9cd021db03cf81e95ed0",
+  "realEmailSent": false,
+  "limitations": [
+    "Refresh race controls dependency completion order; not a production latency measurement.",
+    "Protocol probes use loopback fixtures; no claim that every provider was tested."
+  ]
+}
