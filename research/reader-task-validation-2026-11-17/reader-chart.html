@@ -1,0 +1,9 @@
+<!doctype html><html lang="zh-CN"><meta charset="utf-8"><style>
+body{font-family:var(--font-sans,system-ui);color:var(--foreground);margin:0}h3{font-size:15px;margin:0 0 6px}p{font-size:12px;color:var(--muted-foreground);margin:8px 0 16px}.row{display:grid;grid-template-columns:92px 1fr 66px;align-items:center;gap:10px;margin:12px 0;font-size:12px}.track{height:19px;position:relative;background:var(--secondary);border-radius:3px}.bar{height:19px;border-radius:3px;background:var(--chart-1)}.after{background:var(--chart-2)}.limit{position:absolute;left:83.333%;height:23px;top:-2px;border-left:1px dashed var(--foreground);opacity:.6}.val{text-align:right;font-variant-numeric:tabular-nums}small{display:block;font-size:11px;color:var(--muted-foreground);line-height:1.7}
+</style><h3>首次打开邮件 · 主线程任务</h3><p>真实打包应用，3 账号 / 30,000 会话；虚线为 50ms。</p>
+<div class="row"><span>原始样本</span><div class="track"><div class="bar" style="width:88.102%"></div><i class="limit"></i></div><span class="val">52.9 ms</span></div>
+<div class="row"><span>修改前复测</span><div class="track"><div class="bar" style="width:82.758%"></div><i class="limit"></i></div><span class="val">49.7 ms</span></div>
+<div class="row"><span>修改后 · 1</span><div class="track"><div class="bar after" style="width:72.523%"></div><i class="limit"></i></div><span class="val">43.5 ms</span></div>
+<div class="row"><span>修改后 · 2</span><div class="track"><div class="bar after" style="width:74.447%"></div><i class="limit"></i></div><span class="val">44.7 ms</span></div>
+<div class="row"><span>修改后 · 3</span><div class="track"><div class="bar after" style="width:73.47%"></div><i class="limit"></i></div><span class="val">44.1 ms</span></div>
+<small>只调整图标目录的读取方式，保留现有缓存和渲染流程。<br>本机隔离合成负载，含诊断开销；不代表所有机器与邮件的耗时。</small></html>

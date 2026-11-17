@@ -2,6 +2,8 @@
 
 状态：可行性探索，不代表已最终选定产品底座或完成生产验证。
 
+[首次打开邮件的长任务](reader-task-validation-2026-11-17/README.md) 已定位到图标目录扫描，0045 仅调整目录读取方式，保存了三次完整负载 Trace、截图与映射兼容性检查。
+
 实现进展：[CLI / GUI 共用草稿与发送结果接口](shared-core-validation.md)，包括可应用补丁、实验 CLI、真实引擎交接与请求重试检查。
 
 后续 [真实写信窗口交接](compose-handoff-validation.md) 已通过 CLI 建稿、GUI 自动保存／发送、旧 CLI 修订拒绝与结果查询；[反向未保存编辑冲突](unsaved-conflict-validation.md) 已复现并修复关闭窗口丢失输入的问题；后续 [另存副本与重启恢复](recovery-copy-validation.md) 已通过文本草稿路径。[Paper Reed 界面接入](ui-validation-2026-11-16/README.md) 开始连接真实数据与编辑状态；附件、真实服务商与完整设计验收仍待完成。

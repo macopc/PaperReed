@@ -1,0 +1,21 @@
+{
+  "calls": [
+    {
+      "ms": 16.100000381469727,
+      "withFileTypes": false
+    }
+  ],
+  "cacheEntries": 2590,
+  "resolved": "images/toolbar/toolbar-compose@1x.png",
+  "ratio": 1
+}
+PASS cold lookup, repeated cache hit, full legacy path mapping, duplicate basename precedence, Retina selection and missing icon
+AssertionError [ERR_ASSERTION]: Cold image directory scan exceeded local 15ms diagnostic budget
+    at /Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/harness/check-image-cache.cjs:97:50 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: false,
+  expected: true,
+  operator: '==',
+  diff: 'simple'
+}

@@ -26,6 +26,9 @@ execFileSync("python3", [
 ]);
 let app, page;
 const result = { synthetic: true };
+// Optional local diagnostics; the default workload keeps its existing behavior.
+const traceDir = process.env.AUDIT_TRACE_DIR && path.resolve(process.env.AUDIT_TRACE_DIR);
+if (traceDir) fs.mkdirSync(traceDir, { recursive: true });
 (async () => {
   const env = { ...process.env };
   delete env.ELECTRON_RUN_AS_NODE;
@@ -71,6 +74,7 @@ const result = { synthetic: true };
 
   const pause=ms=>new Promise(resolve=>setTimeout(resolve,ms));
   const until=async(expression,timeout=20000)=>{const end=Date.now()+timeout;while(!(await run(expression))){if(Date.now()>end)throw Error('Timeout: '+expression);await pause(30)}};
+  if (traceDir) await cdp.send('Tracing.start',{categories:'devtools.timeline,disabled-by-default-devtools.timeline,disabled-by-default-devtools.timeline.stack,v8,blink.user_timing',transferMode:'ReturnAsStream'});
   await cdp.send('Performance.enable');
   await cdp.send('Profiler.enable');await cdp.send('Profiler.start');
   await run(`(()=>{
@@ -81,6 +85,15 @@ const result = { synthetic: true };
     window.loadTasks=[];new PerformanceObserver(list=>loadTasks.push(...list.getEntries().map(e=>({start:e.startTime,duration:e.duration})))).observe({type:'longtask'});
   })()`);
   result.database=await run(`loadEnv.DatabaseStore._query('SELECT COUNT(*) threads FROM Thread').then(r=>r[0])`);
+  if (traceDir) await run(`(()=>{
+    window.syncProbes=[];window.packageProbes=[];
+    const manager=AppEnv.packages,activate=manager.activatePackage;
+    manager.activatePackage=function(pkg){const start=performance.now();try{return activate.call(this,pkg)}finally{packageProbes.push({name:pkg.name,start,ms:performance.now()-start})}};
+    const wrap=(obj,key,label)=>{const fn=obj[key];obj[key]=function(...args){const start=performance.now();try{return fn.apply(this,args)}finally{const ms=performance.now()-start;if(ms>5)syncProbes.push({label,start,ms,stack:new Error().stack})}}};
+    wrap(require('electron').ipcRenderer,'sendSync','ipc.sendSync');
+    const fs=require('fs');for(const key of ['readFileSync','statSync','existsSync','readdirSync'])wrap(fs,key,'fs.'+key);
+    wrap(loadEnv.DatabaseStore,'_executeLocally','db.local');
+  })()`);
   result.phases={queriesStart:await run('performance.now()')};
   result.queries=await run(`(async()=>{
     const {queryInbox,inboxDesktopAccess}=loadApi;const {AccountStore,DatabaseStore,Thread}=loadEnv;
@@ -139,6 +152,7 @@ const result = { synthetic: true };
   result.htmlOpenToBodyMs=performance.now()-t;
   result.burst=await run('loadBurst');
   result.htmlDOM=await run('Array.from(document.querySelectorAll("iframe")).map(f=>({textLength:f.contentDocument?.body?.textContent.length,rows:f.contentDocument?.querySelectorAll("tr").length}))');
+  if (traceDir) await page.screenshot({path:path.join(traceDir,'reader.png')});
   console.log('PASS complex HTML body rendered through end marker, including table rows');
   await page.locator('[data-mailbox=inbox]').click();await page.locator('.pr-search-input').fill('subject:Conversation');
   await until('ws.state.query==="subject:Conversation"&&!ws.state.loading');
@@ -153,5 +167,15 @@ const result = { synthetic: true };
   const nodes=new Map(cpu.nodes.map(n=>[n.id,n.callFrame])),cost=new Map();
   for(let i=0;i<(cpu.samples||[]).length;i++){const id=cpu.samples[i];cost.set(id,(cost.get(id)||0)+cpu.timeDeltas[i]);}
   result.rendererCPU=Array.from(cost,([id,us])=>({name:nodes.get(id).functionName,file:nodes.get(id).url.split('/').slice(-3).join('/'),ms:us/1000})).sort((a,b)=>b.ms-a.ms).slice(0,15);
+  if (traceDir) {
+    result.syncProbes=await run('syncProbes');result.packageProbes=await run('packageProbes');
+    const complete=new Promise(resolve=>cdp.once('Tracing.tracingComplete',resolve));
+    await cdp.send('Tracing.end');
+    const {stream}=await complete;let chunks='';
+    while(true){const part=await cdp.send('IO.read',{handle:stream});chunks+=part.data;if(part.eof)break}
+    await cdp.send('IO.close',{handle:stream});
+    fs.writeFileSync(path.join(traceDir,'trace.json.gz'),require('node:zlib').gzipSync(chunks));
+    fs.writeFileSync(path.join(traceDir,'result.json'),JSON.stringify(result,null,2));
+  }
   console.log(JSON.stringify(result,null,2));
 })().catch(e=>{console.error(e);console.error(JSON.stringify(result,null,2));process.exitCode=1}).finally(async()=>{if(app)await app.close();});

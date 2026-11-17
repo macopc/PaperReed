@@ -1,0 +1,47 @@
+[
+  {
+    "run": "original",
+    "readerTaskMs": 52.861,
+    "imageScanMs": 20.2,
+    "htmlOpenToBodyMs": 119.154,
+    "longTasks": [
+      {
+        "start": 2829.1000003814697,
+        "duration": 52
+      }
+    ],
+    "trace": "research/startup-task-validation-2026-11-17/after-trace.json.gz"
+  },
+  {
+    "run": "before-repeat",
+    "readerTaskMs": 49.655,
+    "imageScanMs": 20.9,
+    "htmlOpenToBodyMs": 117.895,
+    "longTasks": [],
+    "trace": "research/reader-task-validation-2026-11-17/before-repeat-trace.json.gz"
+  },
+  {
+    "run": "after-1",
+    "readerTaskMs": 43.514,
+    "imageScanMs": 13.1,
+    "htmlOpenToBodyMs": 112.465,
+    "longTasks": [],
+    "trace": "research/reader-task-validation-2026-11-17/after-1-trace.json.gz"
+  },
+  {
+    "run": "after-2",
+    "readerTaskMs": 44.668,
+    "imageScanMs": 14.1,
+    "htmlOpenToBodyMs": 114.961,
+    "longTasks": [],
+    "trace": "research/reader-task-validation-2026-11-17/after-2-trace.json.gz"
+  },
+  {
+    "run": "after-3",
+    "readerTaskMs": 44.082,
+    "imageScanMs": 13.9,
+    "htmlOpenToBodyMs": 110.888,
+    "longTasks": [],
+    "trace": "research/reader-task-validation-2026-11-17/after-3-trace.json.gz"
+  }
+]

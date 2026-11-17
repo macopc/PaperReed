@@ -1,0 +1,4 @@
+---> Packaging for 38s
+---> Done Successfully. Built into: /Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64
+---> Skipping installer creation (--skip-installers flag detected)
+Built Paper Reed 0.1.0-preview.1 from cd684627b3903693d8c811526f3847765f52500b-dirty; signing/notarization depend on build configuration.

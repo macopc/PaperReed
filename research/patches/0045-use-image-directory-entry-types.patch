@@ -1,0 +1,13 @@
+--- a/app/src/flux/models/utils.ts
++++ b/app/src/flux/models/utils.ts
+@@ -259,8 +259,8 @@
+     }
+ 
+     const imagesPath = path.join(ResourcePath, 'static', 'images');
+-    const files = (fs.readdirSync(imagesPath, { recursive: true }) as string[]).map((f) =>
+-      path.join(imagesPath, f)
++    const files = fs.readdirSync(imagesPath, { recursive: true, withFileTypes: true }).map((entry) =>
++      path.join(entry.parentPath, entry.name)
+     );
+     for (let file of files) {
+       // On Windows, we get paths like C:\images\compose.png, but

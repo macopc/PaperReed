@@ -1,0 +1,12 @@
+{
+  "calls": [
+    {
+      "ms": 10.5,
+      "withFileTypes": true
+    }
+  ],
+  "cacheEntries": 2590,
+  "resolved": "images/toolbar/toolbar-compose@1x.png",
+  "ratio": 1
+}
+PASS cold lookup, repeated cache hit, full legacy path mapping, duplicate basename precedence, Retina selection and missing icon

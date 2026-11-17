@@ -1,0 +1,605 @@
+{
+  "synthetic": true,
+  "launchToRowsMs": 726,
+  "database": {
+    "threads": 30000
+  },
+  "phases": {
+    "queriesStart": 592.0999994277954,
+    "guiStart": 2124,
+    "htmlStart": 2827.5999994277954
+  },
+  "queries": [
+    {
+      "accounts": [
+        "load0000",
+        "load0001",
+        "load0002"
+      ],
+      "query": "",
+      "rows": 50,
+      "elapsedMs": [
+        1.8000001907348633,
+        1.8999996185302734,
+        1.8000001907348633
+      ]
+    },
+    {
+      "accounts": [
+        "load0000",
+        "load0001",
+        "load0002"
+      ],
+      "query": "设计",
+      "rows": 50,
+      "elapsedMs": [
+        54.19999980926514,
+        51.30000019073486,
+        52.89999961853027
+      ]
+    },
+    {
+      "accounts": [
+        "load0000",
+        "load0001",
+        "load0002"
+      ],
+      "query": "账户1专属",
+      "rows": 50,
+      "elapsedMs": [
+        53,
+        53.30000019073486,
+        54.59999942779541
+      ]
+    },
+    {
+      "accounts": [
+        "load0000",
+        "load0001",
+        "load0002"
+      ],
+      "query": "quarterly",
+      "rows": 50,
+      "elapsedMs": [
+        11,
+        9.90000057220459,
+        9.899999618530273
+      ]
+    },
+    {
+      "accounts": [
+        "load0000",
+        "load0001",
+        "load0002"
+      ],
+      "query": "not-present-token",
+      "rows": 0,
+      "elapsedMs": [
+        1.1000003814697266,
+        0.8999996185302734,
+        1
+      ]
+    },
+    {
+      "accounts": [
+        "load0000"
+      ],
+      "query": "",
+      "rows": 50,
+      "elapsedMs": [
+        0.8000001907348633,
+        0.8999996185302734,
+        0.8000001907348633
+      ]
+    },
+    {
+      "accounts": [
+        "load0000"
+      ],
+      "query": "设计",
+      "rows": 50,
+      "elapsedMs": [
+        36,
+        36.40000057220459,
+        36.09999942779541
+      ]
+    },
+    {
+      "accounts": [
+        "load0000"
+      ],
+      "query": "账户1专属",
+      "rows": 0,
+      "elapsedMs": [
+        46.30000019073486,
+        81.80000019073486,
+        49
+      ]
+    },
+    {
+      "accounts": [
+        "load0000"
+      ],
+      "query": "quarterly",
+      "rows": 50,
+      "elapsedMs": [
+        8.399999618530273,
+        8.5,
+        8
+      ]
+    },
+    {
+      "accounts": [
+        "load0000"
+      ],
+      "query": "not-present-token",
+      "rows": 0,
+      "elapsedMs": [
+        0.5,
+        0.3000001907348633,
+        0.6000003814697266
+      ]
+    },
+    {
+      "accounts": [
+        "load0001"
+      ],
+      "query": "",
+      "rows": 50,
+      "elapsedMs": [
+        1,
+        0.9000005722045898,
+        0.8999996185302734
+      ]
+    },
+    {
+      "accounts": [
+        "load0001"
+      ],
+      "query": "设计",
+      "rows": 50,
+      "elapsedMs": [
+        36.60000038146973,
+        56.80000019073486,
+        39.19999980926514
+      ]
+    },
+    {
+      "accounts": [
+        "load0001"
+      ],
+      "query": "账户1专属",
+      "rows": 50,
+      "elapsedMs": [
+        49.89999961853027,
+        48.90000057220459,
+        48.59999942779541
+      ]
+    },
+    {
+      "accounts": [
+        "load0001"
+      ],
+      "query": "quarterly",
+      "rows": 50,
+      "elapsedMs": [
+        8,
+        7.5,
+        7.699999809265137
+      ]
+    },
+    {
+      "accounts": [
+        "load0001"
+      ],
+      "query": "not-present-token",
+      "rows": 0,
+      "elapsedMs": [
+        0.40000057220458984,
+        0.3000001907348633,
+        0.5
+      ]
+    },
+    {
+      "accounts": [
+        "load0002"
+      ],
+      "query": "",
+      "rows": 50,
+      "elapsedMs": [
+        0.6999998092651367,
+        0.7000007629394531,
+        0.7999992370605469
+      ]
+    },
+    {
+      "accounts": [
+        "load0002"
+      ],
+      "query": "设计",
+      "rows": 50,
+      "elapsedMs": [
+        36,
+        36.40000057220459,
+        37.39999961853027
+      ]
+    },
+    {
+      "accounts": [
+        "load0002"
+      ],
+      "query": "账户1专属",
+      "rows": 0,
+      "elapsedMs": [
+        45.40000057220459,
+        45,
+        44.19999980926514
+      ]
+    },
+    {
+      "accounts": [
+        "load0002"
+      ],
+      "query": "quarterly",
+      "rows": 50,
+      "elapsedMs": [
+        8.09999942779541,
+        7.800000190734863,
+        7.5
+      ]
+    },
+    {
+      "accounts": [
+        "load0002"
+      ],
+      "query": "not-present-token",
+      "rows": 0,
+      "elapsedMs": [
+        0.5,
+        0.3000001907348633,
+        0.5
+      ]
+    }
+  ],
+  "accountSwitchMs": [
+    {
+      "id": "load0000",
+      "ms": 39.49016599999959
+    },
+    {
+      "id": "load0002",
+      "ms": 38.20366699999977
+    },
+    {
+      "id": "",
+      "ms": 36.44279199999983
+    }
+  ],
+  "htmlOpenToBodyMs": 112.46495800000002,
+  "burst": {
+    "queries": 18,
+    "totalMs": 590.8999996185303
+  },
+  "htmlDOM": [
+    {
+      "textLength": 60788,
+      "rows": 160
+    }
+  ],
+  "longThreadOpenToBodyMs": 78.39000000000033,
+  "longTasks": [],
+  "rendererMetrics": [
+    {
+      "name": "Documents",
+      "value": 12
+    },
+    {
+      "name": "Nodes",
+      "value": 9478
+    },
+    {
+      "name": "TaskDuration",
+      "value": 0.565579
+    },
+    {
+      "name": "JSHeapUsedSize",
+      "value": 74070676
+    },
+    {
+      "name": "JSHeapTotalSize",
+      "value": 128892928
+    }
+  ],
+  "rendererCPU": [
+    {
+      "name": "(idle)",
+      "file": "",
+      "ms": 2535.965
+    },
+    {
+      "name": "(program)",
+      "file": "",
+      "ms": 357.596
+    },
+    {
+      "name": "removeChild",
+      "file": "",
+      "ms": 10.956
+    },
+    {
+      "name": "PaperReedWorkspace.renderRow",
+      "file": "paper-reed/lib/workspace.js",
+      "ms": 10.895
+    },
+    {
+      "name": "PaperReedWorkspace.renderRow",
+      "file": "paper-reed/lib/workspace.js",
+      "ms": 10.39
+    },
+    {
+      "name": "insertBefore",
+      "file": "",
+      "ms": 10.098
+    },
+    {
+      "name": "PaperReedWorkspace.renderRow",
+      "file": "paper-reed/lib/workspace.js",
+      "ms": 9.652
+    },
+    {
+      "name": "dispatchEvent",
+      "file": "",
+      "ms": 9.567
+    },
+    {
+      "name": "parseChannelMessages",
+      "file": "node:internal/child_process/serialization",
+      "ms": 8.024
+    },
+    {
+      "name": "select",
+      "file": "",
+      "ms": 5.14
+    },
+    {
+      "name": "setTimeout",
+      "file": "",
+      "ms": 4.715
+    },
+    {
+      "name": "sendSync",
+      "file": "",
+      "ms": 4.649
+    },
+    {
+      "name": "splitPath",
+      "file": "",
+      "ms": 4.521
+    },
+    {
+      "name": "RegExp: (((([A-Za-z]{3,9}:(?:\\/\\/))(?:[\\-;:&=\\+\\$,\\w]+@)?(([a-zA-Z0-9-_]+\\.)*[a-zA-Z0-9][a-zA-Z0-9-_]+\\.[a-zA-Z]{2,11}|(?:[0-9]{1,3}\\.){3}[0-9]{1,3})|([A-Za-z]{3,9}:(?:\\/\\/))?(?:[\\-;:&=\\+\\$,\\w]+@)?(([a-zA-Z0-9-_]+\\.)*[a-zA-Z0-9][a-zA-Z0-9-_]+\\.(?:com|org|edu|gov|uk|net|ca|de|jp|fr|au|us|ru|ch|it|nl|se|no|es|mil|ly)|(?:[0-9]{1,3}\\.){3}[0-9]{1,3}))(?::d*)?|mailto:\\/*(?:\\w+\\.|[\\-;:&=\\+\\$.,\\w]+@)[A-Za-z0-9\\.\\-]+)((?:[\\+=~%\\/\\.\\w\\-_@:]*[\\+~%\\/\\w\\-:_])?(?:\\?[\\-\\+=&;:%@$\\(\\)'\\*\\/~\\!\\.,\\w_]*[\\-\\+=&;~%@\\w_\\/])*(?:#['\\$\\&\\(\\)\\*\\+,;=\\.\\!\\/\\\\\\w%-?]*[\\/\\\\\\w])?)?)",
+      "file": "",
+      "ms": 4.335
+    },
+    {
+      "name": "appendChild",
+      "file": "",
+      "ms": 3.611
+    }
+  ],
+  "syncProbes": [
+    {
+      "label": "fs.readdirSync",
+      "start": 2858.5,
+      "ms": 13.09999942779541,
+      "stack": "Error\n    at obj.<computed> [as readdirSync] (<anonymous>:5:227)\n    at ensureImageCacheReady (/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/flux/models/utils.js:222:36)\n    at Object.imageNamed (/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/flux/models/utils.js:234:5)\n    at pathFor (/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/components/retina-img.js:43:43)\n    at /Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/src/components/retina-img.js:45:31\n    at Ch (/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/node_modules/react-dom/cjs/react-dom.production.min.js:157:137)\n    at gi (/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/node_modules/react-dom/cjs/react-dom.production.min.js:176:260)\n    at ck (/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/node_modules/react-dom/cjs/react-dom.production.min.js:271:400)\n    at bk (/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/node_modules/react-dom/cjs/react-dom.production.min.js:250:347)\n    at ak (/Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/dist/Paper Reed-darwin-arm64/Paper Reed.app/Contents/Resources/app.asar/node_modules/react-dom/cjs/react-dom.production.min.js:250:278)"
+    }
+  ],
+  "packageProbes": [
+    {
+      "name": "activity",
+      "start": 1176.2999992370605,
+      "ms": 0.10000038146972656
+    },
+    {
+      "name": "category-mapper",
+      "start": 1176.3999996185303,
+      "ms": 2
+    },
+    {
+      "name": "category-picker",
+      "start": 1178.7999992370605,
+      "ms": 1.8000001907348633
+    },
+    {
+      "name": "composer-grammar-check",
+      "start": 1180.5999994277954,
+      "ms": 1.6999998092651367
+    },
+    {
+      "name": "composer-signature",
+      "start": 1182.2999992370605,
+      "ms": 2
+    },
+    {
+      "name": "composer-templates",
+      "start": 1184.2999992370605,
+      "ms": 2.1000003814697266
+    },
+    {
+      "name": "contacts",
+      "start": 1190.8999996185303,
+      "ms": 6.699999809265137
+    },
+    {
+      "name": "custom-sounds",
+      "start": 1202.1999998092651,
+      "ms": 0.3000001907348633
+    },
+    {
+      "name": "draft-list",
+      "start": 1207.1999998092651,
+      "ms": 3.5
+    },
+    {
+      "name": "events",
+      "start": 1215.1999998092651,
+      "ms": 3.1999998092651367
+    },
+    {
+      "name": "github-contact-card",
+      "start": 1224.1999998092651,
+      "ms": 0
+    },
+    {
+      "name": "link-tracking",
+      "start": 1229.1999998092651,
+      "ms": 0
+    },
+    {
+      "name": "unsubscribe",
+      "start": 1233.5999994277954,
+      "ms": 34.60000038146973
+    },
+    {
+      "name": "mcp-server",
+      "start": 1272.5,
+      "ms": 25.09999942779541
+    },
+    {
+      "name": "message-view-on-github",
+      "start": 1303,
+      "ms": 0
+    },
+    {
+      "name": "mode-switch",
+      "start": 1307.2999992370605,
+      "ms": 1.9000005722045898
+    },
+    {
+      "name": "open-tracking",
+      "start": 1313.5999994277954,
+      "ms": 0
+    },
+    {
+      "name": "participant-profile",
+      "start": 1318.0999994277954,
+      "ms": 0
+    },
+    {
+      "name": "personal-level-indicators",
+      "start": 1322.5,
+      "ms": 0
+    },
+    {
+      "name": "phishing-detection",
+      "start": 1328.0999994277954,
+      "ms": 0
+    },
+    {
+      "name": "print",
+      "start": 1332.7999992370605,
+      "ms": 1.1000003814697266
+    },
+    {
+      "name": "remove-tracking-pixels",
+      "start": 1338.6999998092651,
+      "ms": 0.39999961853027344
+    },
+    {
+      "name": "screenshot-mode",
+      "start": 1343.0999994277954,
+      "ms": 0.40000057220458984
+    },
+    {
+      "name": "send-and-archive",
+      "start": 1347.5999994277954,
+      "ms": 0.8000001907348633
+    },
+    {
+      "name": "send-later",
+      "start": 1353,
+      "ms": 0
+    },
+    {
+      "name": "send-reminders",
+      "start": 1357.2999992370605,
+      "ms": 0
+    },
+    {
+      "name": "system-tray",
+      "start": 1362.7999992370605,
+      "ms": 2.3000001907348633
+    },
+    {
+      "name": "theme-picker",
+      "start": 1369.5999994277954,
+      "ms": 2
+    },
+    {
+      "name": "thread-sharing",
+      "start": 1375.5999994277954,
+      "ms": 0
+    },
+    {
+      "name": "thread-snooze",
+      "start": 1379.7999992370605,
+      "ms": 0
+    },
+    {
+      "name": "translation",
+      "start": 1384.1999998092651,
+      "ms": 0
+    },
+    {
+      "name": "ui-automatic",
+      "start": 1388.3999996185303,
+      "ms": 0
+    },
+    {
+      "name": "ui-dark",
+      "start": 1393,
+      "ms": 0
+    },
+    {
+      "name": "ui-darkside",
+      "start": 1397.1999998092651,
+      "ms": 0
+    },
+    {
+      "name": "less-is-more",
+      "start": 1401.2999992370605,
+      "ms": 0
+    },
+    {
+      "name": "ui-light",
+      "start": 1405.5,
+      "ms": 0.09999942779541016
+    },
+    {
+      "name": "ui-taiga",
+      "start": 1410.0999994277954,
+      "ms": 0
+    },
+    {
+      "name": "ui-ubuntu",
+      "start": 1414.5,
+      "ms": 0
+    },
+    {
+      "name": "undo-redo",
+      "start": 1419.0999994277954,
+      "ms": 2.1999998092651367
+    },
+    {
+      "name": "unread-notifications",
+      "start": 1426.6999998092651,
+      "ms": 1.3000001907348633
+    },
+    {
+      "name": "views",
+      "start": 1432.2999992370605,
+      "ms": 19.90000057220459
+    }
+  ]
+}
