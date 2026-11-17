@@ -1,0 +1,78 @@
+{
+  "synthetic": true,
+  "launchToRowsMs": 729,
+  "render": {
+    "blockedRequests": [],
+    "scriptExecuted": false,
+    "inlineLoaded": true,
+    "allowedRequests": [
+      "/ordinary",
+      "/srcset",
+      "/shorthand",
+      "/stylesheet",
+      "/font"
+    ],
+    "frameRecreated": true,
+    "reblockedRequests": []
+  },
+  "credentials": {
+    "bothUpdatesSaved": true,
+    "deletedAccountStaysDeleted": true,
+    "otherAccountUpdated": true,
+    "crossWindowUpdatesSaved": true,
+    "untrustedWindowRejected": true,
+    "failureRecovery": {
+      "outcomes": [
+        "rejected",
+        "fulfilled"
+      ],
+      "keys": [
+        "b"
+      ]
+    }
+  },
+  "writer": {
+    "operationMs": 1814.8000001907349,
+    "heartbeatMs": 22.5,
+    "changed": {
+      "items": [
+        {
+          "accountId": "load0000",
+          "threadId": "t:load0000-00009999",
+          "status": "succeeded"
+        }
+      ]
+    },
+    "journalMode": "wal"
+  },
+  "query": {
+    "outcome": "rejected",
+    "unhandled": [],
+    "helperExit": "rejected",
+    "nextQuery": 42
+  },
+  "packagedVersions": {
+    "dompurify": "3.4.17",
+    "zod": "4.6.7",
+    "@modelcontextprotocol/sdk": "1.32.0"
+  },
+  "mcp": {
+    "wrongToken": 401,
+    "wrongHost": 403,
+    "largeInitialize": 413,
+    "chunkedInitialize": 413,
+    "collectionRejected": true,
+    "largeEstablished": 413,
+    "normalRequestAfterRejections": true
+  },
+  "localCLI": [
+    "CLI pin/unpin and read state",
+    "CLI labels create/update/membership reflected in GUI",
+    "CLI snooze/unsnooze",
+    "CLI rule save, preview, apply, reorder and stale preview rejection",
+    "Automatic rule batch and manual-category precedence",
+    "Label deletion removes memberships and disables dependent rules atomically",
+    "Helper transaction rollback on real SQL failure",
+    "CLI write denied after permission revocation"
+  ]
+}

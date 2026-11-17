@@ -1,0 +1,37 @@
+--- a/app/internal_packages/paper-reed/lib/workspace.tsx
++++ b/app/internal_packages/paper-reed/lib/workspace.tsx
+@@ -412,6 +412,20 @@
+         this.setState({ route: 'thread', selected: row });
+       }
+     });
++  backToList = () =>
++    this.move(() => {
++      const selected = this.state.selected;
++      Actions.setFocus({ collection: 'thread', item: null });
++      this.setState({ route: 'list', selected: null, checked: [] }, () => {
++        const row = Array.from(document.querySelectorAll<HTMLButtonElement>('.pr-mail-row')).find(
++          (el) => selected instanceof Message
++            ? el.dataset.draftId === selected.headerMessageId
++            : el.dataset.threadId === selected?.id
++        );
++        (row || document.querySelector<HTMLInputElement>('.pr-search-input'))?.focus();
++        this.refresh();
++      });
++    });
+   compose = () =>
+     this.move(async () => {
+       const account =
+@@ -1037,12 +1051,7 @@
+               ) : (
+                 <button
+                   className="pr-back"
+-                  onClick={() =>
+-                    this.move(() => {
+-                      Actions.setFocus({ collection: 'thread', item: null });
+-                      this.setState({ route: 'list', selected: null, checked: [] }, this.refresh);
+-                    })
+-                  }
++                  onClick={this.backToList}
+                 >
+                   ‹ 返回{this.state.query ? '搜索结果' : this.locationTitle()}
+                 </button>

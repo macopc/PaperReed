@@ -1,0 +1,12 @@
+{
+  "cliDoctorPassed": true,
+  "readPreviouslyApprovedTestMessage": true,
+  "guiTextSavedBeforeHandoff": true,
+  "handoffReferencesSameDraft": true,
+  "handoffContainsToken": false,
+  "beforeRevision": 3,
+  "afterRevision": 5,
+  "agentTextWritten": true,
+  "guiTextPreserved": true,
+  "visibleAfterRestart": true
+}

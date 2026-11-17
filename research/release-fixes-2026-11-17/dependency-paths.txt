@@ -1,0 +1,32 @@
+fdir@6.5.0
+node_modules/fdir
+  fdir@"^6.5.0" from tinyglobby@0.2.17
+  node_modules/tinyglobby
+    tinyglobby@"^0.2.11" from sucrase@3.35.1
+    node_modules/sucrase
+      sucrase@"^3.35.1" from the root project
+
+picomatch@4.0.7
+node_modules/picomatch
+  peerOptional picomatch@"^3 || ^4" from fdir@6.5.0
+  node_modules/fdir
+    fdir@"^6.5.0" from tinyglobby@0.2.17
+    node_modules/tinyglobby
+      tinyglobby@"^0.2.11" from sucrase@3.35.1
+      node_modules/sucrase
+        sucrase@"^3.35.1" from the root project
+  picomatch@"^4.0.4" from tinyglobby@0.2.17
+  node_modules/tinyglobby
+    tinyglobby@"^0.2.11" from sucrase@3.35.1
+    node_modules/sucrase
+      sucrase@"^3.35.1" from the root project
+
+sucrase@3.35.1
+node_modules/sucrase
+  sucrase@"^3.35.1" from the root project
+
+tinyglobby@0.2.17
+node_modules/tinyglobby
+  tinyglobby@"^0.2.11" from sucrase@3.35.1
+  node_modules/sucrase
+    sucrase@"^3.35.1" from the root project

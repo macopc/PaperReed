@@ -1,0 +1,39 @@
+{
+  "source": "Original release-audit isolated probes, before 0047",
+  "credentials": {
+    "concurrentUpdates": {
+      "accountASaved": false,
+      "accountBSaved": true
+    },
+    "deleteAndUpdate": {
+      "deletedAccountSecretReappeared": true,
+      "otherAccountUpdated": true
+    },
+    "storage": "in-memory crypto adapter, isolated synthetic profile; production KeyManager methods"
+  },
+  "writer": {
+    "operationMs": 1874.8000001907349,
+    "heartbeatMs": 1875,
+    "changed": {
+      "items": [
+        {
+          "accountId": "load0000",
+          "threadId": "t:load0000-00009999",
+          "status": "succeeded"
+        }
+      ]
+    },
+    "journalMode": "wal"
+  },
+  "query": {
+    "outcome": "pending-after-250ms",
+    "unhandled": [
+      "Error: AUDIT_SQLITE_BUSY"
+    ]
+  },
+  "helperExit": "pending",
+  "blockedResourceRequests": [
+    "/shorthand"
+  ],
+  "largeInitialize": 200
+}

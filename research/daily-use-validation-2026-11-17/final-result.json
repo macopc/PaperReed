@@ -1,0 +1,38 @@
+{
+  "provider": "gmail",
+  "online": true,
+  "accountIdPreserved": true,
+  "revision": "aa5561c342380a08a3f9eb6accd2c704e00fb0be-dirty",
+  "syncRestartAt": 54243.300000190735,
+  "searchMs": 207,
+  "replyVisibleMs": 108,
+  "agentTextRestored": true,
+  "originalBodyExpanded": true,
+  "threadFocusRestored": true,
+  "searchRetained": true,
+  "draftFocusRestored": true,
+  "longTasks": [
+    {
+      "start": 60485.39999961853,
+      "duration": 51
+    }
+  ],
+  "syncEvents": [
+    {
+      "time": 60218.89999961853,
+      "active": true,
+      "progress": 1
+    },
+    {
+      "time": 67961.19999980927,
+      "active": true,
+      "progress": 1
+    },
+    {
+      "time": 68853.69999980927,
+      "active": false,
+      "progress": 1
+    }
+  ],
+  "saved": true
+}

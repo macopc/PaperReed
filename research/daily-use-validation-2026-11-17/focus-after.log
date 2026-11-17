@@ -1,0 +1,11 @@
+PASS command palette with no list row focused
+PASS Gmail J moves to next row; X selects and Escape clears
+PASS return from reader restores the previous row and keyboard navigation
+PASS Apple Mail ignores J and honors ArrowDown
+PASS custom N binding changes actual list behavior
+PASS Cmd+K, filtered command and Enter navigate to drafts
+PASS Cmd+Shift+P, Escape and focus restoration
+PASS typing action letters in search does not activate list commands
+PASS editor Cmd+K does not open palette; Cmd+Shift+P does
+PASS returning from a new draft focuses search; existing draft restores its own row
+PASS command-panel workflow in isolated synthetic profile; no mail sent

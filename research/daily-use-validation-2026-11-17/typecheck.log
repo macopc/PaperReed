@@ -1,0 +1,4 @@
+
+> mailspring-root@0.0.1 typecheck
+> ./node_modules/.bin/tsc -p app/tsconfig.json --noEmit
+

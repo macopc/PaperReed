@@ -1,0 +1,37 @@
+Running database migrations
+
+Running Setup
+{"error":null}
+[89479:1117/112952.433424:INFO:CONSOLE:26244] "%cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools
+You might need to use a local HTTP server (instead of file://): https://reactjs.org/link/react-devtools-faq font-weight:bold", source: /Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/node_modules/react-dom/cjs/react-dom.development.js (26244)
+
+  KeyManager
+    _getKeyHash
+      ✓ returns an empty set when nothing has been stored
+      ✓ returns an empty set for a "null" placeholder
+      ✓ returns an empty set for a null placeholder
+      ✓ returns an empty set for a undefined placeholder
+      ✓ returns the decrypted keys
+      ✓ is fatal when a stored blob cannot be decrypted
+      ✓ does not overwrite stored credentials when decryption fails
+      ✓ falls back to the synchronous API for pre-1.24 blobs and re-encrypts them
+      ✓ does not replace malformed decrypted credentials
+    re-encryption
+      ✓ rewrites the blob when the key provider has changed
+      ✓ does not rewrite the blob when the provider is unchanged
+      ✓ only rewrites once per session
+[89479:1117/112952.952224:INFO:CONSOLE:39] "[KeyManager re-encryption returns the keys and stays non-fatal when the rewrite fails.] Could not migrate saved credentials to the current keychain provider.", source: /Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/spec/spec-runner/console-reporter.ts (39)
+      ✓ returns the keys and stays non-fatal when the rewrite fails
+    _writeKeyHash
+      ✓ throws when encryption is unavailable
+      on Linux
+        ✓ refuses to persist a blob encrypted with the hardcoded fallback key
+        ✓ persists a blob encrypted with the desktop keyring
+    deletePasswordsWithPrefix
+      ✓ refuses an empty prefix without touching the stored keys
+      ✓ deletes only the keys that start with the prefix
+    _reportFatalError
+      ✓ shows one dialog no matter how many failures arrive
+
+
+  19 passing
