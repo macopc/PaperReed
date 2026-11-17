@@ -1,0 +1,102 @@
+diff --git a/app/internal_packages/composer/lib/send-action-button.tsx b/app/internal_packages/composer/lib/send-action-button.tsx
+index a0de938..d0edb59 100644
+--- a/app/internal_packages/composer/lib/send-action-button.tsx
++++ b/app/internal_packages/composer/lib/send-action-button.tsx
+@@ -40,6 +40,15 @@ export class SendActionButton extends React.Component<
+   }
+
+   componentDidMount() {
++    if (AppEnv.config.get('core.paperReed.enabled')) {
++      const networkChanged = () => this.forceUpdate();
++      window.addEventListener('online', networkChanged);
++      window.addEventListener('offline', networkChanged);
++      this._unlisteners.push(() => {
++        window.removeEventListener('online', networkChanged);
++        window.removeEventListener('offline', networkChanged);
++      });
++    }
+     const session = DraftStore._draftSessions[this.props.draft.headerMessageId];
+     if (AppEnv.config.get('core.paperReed.enabled') && session) {
+       const changed = () => this.forceUpdate();
+@@ -93,7 +102,7 @@ export class SendActionButton extends React.Component<
+   }
+
+   _onSendWithAction = (sendAction: ISendAction) => {
+-    if (this.hasConflict()) return;
++    if (this.hasConflict() || (AppEnv.config.get('core.paperReed.enabled') && !navigator.onLine)) return;
+     if (this.props.isValidDraft()) {
+       if (AppEnv.config.get('core.sending.sounds')) {
+         SoundRegistry.playSound('hit-send');
+@@ -128,8 +137,8 @@ export class SendActionButton extends React.Component<
+   };
+
+   render() {
+-    if (AppEnv.config.get('core.paperReed.enabled')) return <button type="button" className="btn-send pr-send" disabled={this.hasConflict()}
+-      onClick={this._onPrimaryClick} title={this.state.sendActions[0].title}><span className="primary-item">发送</span></button>;
++    if (AppEnv.config.get('core.paperReed.enabled')) return <button type="button" className="btn-send pr-send" disabled={this.hasConflict() || !navigator.onLine}
++      onClick={this._onPrimaryClick} title={navigator.onLine ? this.state.sendActions[0].title : '当前离线；草稿可保存，联网后再发送'}><span className="primary-item">发送</span></button>;
+     return (
+       <ButtonDropdown
+         className={'btn-send btn-emphasis btn-text'}
+diff --git a/app/internal_packages/paper-reed/lib/workspace.tsx b/app/internal_packages/paper-reed/lib/workspace.tsx
+index 230cf37..c68a60d 100644
+--- a/app/internal_packages/paper-reed/lib/workspace.tsx
++++ b/app/internal_packages/paper-reed/lib/workspace.tsx
+@@ -28,6 +28,7 @@ import {
+   Account,
+   KeyManager,
+   FolderSyncProgressStore,
++  OnlineStatusStore,
+   Actions,
+   CategoryStore,
+   DatabaseStore,
+@@ -150,6 +151,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       CategoryStore.listen(this.scheduleRefresh),
+       FolderSyncProgressStore.listen(() => this.forceUpdate()),
+       AccountStore.listen(this.scheduleRefresh),
++      OnlineStatusStore.listen(() => this.forceUpdate()),
+       WorkspaceStore.setSectionLeaveGuard(() => {
+         if (!this.dirtySessions().length) return true;
+         this.setState({ notice: '请先保存当前编辑，再离开邮件。' });
+@@ -172,6 +174,13 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+         this.refreshOperations();
+       })
+     );
++    const networkChanged = () => this.forceUpdate();
++    window.addEventListener('online', networkChanged);
++    window.addEventListener('offline', networkChanged);
++    this.unlisten.push(() => {
++      window.removeEventListener('online', networkChanged);
++      window.removeEventListener('offline', networkChanged);
++    });
+     document.addEventListener('keydown', this.onListKeyDown, true);
+     this.refresh();
+     this.operationTimer = setInterval(this.refreshOperations, 2000);
+@@ -900,8 +909,12 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     }
+   };
+   renderSyncStatus() {
++    if (!navigator.onLine)
++      return <p className="pr-sync-status" role="status">
++        当前离线，仍可阅读已缓存邮件、保存草稿。恢复联网后，请再点击发送。
++      </p>;
+     const accounts = AccountStore.accounts().filter((a) => this.accountIds().includes(a.id));
+-    const failed = accounts.filter((a) => a.hasSyncStateError());
++    const failed = accounts.filter((a) => a.hasSyncStateError() || !OnlineStatusStore.isAccountOnline(a.id));
+     if (failed.length)
+       return (
+         <div className="pr-sync-status" role="status">
+@@ -911,9 +924,11 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                 {account.emailAddress} ·{' '}
+                 {account.syncState === Account.SYNC_STATE_AUTH_FAILED
+                   ? '需要重新连接'
+-                  : '同步暂时中断'}
++                  : !OnlineStatusStore.isAccountOnline(account.id)
++                    ? '连接暂时中断，已缓存邮件仍可阅读'
++                    : '同步暂时中断'}
+               </span>
+-              <button onClick={() => this.reconnect(account)}>重新连接</button>
++              {account.hasSyncStateError() && <button onClick={() => this.reconnect(account)}>重新连接</button>}
+               <button onClick={() => Actions.restartAccountSync(account)}>重试同步</button>
+             </div>
+           ))}
