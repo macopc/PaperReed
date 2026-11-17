@@ -84,12 +84,12 @@ index 06cd61f..7699c92 100644
              task->data()["undoPlacements"] = json::object();
 +            if (task->data().count("gmailInbox")) task->data()["gmailLabels"] = json::object();
              performLocalChangeOnMessages(task, _applyFolder);
-
+             
          } else if (cname == "ChangeLabelsTask") {
 @@ -1143,6 +1194,10 @@ ChangeMailModels TaskProcessor::inflateMessages(json & data) {
          models.messages = store->findLargeSet<Message>("id", messageIds);
      }
-
+     
 +    for (auto & msg : models.messages) {
 +        if (msg->accountId() != account->id())
 +            throw SyncException("bad-accountid", "Message belongs to a different account.", false);
