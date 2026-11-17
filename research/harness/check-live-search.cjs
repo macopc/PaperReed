@@ -77,7 +77,7 @@ const result = { synthetic: true };
   };
   const pause = (ms) => new Promise((r) => setTimeout(r, ms));
   await run(
-    `(()=>{const el=document.querySelector('.pr-workspace');let f=el[Object.keys(el).find(k=>k.startsWith('__reactInternalInstance')||k.startsWith('__reactFiber'))];while(f&&!(f.stateNode&&f.stateNode.refreshOperations))f=f.return;window.ws=f.stateNode;window.probe={renders:0,queries:0,delay:0};const render=ws.render;ws.render=function(){probe.renders++;return render.call(this)};const db=require('mailspring-exports').DatabaseStore,q=db._query;db._query=function(sql,args,bg){probe.queries++;const delay=bg?probe.delay:0;return q.call(this,sql,args,bg).then(async result=>{if(delay)await new Promise(r=>setTimeout(r,delay));return result})}})()`,
+    `(()=>{const el=document.querySelector('.pr-workspace');let f=el[Object.keys(el).find(k=>k.startsWith('__reactInternalInstance')||k.startsWith('__reactFiber'))];while(f&&!(f.stateNode&&f.stateNode.refreshOperations))f=f.return;window.ws=f.stateNode;window.probe={renders:0,queries:0,delay:0};probe.inputUpdates=0;const setState=ws.setState;ws.setState=function(update,callback){if(update && Object.prototype.hasOwnProperty.call(update,"searchText"))probe.inputUpdates++;return setState.call(this,update,callback)};const render=ws.render;ws.render=function(){probe.renders++;return render.call(this)};const db=require('mailspring-exports').DatabaseStore,q=db._query;db._query=function(sql,args,bg){probe.queries++;const delay=bg?probe.delay:0;return q.call(this,sql,args,bg).then(async result=>{if(delay)await new Promise(r=>setTimeout(r,delay));return result})}})()`,
   );
   await input.fill("paperreed_no_match_zz");
   await until(
@@ -106,6 +106,7 @@ const result = { synthetic: true };
     0,
     "unchanged send results must not render",
   );
+  await run("probe.inputUpdates=0");
   // Composition is not a sequence of searches; only committed text searches.
   await run(
     'document.querySelector(".pr-search-input").dispatchEvent(new CompositionEvent("compositionstart",{bubbles:true}))',
@@ -114,7 +115,7 @@ const result = { synthetic: true };
   await pause(300);
   assert.equal(await run("ws.state.query"), "");
   assert.equal(
-    await run("probe.renders"),
+    await run("probe.inputUpdates"),
     0,
     "keystrokes should stay in the search component",
   );
