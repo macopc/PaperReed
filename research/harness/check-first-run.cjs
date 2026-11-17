@@ -10,7 +10,7 @@ const run=expression=>evaluate(cdp,expression);
 async function until(fn,label,timeout=45000){const end=Date.now()+timeout;while(Date.now()<end){const value=await fn();if(value)return value;await new Promise(resolve=>setTimeout(resolve,200));}throw new Error('Timeout: '+label);}
 const type=page=>{try{return JSON.parse(new URL(page.url()).searchParams.get('loadSettings')).windowType;}catch{return null;}};
 async function start(){
- const env={...process.env,PAPER_REED_CLI_BIN_DIR:path.join(work,'bin')};delete env.PLAYWRIGHT;delete env.ELECTRON_RUN_AS_NODE;delete env.PAPER_REED_MICROSOFT_CLIENT_ID;
+ const env={...process.env,PAPER_REED_CLI_BIN_DIR:path.join(work,'bin'),PAPER_REED_GOOGLE_CLIENT_FILE:path.join(work,'missing-google-client.json')};delete env.PLAYWRIGHT;delete env.ELECTRON_RUN_AS_NODE;delete env.PAPER_REED_MICROSOFT_CLIENT_ID;
  app=await _electron.launch({executablePath:packaged||r('electron'),args:[...(packaged?[]:[path.join(upstream,'app'),'--dev']),'--no-sandbox','--config-dir-path',config],env,timeout:45000});
  app.process().stderr.on('data',b=>fs.appendFileSync(path.join(work,'electron.log'),b));
  app.on('window',p=>{p.on('dialog',()=>{});p.on('console',msg=>fs.appendFileSync(path.join(work,'renderer.log'),msg.type()+': '+msg.text()+'\n'));});
@@ -21,6 +21,15 @@ async function click(selector){await main.locator(selector).first().click();}
 async function stop(){const process=app.process();await app.evaluate(({app})=>app.quit());await until(async()=>process.exitCode!==null,'normal quit');app=null;}
 (async()=>{
  assert(!fs.existsSync(config));await start();await selectWindow('onboarding');
+ await main.locator('[data-provider=gmail]').click();
+ await main.getByRole('button',{name:'使用 Google 登录',exact:true}).waitFor();
+ await main.locator('.alpha-fade-enter-done [data-google-connect]').waitFor();
+ await shot('google-login');
+ assert.equal(await main.locator('input[type=password]').count(),0);
+ await main.locator('[data-google-connect]').click();
+ await main.getByRole('alert').filter({hasText:'Google 登录尚未配置'}).waitFor();
+ await main.getByRole('button',{name:'返回邮箱选择',exact:true}).click();
+ console.log('PASS Google login without password or JSON picker; missing project config reported');
  await main.locator('[data-provider=office365]').click();
  await main.getByText('Microsoft 登录尚未配置',{exact:true}).waitFor();
  await main.getByRole('button',{name:'返回邮箱选择',exact:true}).click();
@@ -127,7 +136,27 @@ async function stop(){const process=app.process();await app.evaluate(({app})=>ap
  await main.keyboard.press('x');await click('[data-mail-action=archive]');
  await until(async()=>!(await cli('search',{accountId:account.id,query:'in:inbox'})).some(t=>t.subject==='Archive this note'),'archive visible in CLI');
  await shot('completed');
- const result={blankProfile:true,productName:'Paper Reed',independentProfile:true,noInjectedAccountsOrCredentials:true,wrongPasswordLeavesNoAccount:true,GUIAccountSetup:true,noUpstreamIdentity:true,upstreamUpdaterDisabled:true,firstSync:true,normalRestart:true,credentialsPersist:true,expiredCredentialsReconnect:true,GUIReplySaved:true,replyRestoredAfterRestart:true,GUISend:true,GUIArchive:true,installedCLI:true,noCLIConnectionEnvironment:true,CLIReadSameMail:true,readOnlyAgentAccess:true,packaged:!!packaged};
+ // Exercise the real account store's reconnect merge and encrypted credential round trip.
+ const migrated=await run(`(async()=>{
+  const {AccountStore,KeyManager}=require('mailspring-exports');
+  const original=await KeyManager.insertAccountSecrets(AccountStore.accounts()[0]);
+  const replacement=original.clone();replacement.provider='gmail';
+  replacement.settings.refresh_token='fixture-unified-refresh';
+  replacement.settings.gmail_client_secret='fixture-client-secret';
+  replacement.settings.gmail_api_send=true;
+  delete replacement.settings.imap_password;delete replacement.settings.smtp_password;
+  const stored=await AccountStore.addAccount(replacement);
+  const restored=await KeyManager.insertAccountSecrets(stored);
+  const result={sameId:stored.id===original.id,provider:stored.provider,
+   tokenRestored:restored.settings.refresh_token==='fixture-unified-refresh',
+   noPassword:!restored.settings.imap_password&&!restored.settings.smtp_password,
+   oneAccount:AccountStore.accounts().length===1,
+   noPlaintext:!JSON.stringify(AppEnv.config.get('accounts')).includes('fixture-unified-refresh')};
+  await AccountStore.addAccount(original);return result;
+ })()`);
+ assert.deepEqual(migrated,{sameId:true,provider:'gmail',tokenRestored:true,noPassword:true,oneAccount:true,noPlaintext:true});
+ console.log('PASS actual account store reconnect updates provider and encrypts the shared grant');
+ const result={blankProfile:true,productName:'Paper Reed',independentProfile:true,noInjectedAccountsOrCredentials:true,wrongPasswordLeavesNoAccount:true,GUIAccountSetup:true,noUpstreamIdentity:true,upstreamUpdaterDisabled:true,firstSync:true,normalRestart:true,credentialsPersist:true,expiredCredentialsReconnect:true,GUIReplySaved:true,replyRestoredAfterRestart:true,GUISend:true,GUIArchive:true,installedCLI:true,noCLIConnectionEnvironment:true,CLIReadSameMail:true,readOnlyAgentAccess:true,packaged:!!packaged,googleLoginNoPassword:true,googleMissingConfig:true,reconnectProviderAndCredentials:true};
  fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(result,null,2)+'\n');console.log('PASS',JSON.stringify(result));
  await stop();
 })().catch(async error=>{console.error(error);if(main&&!main.isClosed()){fs.writeFileSync(path.join(work,'failure-dom.txt'),await main.locator('body').innerText().catch(()=>''));await shot('failure').catch(()=>{});}process.exitCode=1;}).finally(()=>{if(app)app.process().kill('SIGKILL');});

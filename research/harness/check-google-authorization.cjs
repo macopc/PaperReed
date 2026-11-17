@@ -8,18 +8,23 @@ const root = path.resolve(process.argv[2]);
 const ts = require(path.join(root, 'node_modules/typescript'));
 const source = fs.readFileSync(path.join(root, 'app/internal_packages/onboarding/lib/paper-reed-google-auth.ts'), 'utf8');
 const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText;
-const scope = 'https://www.googleapis.com/auth/gmail.send';
+const scope = 'https://mail.google.com/';
 (async () => {
-  for (const mode of ['success', 'cancel-picker', 'cancel-consent', 'wrong-account', 'missing-scope', 'token-error']) {
+  for (const mode of ['success', 'new-account', 'missing-config', 'cancel-consent', 'wrong-account', 'missing-scope', 'send-only-scope', 'no-refresh', 'token-error', 'abort']) {
     let authURL, tokenRequests = 0;
+    const controller = new AbortController();
     const exports = {};
     const mocks = {
-      '@electron/remote': { dialog: { showOpenDialog: async () => ({ canceled: mode === 'cancel-picker', filePaths: ['fixture.json'] }) } },
-      fs: { promises: { readFile: async () => JSON.stringify({ installed: { client_id: 'own-client', client_secret: 'fixture-secret' } }) } },
+      fs: { promises: { readFile: async file => {
+        assert.equal(file, '/app/paper-reed-google-client.json');
+        if (mode === 'missing-config') throw Error('ENOENT');
+        return JSON.stringify({ installed: { client_id: 'own-client', client_secret: 'fixture-secret' } });
+      } } },
       electron: { shell: { openExternal: async value => {
         authURL = new URL(value);
         assert.equal(authURL.hostname, 'accounts.google.com');
         const p = authURL.searchParams;
+        if (mode === 'abort') { controller.abort(); return; }
         assert.equal(p.get('client_id'), 'own-client');
         assert.equal(p.get('scope'), `openid email ${scope}`);
         assert.equal(p.get('code_challenge_method'), 'S256');
@@ -36,30 +41,32 @@ const scope = 'https://www.googleapis.com/auth/gmail.send';
     };
     vm.runInNewContext(js, {
       exports, require: name => mocks[name] || require(name), Buffer, URL, URLSearchParams,
-      setTimeout, clearTimeout, AbortSignal,
+      setTimeout, clearTimeout, AbortSignal, process: { env: {} },
+      AppEnv: { getLoadSettings: () => ({ resourcePath: '/app' }) },
       fetch: async (url, options) => {
         if (url === 'https://oauth2.googleapis.com/token') {
           tokenRequests++;
           const body = new URLSearchParams(options.body);
           assert.equal(body.get('client_secret'), 'fixture-secret');
           assert.equal(crypto.createHash('sha256').update(body.get('code_verifier')).digest('base64url'), authURL.searchParams.get('code_challenge'));
-          return { ok: mode !== 'token-error', status: 400, json: async () => ({ access_token: 'fixture-access', refresh_token: 'fixture-refresh', scope: mode === 'missing-scope' ? 'openid email' : `openid email ${scope}` }) };
+          return { ok: mode !== 'token-error', status: 400, json: async () => ({ access_token: 'fixture-access', refresh_token: mode === 'no-refresh' ? undefined : 'fixture-refresh', scope: mode === 'missing-scope' ? 'openid email' : mode === 'send-only-scope' ? 'openid email https://www.googleapis.com/auth/gmail.send' : `openid email ${scope}` }) };
         }
         assert.equal(url, 'https://openidconnect.googleapis.com/v1/userinfo');
         assert.equal(options.headers.Authorization, 'Bearer fixture-access');
         return { ok: true, json: async () => ({ email: mode === 'wrong-account' ? 'another@example.test' : 'test@example.test', email_verified: true }) };
       },
     });
-    if (mode === 'success') {
-      const result = await exports.authorizeGmailSend('test@example.test');
-      assert.equal(result.gmail_api_send, true);
-      assert.equal(result.gmail_refresh_token, 'fixture-refresh');
-      assert.equal(result.access_token, undefined, 'Access tokens are not persisted');
-    } else if (mode === 'cancel-picker') {
-      assert.equal(await exports.authorizeGmailSend('test@example.test'), null);
-      assert.equal(tokenRequests, 0);
+    const authorize = () => exports.authorizeGoogle(mode === 'new-account' ? '' : 'test@example.test', controller.signal);
+    if (mode === 'success' || mode === 'new-account') {
+      const result = await authorize();
+      assert.equal(result.emailAddress, 'test@example.test');
+      assert.equal(result.settings.gmail_api_send, true);
+      assert.equal(result.settings.refresh_token, 'fixture-refresh');
+      assert.equal(result.settings.gmail_refresh_token, undefined);
+      assert.equal(result.settings.access_token, undefined, 'Access tokens are not persisted');
     } else {
-      await assert.rejects(exports.authorizeGmailSend('test@example.test'));
+      await assert.rejects(authorize());
+      if (mode === 'missing-config' || mode === 'abort') assert.equal(tokenRequests, 0);
     }
     console.log('PASS', mode);
   }

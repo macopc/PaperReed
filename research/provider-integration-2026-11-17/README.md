@@ -100,3 +100,5 @@ sandbox-exec -f research/harness/loopback-only.sb \
 当前授权请求包含 `openid email profile offline_access User.Read Mail.ReadWrite Mail.Send` 与 `https://outlook.office.com/IMAP.AccessAsUser.All`、`https://outlook.office.com/SMTP.Send`。正常发行版本应统一带上项目 ID；未配置的开发版明确显示“Microsoft 登录尚未配置”，不伪装成已连通。组织管理员是否允许该应用属于 Microsoft 租户政策。
 
 本轮已经完成接入代码及自动验证；Microsoft 项目注册、真实授权和 macOS 正式分发尚未完成。IMAP/SMTP 的实际可达性仍取决于服务商及用户网络，不改变系统／路由器代理，也不承诺任意网络都可访问邮件端口。
+
+从普通微软账号起步的项目注册入口、费用、回调和全部权限见 [Microsoft 应用注册填写清单](MICROSOFT-SETUP.md)。

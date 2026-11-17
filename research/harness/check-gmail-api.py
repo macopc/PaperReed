@@ -18,6 +18,7 @@ parser = argparse.ArgumentParser()
 parser.add_argument('--upstream', type=Path, required=True)
 parser.add_argument('--binary', type=Path, required=True)
 parser.add_argument('--output', type=Path, required=True)
+parser.add_argument('--case', help='Run one named legacy- or oauth- case')
 args = parser.parse_args()
 sys.path.insert(0, str(args.upstream.resolve() / 'mailsync/test'))
 from harness.mailsync import MailsyncProcess, account_json
@@ -48,8 +49,9 @@ work = Path(tempfile.mkdtemp(prefix='gmail-api-', dir=args.output.resolve()))
 results = []
 
 
-def run_case(mode):
+def run_case(mode, unified=False):
     requests = []
+    refreshes = []
     class Google(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
@@ -71,11 +73,15 @@ def run_case(mode):
             body = self.rfile.read(int(self.headers['Content-Length']))
             if self.path == '/token':
                 form = parse_qs(body.decode())
+                refreshes.append(form)
                 assert form['client_id'] == ['paper-reed-fixture']
                 assert form['client_secret'] == ['fixture-client-secret']
                 assert form['refresh_token'] == ['fixture-refresh']
+                if mode == 'refresh-outage':
+                    self.reply(503, {'error': 'temporarily_unavailable'})
+                    return
                 self.reply(400 if mode == 'refresh-rejected' else 200,
-                           {'error': 'invalid_grant'} if mode == 'refresh-rejected' else {'access_token': 'fixture-access'})
+                           {'error': 'invalid_grant'} if mode == 'refresh-rejected' else {'access_token': 'fixture-access', 'expires_in': 3600})
                 return
             assert self.path == '/gmail/v1/users/me/messages/send'
             assert self.headers['Authorization'] == 'Bearer fixture-access'
@@ -108,24 +114,43 @@ def run_case(mode):
     thread = threading.Thread(target=google.serve_forever, daemon=True)
     thread.start()
     server = FakeServer('gmail', smtp=True)
+    if unified:
+        server.imap.oauth_tokens = {'fixture-access': 'test@example.test'}
     server.append('INBOX', message(1))
     server.start()
     ms = None
-    case = work / mode
+    case_name = ('oauth-' if unified else 'legacy-') + mode
+    case = work / case_name
     try:
         account = account_json(**server.account_kwargs(), extra_settings={
             'gmail_api_send': True, 'gmail_client_id': 'paper-reed-fixture',
             'gmail_client_secret': 'fixture-client-secret', 'gmail_refresh_token': 'fixture-refresh',
         })
+        if unified:
+            account['settings']['refresh_token'] = account['settings'].pop('gmail_refresh_token')
+            account['settings'].pop('imap_password', None)
+            account['settings'].pop('smtp_password', None)
         base = f'http://127.0.0.1:{google.server_port}'
         ms = MailsyncProcess(account, case, binary=args.binary.resolve(), env={
             'GMAIL_OAUTH_TOKEN_URL': base + '/token', 'GMAIL_USERINFO_URL': base + '/userinfo',
             'GMAIL_API_URL': base + '/gmail/v1',
         })
+        if unified and mode in ('refresh-rejected', 'refresh-outage'):
+            check = ms.run_mode('test')
+            assert check.returncode != 0, 'Revoked grant must fail account validation'
+            error = json.loads(check.stdout.strip().splitlines()[-1])
+            assert error['error'] == ('ErrorAuthentication' if mode == 'refresh-rejected' else 'ErrorConnection'), error
+            assert error['error_offline'] == (mode == 'refresh-outage'), error
+            assert not requests
+            assert not server.sent_messages()
+            results.append({'case': case_name, 'outcome': 'authentication-failed' if mode == 'refresh-rejected' else 'connection-interrupted', 'api_submissions': 0, 'smtp_submissions': 0})
+            print('PASS', case_name, flush=True)
+            return
         if mode == 'accepted':
             check = ms.run_mode('test')
             assert check.returncode == 0, check.stdout
             assert not requests, 'Connection check must not send email'
+        initial_refreshes = len(refreshes)
         ms.start()
         ms.wait_quiescent(timeout=35)
 
@@ -175,6 +200,8 @@ def run_case(mode):
                         45, 'late Sent sync reconciles receipt')
         expected_requests = 0 if mode == 'refresh-rejected' else 1
         assert len(requests) == expected_requests, requests
+        if unified:
+            assert len(refreshes) == initial_refreshes + 1, 'IMAP and API send must share one cached token'
         ms.stop()
         ms.start()
         ms.wait_quiescent(timeout=35)
@@ -184,8 +211,8 @@ def run_case(mode):
         if mode == 'late-sent-copy':
             assert row("SELECT sentCopy FROM PaperReedSend WHERE requestId='send'") == ('filed',)
         assert len(server.sent_messages()) == 0, 'Gmail API must not fall back to SMTP'
-        results.append({'case': mode, 'outcome': expected, 'api_submissions': len(requests), 'smtp_submissions': 0})
-        print('PASS', mode, flush=True)
+        results.append({'case': case_name, 'outcome': expected, 'api_submissions': len(requests), 'smtp_submissions': 0})
+        print('PASS', case_name, flush=True)
     finally:
         if ms:
             ms.stop()
@@ -195,6 +222,10 @@ def run_case(mode):
 
 
 for mode in ('accepted', 'rewritten-message-id', 'late-sent-copy', 'rejected', 'lost-response', 'invalid-receipt', 'server-error', 'refresh-rejected'):
-    run_case(mode)
+    if not args.case or args.case == 'legacy-' + mode:
+        run_case(mode)
+for mode in ('accepted', 'late-sent-copy', 'refresh-rejected', 'refresh-outage'):
+    if not args.case or args.case == 'oauth-' + mode:
+        run_case(mode, unified=True)
 (work / 'results.json').write_text(json.dumps(results, indent=2) + '\n')
 print('Results:', work)

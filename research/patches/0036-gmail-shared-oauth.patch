@@ -1,0 +1,102 @@
+diff --git a/MailSync/Models/Account.cpp b/MailSync/Models/Account.cpp
+index d7c1504..c1b93bb 100644
+--- a/MailSync/Models/Account.cpp
++++ b/MailSync/Models/Account.cpp
+@@ -66,7 +66,7 @@ string Account::valid() {
+     if (!(s.count("smtp_allow_insecure_ssl") && s["smtp_allow_insecure_ssl"].is_boolean())) {
+         return "smtp_allow_insecure_ssl";
+     }
+-    if (sendsViaGmail() && (gmailSetting("gmail_client_id").empty() || gmailSetting("gmail_client_secret").empty() || gmailSetting("gmail_refresh_token").empty())) {
++    if (sendsViaGmail() && (gmailSetting("gmail_client_id").empty() || gmailSetting("gmail_client_secret").empty() || (refreshToken().empty() && gmailSetting("gmail_refresh_token").empty()))) {
+         return "Gmail API authorization";
+     }
+     return ""; // true
+@@ -92,6 +92,7 @@ void Account::setRefreshToken(string value) {
+ }
+
+ string Account::refreshClientId() {
++    if (sendsViaGmail()) return gmailSetting("gmail_client_id");
+     if (_data["settings"].count("refresh_client_id") == 0) {
+         return "";
+     }
+diff --git a/MailSync/NetworkRequestUtils.cpp b/MailSync/NetworkRequestUtils.cpp
+index 144ea06..fa138f3 100644
+--- a/MailSync/NetworkRequestUtils.cpp
++++ b/MailSync/NetworkRequestUtils.cpp
+@@ -11,6 +11,7 @@
+
+ #include "Identity.hpp"
+ #include "NetworkRequestUtils.hpp"
++#include "XOAuth2TokenManager.hpp"
+ #include "SyncException.hpp"
+ #include "Account.hpp"
+ #include "MailUtils.hpp"
+@@ -389,21 +390,34 @@ static json gmailRequest(const string & url, const string & method, const string
+     CleanupCurlRequest(handle);
+     if (result != CURLE_OK) {
+         throw SyncException(sending ? "send-unknown" : "gmail-authorization-failed",
+-                            "Google HTTPS transport failed: " + string(curl_easy_strerror(result)), false);
++                            "Google HTTPS transport failed: " + string(curl_easy_strerror(result)), !sending, !sending);
+     }
+     if (status < 200 || status >= 300) {
+         bool rejected = status >= 400 && status < 500;
+         throw SyncException(sending ? (rejected ? "send-rejected" : "send-unknown") : "gmail-authorization-failed",
+-                            "Google HTTPS returned HTTP " + to_string(status), false);
++                            "Google HTTPS returned HTTP " + to_string(status),
++                            !sending && (status == 429 || status >= 500),
++                            !sending && (status == 429 || status >= 500));
+     }
+     return json::parse(response, nullptr, false);
+ }
+
+-string GmailSendAccessToken(shared_ptr<Account> account) {
++json RefreshGmailAccessToken(shared_ptr<Account> account) {
++    const string refresh = account->refreshToken().empty()
++        ? account->gmailSetting("gmail_refresh_token") : account->refreshToken();
+     string body = "grant_type=refresh_token&client_id=" + URLEscape(account->gmailSetting("gmail_client_id")) +
+         "&client_secret=" + URLEscape(account->gmailSetting("gmail_client_secret")) +
+-        "&refresh_token=" + URLEscape(account->gmailSetting("gmail_refresh_token"));
+-    auto response = gmailRequest(gmailEndpoint("GMAIL_OAUTH_TOKEN_URL", "https://oauth2.googleapis.com/token"), "POST", "", body, true);
++        "&refresh_token=" + URLEscape(refresh);
++    return gmailRequest(gmailEndpoint("GMAIL_OAUTH_TOKEN_URL", "https://oauth2.googleapis.com/token"), "POST", "", body, true);
++}
++
++string GmailSendAccessToken(shared_ptr<Account> account) {
++    // Unified login shares the existing IMAP token cache. Keep send-only grants usable
++    // until the user reconnects; those accounts still authenticate IMAP with a password.
++    if (!account->refreshToken().empty()) {
++        return SharedXOAuth2TokenManager()->partsForAccount(account).accessToken;
++    }
++    auto response = RefreshGmailAccessToken(account);
+     string token = JSONString(response, "access_token");
+     if (token.empty()) throw SyncException("gmail-authorization-failed", "Google returned no access token. Reauthorize Gmail sending.", false);
+     return token;
+diff --git a/MailSync/NetworkRequestUtils.hpp b/MailSync/NetworkRequestUtils.hpp
+index ec6849c..1d94b73 100644
+--- a/MailSync/NetworkRequestUtils.hpp
++++ b/MailSync/NetworkRequestUtils.hpp
+@@ -72,7 +72,8 @@ string GraphErrorDescription(const GraphResponse & resp);
+ // (the response is copied into `failure` when given).
+ string GraphSentItemsId(const string & accessToken, GraphResponse * failure = nullptr);
+
+-// Gmail HTTPS submission uses a separate, send-only OAuth grant from IMAP.
++// Gmail shares the IMAP OAuth grant after reconnect; legacy send-only grants remain usable.
++json RefreshGmailAccessToken(shared_ptr<Account> account);
+ string GmailSendAccessToken(shared_ptr<Account> account);
+ void ValidateGmailSendAuthorization(shared_ptr<Account> account);
+ string SendGmailMessage(const string & accessToken, const string & base64urlMIME);
+diff --git a/MailSync/XOAuth2TokenManager.cpp b/MailSync/XOAuth2TokenManager.cpp
+index d019fa3..e552e93 100644
+--- a/MailSync/XOAuth2TokenManager.cpp
++++ b/MailSync/XOAuth2TokenManager.cpp
+@@ -110,7 +110,9 @@ XOAuth2Parts XOAuth2TokenManager::partsForAccount(shared_ptr<Account> account, O
+
+     spdlog::get("logger")->info("Fetching XOAuth2 access token ({}{}) for {}", account->provider(),
+         audience == OAuthTokenAudience::MicrosoftGraph ? ", Graph" : "", account->id());
+-    json updated = MakeOAuthRefreshRequest(account->provider(), refreshClientId, account->refreshToken(), audience);
++    json updated = account->sendsViaGmail()
++        ? RefreshGmailAccessToken(account)
++        : MakeOAuthRefreshRequest(account->provider(), refreshClientId, account->refreshToken(), audience);
+
+     // A 2xx does not mean the body is a token response: a captive portal or intercepting
+     // proxy answers 200 with its own sign-in page, which PerformJSONRequest returns as

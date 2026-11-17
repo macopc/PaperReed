@@ -39,10 +39,12 @@
 | `0033-local-mail-quality.patch` | Mailspring 根目录，在 0031 后应用 | 桌面固定基线及此前桌面补丁 |
 | `0034-targeted-sent-copy-confirmation.patch` | `mailsync/` 子模块，在 0032 后应用 | 原生固定基线及此前原生补丁 |
 | `0035-reviewed-send-revision.patch` | Mailspring 根目录，在 0033 后应用 | 桌面固定基线及此前桌面补丁 |
+| `0036-gmail-shared-oauth.patch` | `mailsync/` 子模块，在 0034 后应用 | 原生固定基线及此前原生补丁 |
+| `0037-google-login-reconnect.patch` | Mailspring 根目录，在 0035 后应用 | 桌面固定基线及此前桌面补丁；需要 0036 引擎 |
 
-在干净的固定版本 checkout 中，使用补丁的绝对路径分别执行 `git apply --check <patch>`、`git apply <patch>`。0001、0008、0023、0024、0026、0028、0032、0034 按顺序在子模块根目录应用；其余补丁按编号在桌面根目录应用。应用全部原生补丁后重新构建引擎，并替换实验桌面 `app/mailsync`；0010 不要求额外原生构建。本轮已在临时目录恢复各文件的基线版本、实际应用补丁，并逐字节比对测试过的源码。
+在干净的固定版本 checkout 中，使用补丁的绝对路径分别执行 `git apply --check <patch>`、`git apply <patch>`。0001、0008、0023、0024、0026、0028、0032、0034、0036 按顺序在子模块根目录应用；其余补丁按编号在桌面根目录应用。应用全部原生补丁后重新构建引擎，并替换实验桌面 `app/mailsync`；0010 不要求额外原生构建。本轮已在临时目录恢复各文件的基线版本、实际应用补丁，并逐字节比对测试过的源码。
 
-当前工作区的 `research/.local/Mailspring` 已应用三十五份补丁，**不要重复应用**。安装过程中产生的上游 `app/package-lock.json` 变化不在补丁内。
+当前工作区的 `research/.local/Mailspring` 已应用三十七份补丁，**不要重复应用**。安装过程中产生的上游 `app/package-lock.json` 变化不在补丁内。
 
 接入方式：新增一个 `MailMutationGuard.hpp`，只依赖现有 SQLiteCpp / nlohmann。它由 `TaskProcessor.cpp` 和 `MailStore.cpp` 直接包含，不新增构建目标、服务、数据库或任务调度器。迁移在原数据库中建立 `PaperReedSend` 表和活动草稿唯一索引；实验阶段不改变上游 `user_version`。正式分支需要接入自己的版本化迁移。
 
@@ -105,3 +107,5 @@
 0032 / 0033 修复 Gmail 本机稍后／规则、SMTP 认证拒绝、迟到 Sent 副本确认及发送结果查询，删除过期保存延时和不可达 multisend 分支。0032 需要重编译引擎。见 [修复验证](../quality-fixes-2026-11-17/README.md)。
 
 0034 / 0035 固定 GUI 审阅版本，停止发送间隙被改写的草稿；按当前 Sent 邮件确认关联记录，允许失败副本随后被确认，并保留 filed 的单向状态。清理桌面旧错误分支。0034 需要重编译引擎，见 [修复验证](../send-review-fixes-2026-11-17/README.md)。
+
+0036 / 0037 将 Gmail 收信与 HTTPS 发信合为一次项目 OAuth 登录；复用既有 token 缓存、凭据加密和重连流程，旧 send-only 账号保持可用。0036 需要重新编译引擎。实现、验证与真实重授权边界见 [Gmail 统一登录](../gmail-oauth-validation-2026-11-17/README.md)。Microsoft 项目方注册步骤见 [填写清单](../provider-integration-2026-11-17/MICROSOFT-SETUP.md)。

@@ -36,3 +36,5 @@ node --test research/harness/check-feasibility.cjs
 [运行界面与设计／spec 的体验走查](ux-audit-2026-11-16/REVIEW.md) 汇总本机测试邮箱下的实际页面截图、四项优先缺口和下一轮验收任务；[交互对照](ux-audit-2026-11-16/index.html) 可直接打开。
 
 [签名管理与表情选择器](settings-validation-2026-11-16/README.md) 记录后续页面打磨和实际键盘／持久化检查。
+
+[Gmail 统一登录与重连](gmail-oauth-validation-2026-11-17/README.md) 将 IMAP 和 HTTPS 发信合为一次 OAuth，复用现有加密凭据与 token 缓存；包含旧账号兼容、取消授权、网络中断和独立应用检查。Microsoft 尚未注册的项目维护者可按 [完整填写清单](provider-integration-2026-11-17/MICROSOFT-SETUP.md) 操作。

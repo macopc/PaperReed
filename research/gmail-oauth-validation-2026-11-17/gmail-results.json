@@ -1,0 +1,74 @@
+[
+  {
+    "case": "legacy-accepted",
+    "outcome": "accepted",
+    "api_submissions": 1,
+    "smtp_submissions": 0
+  },
+  {
+    "case": "legacy-rewritten-message-id",
+    "outcome": "accepted",
+    "api_submissions": 1,
+    "smtp_submissions": 0
+  },
+  {
+    "case": "legacy-late-sent-copy",
+    "outcome": "accepted",
+    "api_submissions": 1,
+    "smtp_submissions": 0
+  },
+  {
+    "case": "legacy-rejected",
+    "outcome": "rejected",
+    "api_submissions": 1,
+    "smtp_submissions": 0
+  },
+  {
+    "case": "legacy-lost-response",
+    "outcome": "unknown",
+    "api_submissions": 1,
+    "smtp_submissions": 0
+  },
+  {
+    "case": "legacy-invalid-receipt",
+    "outcome": "unknown",
+    "api_submissions": 1,
+    "smtp_submissions": 0
+  },
+  {
+    "case": "legacy-server-error",
+    "outcome": "unknown",
+    "api_submissions": 1,
+    "smtp_submissions": 0
+  },
+  {
+    "case": "legacy-refresh-rejected",
+    "outcome": "rejected",
+    "api_submissions": 0,
+    "smtp_submissions": 0
+  },
+  {
+    "case": "oauth-accepted",
+    "outcome": "accepted",
+    "api_submissions": 1,
+    "smtp_submissions": 0
+  },
+  {
+    "case": "oauth-late-sent-copy",
+    "outcome": "accepted",
+    "api_submissions": 1,
+    "smtp_submissions": 0
+  },
+  {
+    "case": "oauth-refresh-rejected",
+    "outcome": "authentication-failed",
+    "api_submissions": 0,
+    "smtp_submissions": 0
+  },
+  {
+    "case": "oauth-refresh-outage",
+    "outcome": "connection-interrupted",
+    "api_submissions": 0,
+    "smtp_submissions": 0
+  }
+]

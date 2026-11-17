@@ -49,13 +49,39 @@ function load(file, extra={}){
  const mocks={'mailspring-exports':exportsMock,'./onboarding-constants':constants,dns,...extra};
  const source=ts.transpileModule(fs.readFileSync(path.join(folder,file),'utf8'),{compilerOptions:{module:ts.ModuleKind.CommonJS,target:ts.ScriptTarget.ES2022,jsx:ts.JsxEmit.React,esModuleInterop:true}}).outputText;
  vm.runInNewContext(source,{exports,require:name=>mocks[name]||(name.startsWith('.')?r(path.join(folder,name)):r(name)),
-  AppEnv,process:{env:{}},console:{log(){}},Buffer,URL,URLSearchParams,setTimeout,clearTimeout,fetch:fixtureFetch});
+  AppEnv,process:{env:{}},console:{log(){}},Buffer,URL,URLSearchParams,setTimeout,clearTimeout,fetch:fixtureFetch,AbortController});
  return exports;
 }
 const helpers=load('onboarding-helpers.ts');
 function pass(name){results.push(name);console.log('PASS',name)}
 async function waitFor(fn){const end=Date.now()+10000;while(Date.now()<end){if(fn())return;await new Promise(r=>setTimeout(r,20))}throw Error('Timed out')}
 (async()=>{
+ const googleGrant = {emailAddress:'test@example.test', settings:{gmail_api_send:true,
+  gmail_client_id:'own-google-client',gmail_client_secret:'fixture-secret',refresh_token:'full-mail-refresh'}};
+ tested=[];
+ const gmail=await helpers.buildPaperReedGmailAccount(googleGrant);
+ assert.equal(gmail.provider,'gmail');assert.equal(gmail.settings.imap_host,'imap.gmail.com');
+ assert.equal(gmail.settings.refresh_token,'full-mail-refresh');assert.equal(gmail.settings.imap_password,undefined);
+ assert.equal(tested.length,1);
+ const old=new Account({id:'stable-local-id',emailAddress:'test@example.test',name:'My mailbox',color:'#556677',
+  provider:'imap',settings:{imap_password:'old-password',smtp_password:'old-password',gmail_refresh_token:'old-send-grant'}});
+ const reconnected=await helpers.buildPaperReedGmailAccount(googleGrant,old);
+ assert.equal(reconnected.id,old.id);assert.equal(tested[1].id,old.id);
+ assert.equal(reconnected.name,old.name);assert.equal(reconnected.color,old.color);
+ assert.equal(reconnected.settings.gmail_refresh_token,undefined);assert.equal(reconnected.settings.smtp_password,undefined);
+ assert.equal(old.settings.imap_password,'old-password','Failed validation must leave existing account untouched');
+ pass('Gmail new login and legacy reconnect keep identity, replace password/send-only grant');
+ let finishCount=0, finishValidation;
+ const GooglePage=load('paper-reed-google-page.tsx',{
+  './paper-reed-google-auth':{authorizeGoogle:async()=>googleGrant},
+  './onboarding-helpers':{buildPaperReedGmailAccount:()=>new Promise(resolve=>{finishValidation=resolve})},
+  './onboarding-actions':{finishAndAddAccount:()=>finishCount++},
+  'mailspring-exports':{...exportsMock,AccountStore:{accounts:()=>[old]}},
+ }).default;
+ const googlePage=new GooglePage({account:old});googlePage.setState=next=>Object.assign(googlePage.state,next);
+ const connecting=googlePage.connect();await waitFor(()=>finishValidation);
+ googlePage.componentWillUnmount();finishValidation(reconnected);await connecting;
+ assert.equal(finishCount,0);pass('Leaving Google login during connection validation cannot save the account');
  ownClient='';assert.throws(()=>helpers.buildO365AuthURL(),/未配置/);assert.equal(exchanged,0);
  ownClient='paper-reed-test-client';
  const auth=new URL(helpers.buildO365AuthURL());
