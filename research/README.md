@@ -37,4 +37,6 @@ node --test research/harness/check-feasibility.cjs
 
 [签名管理与表情选择器](settings-validation-2026-11-16/README.md) 记录后续页面打磨和实际键盘／持久化检查。
 
-[Gmail 统一登录与重连](gmail-oauth-validation-2026-11-17/README.md) 将 IMAP 和 HTTPS 发信合为一次 OAuth，复用现有加密凭据与 token 缓存；包含旧账号兼容、取消授权、网络中断和独立应用检查。Microsoft 尚未注册的项目维护者可按 [完整填写清单](provider-integration-2026-11-17/MICROSOFT-SETUP.md) 操作。
+[Gmail 统一登录与重连](gmail-oauth-validation-2026-11-17/README.md) 将 IMAP 和 HTTPS 发信合为一次 OAuth，复用现有加密凭据与 token 缓存；包含旧账号兼容、取消授权、网络中断和独立应用检查。Microsoft 渠道现已取消，原注册清单已撤下。
+
+当前接入范围已收敛到 Gmail／Google Workspace、iCloud 和普通 IMAP；Microsoft 渠道已取消，不再要求注册项目。最新改动见 [0038](patches/0038-provider-scope.patch)。

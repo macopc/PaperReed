@@ -1,5 +1,8 @@
 # Gmail 统一登录与重连
 
+> 后续决策：Microsoft 接入渠道已取消，注册及真实授权不再是待办。下文中的 Microsoft 实现和检查仅为历史记录。
+
+
 2026-11-17。此前 `9b07c91` 已推送；本轮先完成 Gmail 统一 OAuth，并提供 [Microsoft 应用注册填写清单](../provider-integration-2026-11-17/MICROSOFT-SETUP.md)。不新增服务端、provider 框架、token 存储或任务队列。
 
 ## 行为变化
@@ -57,4 +60,4 @@ sandbox-exec -f research/harness/loopback-only.sb \
 
 真实 Gmail 统一授权尚需用户重新同意完整邮件 scope。此前真实 Gmail HTTPS 测试验证的是旧 send-only 路径，不能作为本轮统一登录的真实服务商证明。现有真实 profile 未迁移、旧草稿和发送记录未改写。
 
-Google restricted-scope 应用验证、Microsoft 应用注册／真实授权，以及 macOS 正式签名、公证和发行配置仍待完成。Google 对完整邮件 scope 有审核要求；代码支持不等于公众发布已获批准。[scope 与验证说明](https://developers.google.com/workspace/gmail/api/auth/scopes)。
+Google restricted-scope 应用验证，以及 macOS 正式签名、公证和发行配置仍待完成；Microsoft 应用注册／真实授权已取消。Google 对完整邮件 scope 有审核要求；代码支持不等于公众发布已获批准。[scope 与验证说明](https://developers.google.com/workspace/gmail/api/auth/scopes)。

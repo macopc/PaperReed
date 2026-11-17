@@ -52,6 +52,8 @@ def main():
                 touched.add(('mailsync/' if native else '') + line[6:])
     if args.compare:
         for name in sorted(touched):
+            if not (dest / name).exists() and not (args.compare / name).exists():
+                continue  # A later patch removed a file introduced by an earlier patch.
             if (dest / name).read_bytes() != (args.compare / name).read_bytes():
                 raise RuntimeError(f'Patched source differs from tested checkout: {name}')
     for name in ('paper-reed.cjs', 'install.cjs'):

@@ -30,8 +30,13 @@ async function stop(){const process=app.process();await app.evaluate(({app})=>ap
  await main.getByRole('alert').filter({hasText:'Google 登录尚未配置'}).waitFor();
  await main.getByRole('button',{name:'返回邮箱选择',exact:true}).click();
  console.log('PASS Google login without password or JSON picker; missing project config reported');
- await main.locator('[data-provider=office365]').click();
- await main.getByText('Microsoft 登录尚未配置',{exact:true}).waitFor();
+ assert.equal(await main.locator('[data-provider=office365]').count(),0);
+ await main.locator('[data-provider=imap]').click();
+ await main.locator('#emailAddress').fill('fixture@gmail.com');
+ await main.locator('[data-use-google]').waitFor();
+ assert.equal(await main.locator('input[type=password]').count(),0);
+ await main.locator('[data-use-google]').click();
+ await main.locator('[data-google-connect]').waitFor();
  await main.getByRole('button',{name:'返回邮箱选择',exact:true}).click();
  await main.locator('[data-provider=icloud]').click();
  await main.locator('#name').fill('iCloud fixture');
@@ -47,7 +52,7 @@ async function stop(){const process=app.process();await app.evaluate(({app})=>ap
  await main.locator('.AccountBasicSettingsForm').getByRole('button',{name:'返回',exact:true}).click();
  await main.locator('[data-provider=imap]').click();
  await main.locator('#name').waitFor();
- console.log('PASS provider selection, missing Microsoft app configuration, iCloud settings and back navigation');
+ console.log('PASS provider selection, Microsoft entry removed and Gmail redirected, iCloud settings and back navigation');
  assert.equal(await app.evaluate(({app})=>app.getName()),'Paper Reed');
  assert.equal(await app.evaluate(({app})=>app.getPath('userData')),config);
  assert.equal((JSON.parse(fs.readFileSync(path.join(config,'config.json')))['*'].accounts||[]).length,0);
@@ -156,7 +161,7 @@ async function stop(){const process=app.process();await app.evaluate(({app})=>ap
  })()`);
  assert.deepEqual(migrated,{sameId:true,provider:'gmail',tokenRestored:true,noPassword:true,oneAccount:true,noPlaintext:true});
  console.log('PASS actual account store reconnect updates provider and encrypts the shared grant');
- const result={blankProfile:true,productName:'Paper Reed',independentProfile:true,noInjectedAccountsOrCredentials:true,wrongPasswordLeavesNoAccount:true,GUIAccountSetup:true,noUpstreamIdentity:true,upstreamUpdaterDisabled:true,firstSync:true,normalRestart:true,credentialsPersist:true,expiredCredentialsReconnect:true,GUIReplySaved:true,replyRestoredAfterRestart:true,GUISend:true,GUIArchive:true,installedCLI:true,noCLIConnectionEnvironment:true,CLIReadSameMail:true,readOnlyAgentAccess:true,packaged:!!packaged,googleLoginNoPassword:true,googleMissingConfig:true,reconnectProviderAndCredentials:true};
+ const result={blankProfile:true,productName:'Paper Reed',independentProfile:true,noInjectedAccountsOrCredentials:true,wrongPasswordLeavesNoAccount:true,GUIAccountSetup:true,noUpstreamIdentity:true,upstreamUpdaterDisabled:true,firstSync:true,normalRestart:true,credentialsPersist:true,expiredCredentialsReconnect:true,GUIReplySaved:true,replyRestoredAfterRestart:true,GUISend:true,GUIArchive:true,installedCLI:true,noCLIConnectionEnvironment:true,CLIReadSameMail:true,readOnlyAgentAccess:true,packaged:!!packaged,googleLoginNoPassword:true,googleMissingConfig:true,microsoftEntryRemoved:true,gmailFromIMAP:true,reconnectProviderAndCredentials:true};
  fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(result,null,2)+'\n');console.log('PASS',JSON.stringify(result));
  await stop();
 })().catch(async error=>{console.error(error);if(main&&!main.isClosed()){fs.writeFileSync(path.join(work,'failure-dom.txt'),await main.locator('body').innerText().catch(()=>''));await shot('failure').catch(()=>{});}process.exitCode=1;}).finally(()=>{if(app)app.process().kill('SIGKILL');});
