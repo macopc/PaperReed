@@ -1,0 +1,25 @@
+{
+  "passed": [
+    "unified inbox, account filters, identical Message-ID isolated",
+    "GUI mixed-provider archive changes correct server state and preserves custom labels",
+    "GUI mixed-provider undo restores original placements",
+    "per-message archive undo preserves mixed Inbox membership",
+    "spam and exact undo preserve Gmail custom labels and mixed Inbox membership",
+    "trash and exact undo preserve Gmail custom labels and mixed Inbox membership",
+    "CLI restore inbox for Gmail and ordinary Archive",
+    "wrong-account reference and excluded account rejected without moving mail",
+    "drafts remain bound to their account",
+    "changed Gmail label grant blocks historical undo",
+    "one provider authentication failure does not block the other account",
+    "restart retains both accounts, CLI and exact Gmail undo",
+    "archive and undo preserve Sent membership without writing read-only system labels",
+    "explicit draft account controls sender and automatic recipients",
+    "unified composer honors configured sender and CLI exposes the same identity",
+    "selected mailbox overrides default sender without importing another account Bcc",
+    "reply stays with original account and its automatic recipients",
+    "changing default sender and restarting does not change an existing draft identity",
+    "removed default account falls back to an available account for new mail"
+  ],
+  "realProviderAccounts": false,
+  "smtpSubmissions": 0
+}

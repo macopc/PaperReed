@@ -12,7 +12,8 @@ async function truth(account,messageId='same-message@example.test'){const result
 async function complete(item){assert(item.taskId,JSON.stringify(item));return until(async()=>{const v=await cli('change-get',{accountId:item.accountId,taskId:item.taskId});assert(!['failed','rejected','cancelled'].includes(v.status),JSON.stringify(v));return v.status==='succeeded'?v:false},'remote complete');}
 async function undo(item){return complete(await cli('undo',{accountId:item.accountId,taskId:item.taskId}));}
 function pass(name){results.push(name);console.log('PASS',name);}
-async function start(){const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;delete env.PLAYWRIGHT;app=await _electron.launch({executablePath:r('electron'),args:[path.join(upstream,'app'),'--dev','--no-sandbox','--config-dir-path',config],env,timeout:30000});app.on('window',p=>p.on('dialog',()=>{}));app.process().stderr.on('data',b=>fs.appendFileSync(path.join(work,'electron.log'),b));main=await until(()=>app.windows().find(p=>{try{return JSON.parse(new URL(p.url()).searchParams.get('loadSettings')).windowType==='default'}catch{return false}}),'main');main.on('console',m=>fs.appendFileSync(path.join(work,'renderer.log'),m.text()+'\n'));cdp=await app.context().newCDPSession(main);await until(()=>evaluate('typeof AppEnv!=="undefined" && !!AppEnv.mailsyncBridge'),'bridge');}
+async function start(){const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;delete env.PLAYWRIGHT;app=await _electron.launch({executablePath:r('electron'),args:[path.join(upstream,'app'),'--dev','--no-sandbox','--config-dir-path',config],env,timeout:30000});// Electron handles its own beforeunload dialog; prevent Playwright from accepting it again.
+for(const p of app.windows())p.on('dialog',()=>{});app.on('window',p=>p.on('dialog',()=>{}));app.process().stderr.on('data',b=>fs.appendFileSync(path.join(work,'electron.log'),b));main=await until(()=>app.windows().find(p=>{try{return JSON.parse(new URL(p.url()).searchParams.get('loadSettings')).windowType==='default'}catch{return false}}),'main');main.on('console',m=>fs.appendFileSync(path.join(work,'renderer.log'),m.text()+'\n'));cdp=await app.context().newCDPSession(main);await until(()=>evaluate('typeof AppEnv!=="undefined" && !!AppEnv.mailsyncBridge'),'bridge');}
 async function stop(){const p=app.process();await app.evaluate(({app})=>app.quit());await until(()=>p.exitCode!==null,'normal quit');app=null;}
 (async()=>{
  const reservation=require('node:net').createServer();await new Promise(r=>reservation.listen(0,'127.0.0.1',r));port=reservation.address().port;await new Promise(r=>reservation.close(r));
@@ -84,6 +85,57 @@ async function stop(){const p=app.process();await app.evaluate(({app})=>app.quit
  const sentBefore=await truth(0);
  const sentArchive=await complete((await cli('archive',{targets:[targets[0]],requestId:randomUUID()})).items[0]);await undo(sentArchive);
  assert.deepEqual(await truth(0),sentBefore);pass('archive and undo preserve Sent membership without writing read-only system labels');
+
+ // Use different automatic recipients so a wrong account default is observable.
+ await evaluate(`(()=>{const {Actions}=require('mailspring-exports');${accounts.map((a,i)=>`Actions.updateAccount(${JSON.stringify(a.id)},{autoaddress:{type:'bcc',value:'audit${i}@example.test'}});`).join('')}AppEnv.config.set('core.sending.defaultAccountIdForSend',${JSON.stringify(accounts[1].id)});return true})()`);
+ await until(()=>evaluate(`require('mailspring-exports').AccountStore.accounts().every((a,i)=>a.autoaddress.value==='audit'+i+'@example.test')`),'per-account automatic recipients');
+ const explicit=await evaluate(`(async()=>{const d=await require('mailspring-exports').DraftFactory.createDraft({accountId:${JSON.stringify(accounts[0].id)}});return {accountId:d.accountId,from:d.from.map(c=>c.email),bcc:d.bcc.map(c=>c.email)}})()`);
+ assert.equal(explicit.accountId,accounts[0].id);assert.deepEqual(explicit.from,[accounts[0].emailAddress]);assert.deepEqual(explicit.bcc,['audit0@example.test']);
+ pass('explicit draft account controls sender and automatic recipients');
+ async function drafts(){return evaluate(`(async()=>{const {DatabaseStore,Message}=require('mailspring-exports');const rows=await DatabaseStore.findAll(Message).where({draft:true}).include(Message.attributes.body);return rows.map(d=>({accountId:d.accountId,draftId:d.headerMessageId,body:d.body}))})()`)}
+ async function saveEditor(marker){
+  const editor=main.locator('[contenteditable=true]').first();await editor.waitFor();await editor.click();await main.keyboard.insertText(marker);
+  await main.locator('[data-mailbox=drafts]').click();
+  const saved=await until(async()=>(await drafts()).find(d=>d.body?.includes(marker)),'saved composer '+marker);
+  await main.locator('.pr-route-list').waitFor();
+  return saved;
+ }
+ async function composeFor(filter,expected,marker){
+  await main.locator('#pr-account').selectOption(filter);
+  const caption=filter?accounts.find(a=>a.id===filter).emailAddress:'所有已连接邮箱';
+  await until(async()=>(await main.locator('.pr-list-caption').innerText()).includes(caption),'account navigation settled');
+  await main.locator('.pr-compose-button').click();
+  await until(async()=>(await main.locator('.from-field').innerText()).includes(accounts[expected].emailAddress),'composer sender');
+  const saved=await saveEditor(marker);assert.equal(saved.accountId,accounts[expected].id);
+  const dto=await cli('draft-get',{accountId:saved.accountId,draftId:saved.draftId});
+  assert.equal(dto.from[0].email,accounts[expected].emailAddress);assert.deepEqual(dto.bcc.map(c=>c.email),[`audit${expected}@example.test`]);
+  return saved;
+ }
+ const defaultDraft=await composeFor('',1,'Unified sender fixture');
+ pass('unified composer honors configured sender and CLI exposes the same identity');
+ await composeFor(accounts[0].id,0,'Selected sender fixture');
+ pass('selected mailbox overrides default sender without importing another account Bcc');
+ await main.locator('[data-mailbox=inbox]').click();
+ await main.locator(`.pr-mail-row[data-thread-id="${ids[0]}"]`).click();
+ await main.locator('.footer-reply-area').first().click();
+ await until(async()=>(await main.locator('.from-field').innerText()).includes(accounts[0].emailAddress),'reply sender');
+ const reply=await saveEditor('Reply sender fixture');
+ const replyDTO=await cli('draft-get',{accountId:reply.accountId,draftId:reply.draftId});
+ assert.equal(reply.accountId,accounts[0].id);assert.equal(replyDTO.from[0].email,accounts[0].emailAddress);assert.deepEqual(replyDTO.bcc.map(c=>c.email),['audit0@example.test']);
+ pass('reply stays with original account and its automatic recipients');
+ await evaluate(`AppEnv.config.set('core.sending.defaultAccountIdForSend',${JSON.stringify(accounts[0].id)});true`);
+ await stop();await start();
+ await until(()=>evaluate('!!document.querySelector("#pr-account")'),'workspace after restart');
+ await until(async()=>{try{return (await cli('doctor')).ok}catch{return false}},'CLI after sender restart');
+ await main.locator('#pr-account').selectOption('');await main.locator('[data-mailbox=drafts]').click();
+ await main.locator(`[data-draft-id="${defaultDraft.draftId}"]`).click();
+ await until(async()=>(await main.locator('.from-field').innerText()).includes(accounts[1].emailAddress),'saved identity after restart');
+ const reopened=await cli('draft-get',{accountId:defaultDraft.accountId,draftId:defaultDraft.draftId});assert.equal(reopened.from[0].email,accounts[1].emailAddress);
+ pass('changing default sender and restarting does not change an existing draft identity');
+ await main.locator('[data-mailbox=inbox]').click();
+ await evaluate(`AppEnv.config.set('core.sending.defaultAccountIdForSend','removed-account');true`);
+ await composeFor('',0,'Removed default sender fixture');
+ pass('removed default account falls back to an available account for new mail');
  fs.writeFileSync(path.join(out,'result.json'),JSON.stringify({passed:results,realProviderAccounts:false,smtpSubmissions:0},null,2)+'\n');
  await stop();
-})().catch(e=>{console.error(e.stack);process.exitCode=1}).finally(()=>{if(app)app.process().kill('SIGKILL')});
+})().catch(async e=>{console.error(e.stack);if(main){await main.screenshot({path:path.join(work,'failure.png')}).catch(()=>{});fs.writeFileSync(path.join(work,'failure.txt'),await main.locator('body').innerText().catch(()=>''));}process.exitCode=1}).finally(()=>{if(app)app.process().kill('SIGKILL')});

@@ -1,0 +1,63 @@
+diff --git a/app/internal_packages/paper-reed/lib/workspace.tsx b/app/internal_packages/paper-reed/lib/workspace.tsx
+index 31c267b..230cf37 100644
+--- a/app/internal_packages/paper-reed/lib/workspace.tsx
++++ b/app/internal_packages/paper-reed/lib/workspace.tsx
+@@ -374,7 +374,10 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     });
+   compose = () =>
+     this.move(async () => {
+-      const account = AccountStore.accountForId(this.state.accountId) || AccountStore.accounts()[0];
++      const account =
++        AccountStore.accountForId(this.state.accountId) ||
++        AccountStore.accountForId(AppEnv.config.get('core.sending.defaultAccountIdForSend')) ||
++        AccountStore.accounts()[0];
+       if (!account) {
+         this.setState({ notice: '请先在设置中连接邮箱。' });
+         return;
+diff --git a/app/internal_packages/preferences/lib/tabs/config-schema-item.tsx b/app/internal_packages/preferences/lib/tabs/config-schema-item.tsx
+index 987b608..2cb78ba 100644
+--- a/app/internal_packages/preferences/lib/tabs/config-schema-item.tsx
++++ b/app/internal_packages/preferences/lib/tabs/config-schema-item.tsx
+@@ -79,9 +79,11 @@ class ConfigSchemaItem extends React.Component<ConfigSchemaItemProps> {
+     };
+     const title = (paperReed && titles[this.props.keyPath]) || this.props.configSchema.title;
+     const noteText =
+-      paperReed && this.props.keyPath === 'core.composing.html'
+-        ? '按住 Option 新建或回复，可临时使用纯文本。'
+-        : this.props.configSchema.note;
++      paperReed && this.props.keyPath === 'core.sending.defaultAccountIdForSend'
++        ? '用于全部邮箱视图中新建邮件。单账号视图使用该账号；回复使用原邮件账号。'
++        : paperReed && this.props.keyPath === 'core.composing.html'
++          ? '按住 Option 新建或回复，可临时使用纯文本。'
++          : this.props.configSchema.note;
+     const note = noteText ? <div className="platform-note">{noteText}</div> : null;
+     if (this.props.configSchema.type === 'object') {
+       return (
+diff --git a/app/src/flux/stores/draft-factory.ts b/app/src/flux/stores/draft-factory.ts
+index 1eaa6ff..51a99c6 100644
+--- a/app/src/flux/stores/draft-factory.ts
++++ b/app/src/flux/stores/draft-factory.ts
+@@ -55,7 +55,9 @@ class DraftFactory {
+   }
+
+   async createDraft(fields = {}) {
+-    const account = this._accountForNewDraft();
++    const accountId = (fields as Partial<Message>).accountId;
++    const account = accountId ? AccountStore.accountForId(accountId) : this._accountForNewDraft();
++    if (!account) throw new Error('account-not-found');
+     const rich = this.useHTML();
+     const defaults = {
+       body: rich ? '<br/>' : '',
+diff --git a/app/src/services/mail-core/index.ts b/app/src/services/mail-core/index.ts
+index 8aa0ead..f23ad07 100644
+--- a/app/src/services/mail-core/index.ts
++++ b/app/src/services/mail-core/index.ts
+@@ -41,7 +41,7 @@ export async function getDraft(ref: Reference, access: Access) {
+ export function draftResult(draft: Message) {
+   return { accountId: draft.accountId, draftId: draft.headerMessageId, revision: draft.version,
+     subject: draft.subject, body: draft.body, plaintext: draft.plaintext,
+-    to: draft.to, cc: draft.cc, bcc: draft.bcc, messageId: draft.id,
++    from: draft.from, to: draft.to, cc: draft.cc, bcc: draft.bcc, messageId: draft.id,
+     files: draft.files.map(f => ({ id: f.id, filename: f.displayName(), size: f.size, contentType: f.contentType, contentId: f.contentId })) };
+ }
+
