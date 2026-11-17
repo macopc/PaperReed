@@ -1,0 +1,301 @@
+diff --git a/MailSync/Models/Account.cpp b/MailSync/Models/Account.cpp
+index 64c6008..d7c1504 100644
+--- a/MailSync/Models/Account.cpp
++++ b/MailSync/Models/Account.cpp
+@@ -51,13 +51,13 @@ string Account::valid() {
+     if (!(s.count("refresh_token") || s.count("imap_password"))) {
+         return "imap_password or refresh_token";
+     }
+-    if (!(s.count("refresh_token") || s.count("smtp_password"))) {
++    if (!sendsViaGmail() && !(s.count("refresh_token") || s.count("smtp_password"))) {
+         return "smtp_password or refresh_token";
+     }
+     if (!(s.count("imap_port") && s.count("imap_host") && s.count("imap_username"))) {
+         return "imap configuration";
+     }
+-    if (!(s.count("smtp_port") && s.count("smtp_host"))) {
++    if (!sendsViaGmail() && !(s.count("smtp_port") && s.count("smtp_host"))) {
+         return "smtp configuration";
+     }
+     if (!(s.count("imap_allow_insecure_ssl") && s["imap_allow_insecure_ssl"].is_boolean())) {
+@@ -66,6 +66,9 @@ string Account::valid() {
+     if (!(s.count("smtp_allow_insecure_ssl") && s["smtp_allow_insecure_ssl"].is_boolean())) {
+         return "smtp_allow_insecure_ssl";
+     }
++    if (sendsViaGmail() && (gmailSetting("gmail_client_id").empty() || gmailSetting("gmail_client_secret").empty() || gmailSetting("gmail_refresh_token").empty())) {
++        return "Gmail API authorization";
++    }
+     return ""; // true
+ }
+
+@@ -171,6 +174,16 @@ bool Account::sendsViaGraph() {
+     return s.count("graph_send") && s["graph_send"].is_boolean() && s["graph_send"].get<bool>();
+ }
+
++bool Account::sendsViaGmail() {
++    json & s = _data["settings"];
++    return s.count("gmail_api_send") && s["gmail_api_send"] == true;
++}
++
++string Account::gmailSetting(string key) {
++    json & s = _data["settings"];
++    return s.count(key) && s[key].is_string() ? s[key].get<string>() : "";
++}
++
+ string Account::constructorName() {
+     return _data["__cls"].get<string>();
+ }
+diff --git a/MailSync/Models/Account.hpp b/MailSync/Models/Account.hpp
+index f0b7677..a595138 100644
+--- a/MailSync/Models/Account.hpp
++++ b/MailSync/Models/Account.hpp
+@@ -60,6 +60,8 @@ public:
+     string SMTPVerification();
+     bool createHelperFolders();
+     bool sendsViaGraph();
++    bool sendsViaGmail();
++    string gmailSetting(string key);
+
+     string tableName();
+     string constructorName();
+diff --git a/MailSync/NetworkRequestUtils.cpp b/MailSync/NetworkRequestUtils.cpp
+index 1b6139e..50af124 100644
+--- a/MailSync/NetworkRequestUtils.cpp
++++ b/MailSync/NetworkRequestUtils.cpp
+@@ -363,6 +363,74 @@ void ValidateRequestResp(CURLcode res, CURL * curl_handle, string resp) {
+     }
+ }
+
++// Gmail requests deliberately make one attempt. A lost send response is not safe to retry.
++static string gmailEndpoint(const string & env, const string & fallback) {
++    string value = MailUtils::getEnvUTF8(env.c_str());
++    return value.empty() ? fallback : value;
++}
++
++static json gmailRequest(const string & url, const string & method, const string & token,
++                         const string & body, bool form = false, bool sending = false) {
++    CURL * handle = CreateJSONRequest(url, method, token.empty() ? "" : "Bearer " + token);
++    if (!body.empty()) {
++        CurlRequestData * data = nullptr;
++        curl_easy_getinfo(handle, CURLINFO_PRIVATE, &data);
++        data->headers = curl_slist_append(data->headers, form ? "Content-Type: application/x-www-form-urlencoded" : "Content-Type: application/json");
++        curl_easy_setopt(handle, CURLOPT_HTTPHEADER, data->headers);
++        curl_easy_setopt(handle, CURLOPT_POSTFIELDS, body.c_str());
++    }
++    curl_easy_setopt(handle, CURLOPT_TIMEOUT, 60);
++    string response;
++    curl_easy_setopt(handle, CURLOPT_WRITEFUNCTION, _onAppendToString);
++    curl_easy_setopt(handle, CURLOPT_WRITEDATA, &response);
++    CURLcode result = curl_easy_perform(handle);
++    long status = 0;
++    curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, &status);
++    CleanupCurlRequest(handle);
++    if (result != CURLE_OK) {
++        throw SyncException(sending ? "send-unknown" : "gmail-authorization-failed",
++                            "Google HTTPS transport failed: " + string(curl_easy_strerror(result)), false);
++    }
++    if (status < 200 || status >= 300) {
++        bool rejected = status >= 400 && status < 500;
++        throw SyncException(sending ? (rejected ? "send-rejected" : "send-unknown") : "gmail-authorization-failed",
++                            "Google HTTPS returned HTTP " + to_string(status), false);
++    }
++    return json::parse(response, nullptr, false);
++}
++
++string GmailSendAccessToken(shared_ptr<Account> account) {
++    string body = "grant_type=refresh_token&client_id=" + URLEscape(account->gmailSetting("gmail_client_id")) +
++        "&client_secret=" + URLEscape(account->gmailSetting("gmail_client_secret")) +
++        "&refresh_token=" + URLEscape(account->gmailSetting("gmail_refresh_token"));
++    auto response = gmailRequest(gmailEndpoint("GMAIL_OAUTH_TOKEN_URL", "https://oauth2.googleapis.com/token"), "POST", "", body, true);
++    string token = JSONString(response, "access_token");
++    if (token.empty()) throw SyncException("gmail-authorization-failed", "Google returned no access token. Reauthorize Gmail sending.", false);
++    return token;
++}
++
++void ValidateGmailSendAuthorization(shared_ptr<Account> account) {
++    string token = GmailSendAccessToken(account);
++    auto identity = gmailRequest(gmailEndpoint("GMAIL_USERINFO_URL", "https://openidconnect.googleapis.com/v1/userinfo"), "GET", token, "");
++    string email = JSONString(identity, "email");
++    string expected = account->emailAddress();
++    transform(email.begin(), email.end(), email.begin(), ::tolower);
++    transform(expected.begin(), expected.end(), expected.begin(), ::tolower);
++    if (email != expected || !identity.is_object() || identity.value("email_verified", false) != true) {
++        throw SyncException("gmail-authorization-failed", "Google authorization belongs to a different mailbox. Reauthorize Gmail sending.", false);
++    }
++}
++
++string SendGmailMessage(const string & accessToken, const string & base64urlMIME) {
++    auto response = gmailRequest(gmailEndpoint("GMAIL_API_URL", "https://gmail.googleapis.com/gmail/v1") + "/users/me/messages/send",
++                                 "POST", accessToken, json({{"raw", base64urlMIME}}).dump(), false, true);
++    string id = JSONString(response, "id");
++    if (id.empty()) {
++        throw SyncException("send-unknown", "Google returned no message receipt. Check Sent before retrying.", false);
++    }
++    return id;
++}
++
+ // Microsoft Graph
+
+ string MicrosoftGraphURL() {
+diff --git a/MailSync/NetworkRequestUtils.hpp b/MailSync/NetworkRequestUtils.hpp
+index ae6150a..f909053 100644
+--- a/MailSync/NetworkRequestUtils.hpp
++++ b/MailSync/NetworkRequestUtils.hpp
+@@ -72,6 +72,11 @@ string GraphErrorDescription(const GraphResponse & resp);
+ // (the response is copied into `failure` when given).
+ string GraphSentItemsId(const string & accessToken, GraphResponse * failure = nullptr);
+
++// Gmail HTTPS submission uses a separate, send-only OAuth grant from IMAP.
++string GmailSendAccessToken(shared_ptr<Account> account);
++void ValidateGmailSendAuthorization(shared_ptr<Account> account);
++string SendGmailMessage(const string & accessToken, const string & base64urlMIME);
++
+ // HTTP helpers
+
+ string URLEscape(const string & value);
+diff --git a/MailSync/TaskProcessor.cpp b/MailSync/TaskProcessor.cpp
+index adc6c56..06cd61f 100644
+--- a/MailSync/TaskProcessor.cpp
++++ b/MailSync/TaskProcessor.cpp
+@@ -2441,7 +2441,7 @@ static void _sendViaSMTP(shared_ptr<Account> account, MessageBuilder & builder,
+
+ // Polls the Sent folder for copies of a just-sent message, sleeping `delays` seconds before
+ // each look, until `expected` copies are visible or the delays run out.
+-static IndexSet * _waitForSentCopies(IMAPSession * session, String * sentPath, const string & headerMessageId, const vector<int> & delays, size_t expected) {
++static IndexSet * _waitForSentCopies(IMAPSession * session, String * sentPath, const string & headerMessageId, const vector<int> & delays, size_t expected, uint64_t gmailMessageId = 0) {
+     IndexSet * uids = IndexSet::indexSet();
+     for (int delay : delays) {
+         if (delay) {
+@@ -2449,7 +2449,14 @@ static IndexSet * _waitForSentCopies(IMAPSession * session, String * sentPath, c
+             std::this_thread::sleep_for(std::chrono::seconds(delay));
+         }
+         uids->removeAllIndexes();
+-        session->findUIDsOfRecentHeaderMessageID(sentPath, AS_MCSTR(headerMessageId), uids);
++        if (gmailMessageId) {
++            ErrorCode error = ErrorNone;
++            auto found = session->search(sentPath, IMAPSearchExpression::searchGmailMessageID(gmailMessageId), &error);
++            if (error != ErrorNone) throw SyncException(error, "Find Gmail sent copy");
++            uids->addIndexSet(found);
++        } else {
++            session->findUIDsOfRecentHeaderMessageID(sentPath, AS_MCSTR(headerMessageId), uids);
++        }
+         if (uids->count() >= expected) {
+             break;
+         }
+@@ -2617,6 +2624,11 @@ void TaskProcessor::performRemoteSendDraft(Task * task) {
+     Data * messageDataForSent = builder.data();
+
+     bool viaGraph = account->sendsViaGraph();
++    bool viaGmail = account->sendsViaGmail();
++    // Refresh before the submission boundary: failure here cannot have sent mail.
++    string gmailToken = viaGmail ? GmailSendAccessToken(account) : "";
++    string gmailReceipt;
++    uint64_t gmailMessageId = 0;
+     string sentMessageId = draft.headerMessageId();
+
+     // First version has one submission per operation; partial multi-send needs
+@@ -2627,7 +2639,28 @@ void TaskProcessor::performRemoteSendDraft(Task * task) {
+     task->data()["sendOutcome"] = "attempting";
+     store->save(task);
+
+-    if (viaGraph) {
++    if (viaGmail) {
++        string raw = messageDataForSent->base64String()->UTF8Characters();
++        replace(raw.begin(), raw.end(), '+', '-');
++        replace(raw.begin(), raw.end(), '/', '_');
++        raw.erase(remove_if(raw.begin(), raw.end(), [](char c) { return c == '=' || c == '\r' || c == '\n'; }), raw.end());
++        try {
++            gmailReceipt = SendGmailMessage(gmailToken, raw);
++        } catch (SyncException & ex) {
++            if (ex.key == "send-rejected") {
++                guard.transition(account->id(), task->id(), "attempting", "rejected");
++                task->data()["sendOutcome"] = "rejected";
++            }
++            throw;
++        }
++        guard.transition(account->id(), task->id(), "attempting", "accepted");
++        task->data()["sendOutcome"] = "accepted";
++        task->data()["sentCopy"] = "pending";
++        task->data()["gmailMessageId"] = gmailReceipt;
++        store->save(task);
++        // Gmail can rewrite Message-ID. Its API hex id is the IMAP X-GM-MSGID in decimal.
++        gmailMessageId = stoull(gmailReceipt, nullptr, 16);
++    } else if (viaGraph) {
+         // Graph delivers to every To/Cc/Bcc in the MIME and has no separate envelope, so it
+         // cannot send each recipient their own body. The client does not ask it to.
+         if (multisend) {
+@@ -2663,12 +2696,13 @@ void TaskProcessor::performRemoteSendDraft(Task * task) {
+      */
+     uint32_t sentFolderMessageUID = 0;
+     bool appendedToSent = false;
+-    if (viaGraph) {
++    if (viaGraph || viaGmail) {
++        // The API files Sent; never APPEND a second copy when IMAP visibility lags.
+         // Graph has already seen the copy in Sent Items; IMAP can show it a moment later.
+-        IndexSet * uids = _waitForSentCopies(session, sentPath, sentMessageId, {0, 1, 2, 3}, 1);
++        IndexSet * uids = _waitForSentCopies(session, sentPath, sentMessageId, {0, 1, 2, 3}, 1, gmailMessageId);
+         if (uids->count() > 0) {
+             sentFolderMessageUID = (uint32_t)uids->allRanges()[0].location;
+-            logger->info("-- Found the sent copy Exchange filed in {} (UID {}, {} copies)", sent->path(), sentFolderMessageUID, uids->count());
++            logger->info("-- Found the sent copy the provider filed in {} (UID {}, {} copies)", sent->path(), sentFolderMessageUID, uids->count());
+         } else {
+             logger->info("-- The sent copy is not visible in {} yet; the next sync will pick it up.", sent->path());
+         }
+@@ -2721,7 +2755,7 @@ void TaskProcessor::performRemoteSendDraft(Task * task) {
+         }
+     }
+
+-    if (sentFolderMessageUID == 0 && !viaGraph) {
++    if (sentFolderMessageUID == 0 && !viaGraph && !viaGmail) {
+         // Manually place a single message in the sent folder
+         IMAPProgress iprogress;
+         logger->info("-- Placing a new message with `self` body in the sent folder.");
+@@ -2758,7 +2792,7 @@ void TaskProcessor::performRemoteSendDraft(Task * task) {
+         }
+     }
+
+-    string copyState = sentFolderMessageUID != 0 ? "filed" : (viaGraph ? "pending" : "failed");
++    string copyState = sentFolderMessageUID != 0 ? "filed" : ((viaGraph || viaGmail) ? "pending" : "failed");
+     guard.setCopy(account->id(), task->id(), copyState);
+     task->data()["sentCopy"] = copyState;
+     store->save(task);
+@@ -2802,7 +2836,11 @@ void TaskProcessor::performRemoteSendDraft(Task * task) {
+             IndexSet * allUIDs = IndexSet::indexSet();
+             session->select(allPath, &err);
+             if (err == ErrorNone) {
+-                session->findUIDsOfRecentHeaderMessageID(allPath, AS_MCSTR(draft.headerMessageId()), allUIDs);
++                if (gmailMessageId) {
++                    allUIDs = session->search(allPath, IMAPSearchExpression::searchGmailMessageID(gmailMessageId), &err);
++                } else {
++                    session->findUIDsOfRecentHeaderMessageID(allPath, AS_MCSTR(draft.headerMessageId()), allUIDs);
++                }
+             }
+             err = ErrorNone;
+             if (allUIDs->count() == 1) {
+@@ -3316,6 +3354,7 @@ static string base64PartBody(String * text) {
+ }
+
+ void TaskProcessor::performRemoteSendRSVP(Task * task) {
++    if (account->sendsViaGmail()) throw SyncException("send-rejected", "Calendar responses through Gmail HTTPS are not implemented yet.", false);
+     AutoreleasePool pool;
+     ErrorCode err = ErrorNone;
+
+diff --git a/MailSync/main.cpp b/MailSync/main.cpp
+index dbae360..8a2e1a4 100644
+--- a/MailSync/main.cpp
++++ b/MailSync/main.cpp
+@@ -361,6 +361,14 @@ int runTestAuth(shared_ptr<Account> account, string & errorService) {
+         goto done;
+     }
+
++    if (account->sendsViaGmail()) {
++        alogger.log("\n\n----------GMAIL HTTPS----------\n");
++        errorService = "gmail authorization";
++        ValidateGmailSendAuthorization(account);
++        alogger.log("Google token refresh and mailbox identity verified. No test email sent.\n");
++        goto done;
++    }
++
+     if (account->sendsViaGraph()) {
+         // Mail goes out through Graph, so SMTP AUTH (often disabled on Exchange Online) is never
+         // exercised. Reading Sent Items proves the token carries the Graph mail scopes; Mail.Send

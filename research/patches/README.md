@@ -26,10 +26,13 @@
 | `0020-attachments-cli-compose.patch` | Mailspring 根目录，在 0019 后应用 | 桌面固定基线，加 0002–0007 / 0009–0019 |
 | `0021-quality-lifecycles.patch` | Mailspring 根目录，在 0020 后应用 | 桌面固定基线，加 0002–0007 / 0009–0020 |
 | `0022-first-run-preview.patch` | Mailspring 根目录，在 0021 后应用 | 桌面固定基线，加 0002–0007 / 0009–0021 |
+| `0023-independent-engine-path.patch` | mailsync 子模块根目录，在 0008 后应用 | 原生固定基线，加 0001 / 0008 |
+| `0024-gmail-https-send.patch` | `mailsync/` 子模块，在 0023 后应用 | 原生补丁 0001 / 0008 / 0023 |
+| `0025-google-desktop-authorization.patch` | Mailspring 根目录，在 0022 后应用 | 桌面固定基线及此前桌面补丁；需要 0024 引擎 |
 
-在干净的固定版本 checkout 中，使用补丁的绝对路径分别执行 `git apply --check <patch>`、`git apply <patch>`。0001、0008 按顺序在子模块根目录应用；0002–0007、0009–0022 按顺序在桌面根目录应用。应用 0008 后重新构建引擎，并替换实验桌面 `app/mailsync`；0010 不要求额外原生构建。本轮已在临时目录恢复各文件的基线版本、实际应用补丁，并逐字节比对测试过的源码。
+在干净的固定版本 checkout 中，使用补丁的绝对路径分别执行 `git apply --check <patch>`、`git apply <patch>`。0001、0008、0023 按顺序在子模块根目录应用；0002–0007、0009–0022 按顺序在桌面根目录应用。应用全部原生补丁后重新构建引擎，并替换实验桌面 `app/mailsync`；0010 不要求额外原生构建。本轮已在临时目录恢复各文件的基线版本、实际应用补丁，并逐字节比对测试过的源码。
 
-当前工作区的 `research/.local/Mailspring` 已应用二十二份补丁，**不要重复应用**。安装过程中产生的上游 `app/package-lock.json` 变化不在补丁内。
+当前工作区的 `research/.local/Mailspring` 已应用二十三份补丁，**不要重复应用**。安装过程中产生的上游 `app/package-lock.json` 变化不在补丁内。
 
 接入方式：新增一个 `MailMutationGuard.hpp`，只依赖现有 SQLiteCpp / nlohmann。它由 `TaskProcessor.cpp` 和 `MailStore.cpp` 直接包含，不新增构建目标、服务、数据库或任务调度器。迁移在原数据库中建立 `PaperReedSend` 表和活动草稿唯一索引；实验阶段不改变上游 `user_version`。正式分支需要接入自己的版本化迁移。
 
@@ -74,3 +77,7 @@
 固定基线准备、全部补丁重放、CLI 副本比对与 TypeScript 检查使用 [prepare-desktop.py](../../scripts/prepare-desktop.py)，命令见 [贡献指南](../../CONTRIBUTING.md)。
 
 0022 接通空白配置的 IMAP / SMTP 首次接入、同步与重连提示，提供独立 Paper Reed 应用身份和开发启动入口。复用现有构建与凭据机制，不要求重编译引擎。见 [首用与打包验证](../first-run-validation-2026-11-16/README.md)。
+
+0023 在 **mailsync 子模块根目录**、0008 之后应用，移除 Release 引擎对 Mailspring 路径的品牌限制。必须重新编译引擎并替换桌面／开发包中的 mailsync。见 [独立目录验证与真实试用准备](../real-trial-2026-11-16/README.md)。
+
+0024 / 0025 增加自建 Google Desktop OAuth 授权及 Gmail HTTPS 发信，复用 IMAP 收信、加密凭据和发送结果；不增加服务端、不更改代理配置。真实验证、回归命令与边界见 [Gmail 接入验证](../gmail-integration-validation-2026-11-17/README.md)。

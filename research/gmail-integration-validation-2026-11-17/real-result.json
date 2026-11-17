@@ -1,0 +1,21 @@
+{
+  "realGoogleOAuth": true,
+  "PKCEAndIdentityVerified": true,
+  "nativeIMAPAndTokenRefresh": true,
+  "CLIReadAndDraftEdit": true,
+  "GUIReviewedDraft": true,
+  "userApprovedGUISend": true,
+  "realMailSubmissions": 1,
+  "sameMessageInInboxAndSent": true,
+  "receivedAgentEditedBody": true,
+  "restartWithoutReauthorization": true,
+  "CLIAfterRestart": true,
+  "plaintextCredentialFieldsInAccountConfig": false,
+  "initialSendOutcome": "accepted",
+  "initialSentCopyReceipt": "pending",
+  "reason": "Google rewrote Message-ID; actual Sent copy independently confirmed. Stable Gmail ID lookup added afterward and verified against local protocol fixtures; no second real email sent.",
+  "nativeRegressionCases": 7,
+  "oauthRegressionCases": 6,
+  "patchReplayFiles": 99,
+  "nativeBinarySHA256": "1d0d65fd32e61a356a2ea00386371c401484d348a4cefb5a90d4638d272d20cd"
+}

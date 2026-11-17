@@ -1,0 +1,12 @@
+system DNS smtp.gmail.com ['198.18.17.22']
+public DNS smtp.gmail.com ['142.251.163.108']
+system DNS smtp.googlemail.com ['198.18.17.23']
+public DNS smtp.googlemail.com ['142.250.31.16']
+{"host": "smtp.gmail.com", "source": "system", "port": 465, "stage": "TLS", "result": "EOF occurred in violation of protocol (_ssl.c:1129)", "seconds": 0.93}
+{"host": "smtp.gmail.com", "source": "system", "port": 587, "stage": "greeting", "result": "EOF", "seconds": 1.44}
+{"host": "smtp.gmail.com", "source": "public-address", "port": 465, "stage": "TLS", "result": "EOF occurred in violation of protocol (_ssl.c:1129)", "seconds": 0.92}
+{"host": "smtp.gmail.com", "source": "public-address", "port": 587, "stage": "greeting", "result": "EOF", "seconds": 0.91}
+{"host": "smtp.googlemail.com", "source": "system", "port": 465, "stage": "TLS", "result": "EOF occurred in violation of protocol (_ssl.c:1129)", "seconds": 0.92}
+{"host": "smtp.googlemail.com", "source": "system", "port": 587, "stage": "greeting", "result": "EOF", "seconds": 0.9}
+{"host": "smtp.googlemail.com", "source": "public-address", "port": 465, "stage": "TLS", "result": "EOF occurred in violation of protocol (_ssl.c:1129)", "seconds": 0.91}
+{"host": "smtp.googlemail.com", "source": "public-address", "port": 587, "stage": "greeting", "result": "EOF", "seconds": 0.93}

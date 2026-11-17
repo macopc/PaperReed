@@ -1,9 +1,9 @@
 const fs=require('node:fs'),path=require('node:path'),assert=require('node:assert/strict');
 const {createRequire}=require('node:module'),{execFile}=require('node:child_process');
 const exec=require('node:util').promisify(execFile);
-const [upstream,work,packaged]=process.argv.slice(2),r=createRequire(path.join(upstream,'package.json'));
+const [upstream,work,packaged,output]=process.argv.slice(2),r=createRequire(path.join(upstream,'package.json'));
 const {_electron}=r('playwright'), fixture=JSON.parse(fs.readFileSync(path.join(work,'fixture.json')));
-const config=path.join(work,'profile'),out=path.resolve(__dirname,'../first-run-validation-2026-11-16');fs.mkdirSync(out,{recursive:true});
+const config=path.join(work,'profile'),out=output||path.resolve(__dirname,'../first-run-validation-2026-11-16');fs.mkdirSync(out,{recursive:true});
 let app,main,cdp;
 async function evaluate(session,expression){const result=await session.send('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(result.exceptionDetails)throw new Error(JSON.stringify(result.exceptionDetails));return result.result.value;}
 const run=expression=>evaluate(cdp,expression);

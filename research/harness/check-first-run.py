@@ -4,6 +4,7 @@ from pathlib import Path
 parser=argparse.ArgumentParser()
 parser.add_argument('--upstream',type=Path,required=True)
 parser.add_argument('--app',type=Path,help='Optional packaged executable')
+parser.add_argument('--output',type=Path,default=Path(__file__).resolve().parent.parent/'first-run-validation-2026-11-16')
 args=parser.parse_args(); upstream=args.upstream.resolve()
 sys.path.insert(0,str(upstream/'mailsync/test'))
 from harness.servers.fake import FakeServer
@@ -17,7 +18,7 @@ try:
     server.start()
     (work/'fixture.json').write_text(json.dumps(account_json(**server.account_kwargs())))
     command=['node',str(Path(__file__).with_suffix('.cjs')),str(upstream),str(work)]
-    if args.app: command.append(str(args.app.resolve()))
+    command += [str(args.app.resolve()) if args.app else '', str(args.output.resolve())]
     run=subprocess.Popen(command,start_new_session=True)
     deadline = time.monotonic() + 300
     while run.poll() is None:
@@ -30,7 +31,7 @@ try:
     sent=server.sent_messages()
     assert len(sent)==1, len(sent)
     assert b'Paper Reed first run reply' in sent[0].raw
-    result_path=Path(__file__).resolve().parent.parent/'first-run-validation-2026-11-16/result.json'
+    result_path=args.output.resolve()/'result.json'
     result=json.loads(result_path.read_text());result['observedSMTPSubmissions']=len(sent)
     result_path.write_text(json.dumps(result,indent=2)+'\n')
     print('PASS blank profile, normal onboarding, restart and installed CLI; SMTP=1')
