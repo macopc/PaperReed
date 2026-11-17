@@ -113,3 +113,5 @@
 0038 移除 Paper Reed 的 Microsoft 选择入口和专用登录页，保留上游协议实现及历史补丁。其他 IMAP 表单识别 Gmail 地址后引导 Google 登录，不再要求应用密码。不需要重编译原生引擎。验证见 [范围收敛记录](../provider-scope-validation-2026-11-17/README.md)。
 
 0039 补齐项目 Google 配置打包、Paper Reed 预览版版本／源码归属与 Google 登录阶段提示。无原生改动。见 [发行配置验证](../distribution-validation-2026-11-17/README.md)。
+
+0040 接通即时搜索与中文组词处理，缩小输入渲染和数据库事件刷新范围，发送记录未变时不重绘。复用现有查询、轮询与 generation，无原生改动。见 [第一阶段验证](../search-performance-review-2026-11-17/IMPLEMENTATION.md)。

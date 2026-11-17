@@ -44,3 +44,5 @@ node --test research/harness/check-feasibility.cjs
 [配置完整的 macOS 预览包](distribution-validation-2026-11-17/README.md) 已内置项目 Google Desktop client，使用 Paper Reed 自己的版本和源码标识；公众签名、公证及真实授权验收独立跟进。
 
 [搜索、快捷键与性能审查](search-performance-review-2026-11-17/README.md) 记录非即时搜索复现、1 万／10 万封缓存测量、中文检索和刷新范围问题，以及复用现有引擎与命令体系的改进顺序。
+
+[第一阶段实现](search-performance-review-2026-11-17/IMPLEMENTATION.md) 接通即时搜索与 IME，隔离输入渲染并减少无关刷新；快捷键统一、命令面板和中文子词检索继续按阶段推进。

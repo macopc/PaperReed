@@ -1,0 +1,164 @@
+--- a/app/internal_packages/paper-reed/lib/workspace.tsx
++++ b/app/internal_packages/paper-reed/lib/workspace.tsx
+@@ -21,6 +21,7 @@
+ } from '../../../src/services/mail-core/inbox';
+ import { desktopDraftRecoveryInfo, DraftRecoveryInfo } from '../../../src/services/mail-core';
+ import React from 'react';
++import MailSearch from './mail-search';
+ import { agentHandoff, cliStatus } from '../../mcp-server/lib/paper-reed-cli';
+ import { clipboard } from '@electron/remote';
+ import {
+@@ -147,7 +148,11 @@
+   componentDidMount() {
+     this.mounted = true;
+     this.unlisten = [
+-      DatabaseStore.listen(this.scheduleRefresh),
++      DatabaseStore.listen((change) => {
++        if (['Thread', 'Message', 'Folder', 'Label'].includes(change.objectClass) &&
++            change.objects.some((item) => this.accountIds().includes(item.accountId)))
++          this.scheduleRefresh();
++      }),
+       onLocalTriageChanged(this.scheduleRefresh),
+       CategoryStore.listen(this.scheduleRefresh),
+       FolderSyncProgressStore.listen(() => this.forceUpdate()),
+@@ -300,20 +305,19 @@
+         `SELECT accountId, requestId, phase, sentCopy, payload FROM PaperReedSend
+          WHERE accountId IN (${ids.map(() => '?').join(',')}) ORDER BY rowid DESC LIMIT 10`, ids
+       );
+-      if (this.mounted && generation === this.operationGeneration && accountId === this.state.accountId)
+-        this.setState({
+-          operationsError: '',
+-          operations: rows.map((r) => ({
+-            accountId: r.accountId,
+-            requestId: r.requestId,
+-            phase: r.phase,
+-            sentCopy: r.sentCopy,
+-            subject: JSON.parse(r.payload).draft.subject || '无主题',
+-          })),
+-        });
++      const operations = rows.map((r) => ({
++        accountId: r.accountId,
++        requestId: r.requestId,
++        phase: r.phase,
++        sentCopy: r.sentCopy,
++        subject: JSON.parse(r.payload).draft.subject || '无主题',
++      }));
++      if (this.mounted && generation === this.operationGeneration && accountId === this.state.accountId &&
++          (this.state.operationsError || JSON.stringify(operations) !== JSON.stringify(this.state.operations)))
++        this.setState({ operationsError: '', operations });
+     } catch (error) {
+       console.error('Paper Reed send results:', error);
+-      if (this.mounted && generation === this.operationGeneration && accountId === this.state.accountId)
++      if (this.mounted && generation === this.operationGeneration && accountId === this.state.accountId && !this.state.operationsError)
+         this.setState({ operations: [], operationsError: '发送结果暂时无法读取。' });
+     }
+   };
+@@ -461,7 +465,6 @@
+           checked: [],
+           limit: 50,
+           loading: true,
+-          rows: [],
+         },
+         this.refresh
+       )
+@@ -619,33 +622,10 @@
+     ];
+     return (
+       <>
+-        <form
+-          className="pr-search"
+-          role="search"
+-          onSubmit={(e) => {
+-            e.preventDefault();
+-            this.search();
+-          }}
+-        >
+-          <label className="sr-only" htmlFor="pr-mail-search">
+-            搜索本机邮件
+-          </label>
+-          <input
+-            id="pr-mail-search"
+-            className="pr-search-input"
+-            value={this.state.searchText}
+-            placeholder="搜索邮件 · 发件人、主题或正文"
+-            onChange={(e) => this.setState({ searchText: e.target.value })}
+-          />
+-          <button type="submit">
+-            搜索 <kbd>↵</kbd>
+-          </button>
+-          {this.state.query && (
+-            <button type="button" onClick={() => this.search('')}>
+-              清除
+-            </button>
+-          )}
+-        </form>
++        <MailSearch key={`${this.state.folder}:${this.state.accountId}`}
++          query={this.state.query} onSearch={this.search}
++          onPending={() => { this.generation++; }} />
++        {this.state.loading && <span role="status">正在更新结果 · 下方暂为上次列表</span>}
+         <div className="pr-list-tools">
+           {(this.state.folder !== 'drafts' || this.state.query) && (
+             <label>
+@@ -1112,7 +1092,7 @@
+                     {folder === 'drafts' && !this.state.query ? '草稿' : '会话'}
+                   </span>
+                 </p>
+-                <div className="pr-mail-list" aria-label={title}>
++                <div className="pr-mail-list" aria-label={title} aria-busy={loading}>
+                   {rows.map(this.renderRow)}
+                   {!rows.length && (
+                     <p className="pr-empty">
+--- /dev/null
++++ b/app/internal_packages/paper-reed/lib/mail-search.tsx
+@@ -0,0 +1,51 @@
++import React from 'react';
++
++// Keep keystrokes local: querying is debounced, typing never re-renders the mailbox.
++export default class MailSearch extends React.Component<{
++  query: string;
++  onSearch: (query: string) => void;
++  onPending: () => void;
++}, { text: string; pending: boolean }> {
++  state = { text: this.props.query, pending: false };
++  timer: ReturnType<typeof setTimeout>;
++  composing = false;
++  componentDidUpdate(previous: Readonly<typeof this.props>) {
++    if (previous.query !== this.props.query && this.props.query !== this.state.text.trim()) {
++      clearTimeout(this.timer);
++      this.setState({ text: this.props.query, pending: false });
++    }
++  }
++  componentWillUnmount() { clearTimeout(this.timer); }
++  submit = () => {
++    clearTimeout(this.timer);
++    if (this.composing) return;
++    this.setState({ pending: false });
++    this.props.onSearch(this.state.text);
++  };
++  change = (text: string) => {
++    clearTimeout(this.timer);
++    this.props.onPending();
++    this.setState({ text, pending: true });
++    if (!this.composing) this.timer = setTimeout(this.submit, 180);
++  };
++  render() {
++    return (
++      <form className="pr-search" role="search" onSubmit={(event) => {
++        event.preventDefault(); this.submit();
++      }}>
++        <label className="sr-only" htmlFor="pr-mail-search">搜索本机邮件</label>
++        <input id="pr-mail-search" className="pr-search-input" value={this.state.text}
++          placeholder="搜索邮件 · 发件人、主题或正文"
++          onChange={(event) => this.change(event.target.value)}
++          onCompositionStart={() => { this.composing = true; clearTimeout(this.timer); }}
++          onCompositionEnd={(event) => { this.composing = false; this.change(event.currentTarget.value); }} />
++        {this.state.pending && <span role="status">输入中 · 列表尚未更新</span>}
++        {!!this.state.text && <button type="button" onClick={() => {
++          clearTimeout(this.timer);
++          this.setState({ text: '', pending: false });
++          this.props.onSearch('');
++        }}>清除</button>}
++      </form>
++    );
++  }
++}
