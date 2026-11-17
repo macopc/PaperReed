@@ -1,0 +1,128 @@
+--- a/app/src/services/search/search-query-backend-local.ts
++++ b/app/src/services/search/search-query-backend-local.ts
+@@ -236,19 +236,32 @@
+   }
+ 
+   visitFrom(node) {
+-    throw new Error(`Unreachable: ${node}`);
++    this.textMatch(node, ['from_']);
+   }
+ 
+   visitTo(node) {
+-    throw new Error(`Unreachable: ${node}`);
++    this.textMatch(node, ['to_']);
+   }
+ 
+   visitSubject(node) {
+-    throw new Error(`Unreachable: ${node}`);
++    this.textMatch(node, ['subject']);
+   }
+ 
+   visitGeneric(node) {
+-    throw new Error(`Unreachable: ${node}`);
++    this.textMatch(node, ['subject', 'to_', 'from_', 'categories', 'body']);
++  }
++
++  private textMatch(node, columns: string[]) {
++    const term = node.text.token.s;
++    if (!/\p{Script=Han}/u.test(term)) {
++      this.visitMatch(new MatchQueryExpressionVisitor().visit(node));
++      return;
++    }
++    // unicode61 cannot match Han suffixes. Read the existing FTS content, not a
++    // second index; instr treats quotes, % and _ as literal characters.
++    const quoted = `'${term.toLowerCase().replace(/'/g, "''")}'`;
++    const predicate = columns.map(column => `instr(lower(${column}), ${quoted}) > 0`).join(' OR ');
++    this._result = `(\`${this._className}\`.id IN (SELECT content_id FROM \`${this._className}Search\` WHERE ${predicate}))`;
+   }
+ 
+   visitText(node) {
+@@ -320,7 +333,11 @@
+ 
+   compile(ast: QueryExpression) {
+     const condenser = new MatchCompatibleQueryCondenser();
+-    const intermediateAST = condenser.visit(ast);
++    // Preserve boolean/field structure when a literal Han term needs SQL matching.
++    const hasHan = (node): boolean => !!node && (
++      (typeof node.token?.s === 'string' && /\p{Script=Han}/u.test(node.token.s)) ||
++      hasHan(node.text) || hasHan(node.e1) || hasHan(node.e2));
++    const intermediateAST = hasHan(ast) ? ast : condenser.visit(ast);
+ 
+     const codegen = new StructuredSearchQueryVisitor(`${this._modelClassName}`);
+     return codegen.visit(intermediateAST);
+--- a/app/src/services/mail-core/inbox.ts
++++ b/app/src/services/mail-core/inbox.ts
+@@ -68,27 +68,36 @@
+   const ids = input.accountIds.filter(
+     (id) => grant.accountIds === null || grant.accountIds.includes(id)
+   );
++  const searching = !!input.query?.trim();
++  const limit = Math.min(input.limit, 201);
++  const offset = input.offset || 0;
+   const clauses: any[] = [];
+   if (input.folder) clauses.push({ in: input.folder });
+   if (input.unread) clauses.push({ unread: true });
+-  const query = threadQuery(
+-    { ...grant, accountIds: ids },
+-    {
++  const makeQuery = (pinned?: boolean) => {
++    const query = threadQuery({ ...grant, accountIds: ids }, {
+       search: input.query,
+-      priorityOrder: input.pinFirst ? (localPinOrder as any) : undefined,
++      priorityOrder: input.pinFirst && searching ? (localPinOrder as any) : undefined,
+       filter: clauses.length ? { and: clauses } : undefined,
+-      limit: Math.min(input.limit, 201),
+-      offset: input.offset || 0,
+-      background: true,
+-    }
+-  );
+-  query.where(
+-    new FilterMatcher(
+-      localViewSQL(input.localView, input.folder === 'inbox' && !input.query)
+-    ) as any
+-  );
+-  query.order(Thread.attributes.id.ascending());
+-  const rows = await query;
++      limit, offset: 0, background: true,
++    });
++    query.where(new FilterMatcher(localViewSQL(input.localView, input.folder === 'inbox' && !input.query)) as any);
++    if (pinned !== undefined) query.where(new FilterMatcher(
++      `Thread.id ${pinned ? 'IN' : 'NOT IN'} (SELECT threadId FROM PaperReedLocalThread WHERE pinned=1)`
++    ) as any);
++    return query.order(Thread.attributes.id.ascending());
++  };
++  let rows: Thread[];
++  if (input.pinFirst && !searching) {
++    // One statement/snapshot: limit each sorted range before combining, so a
++    // concurrent pin change cannot duplicate or lose a row between two reads.
++    const branch = (pinned: boolean) => `SELECT Thread.data, ${pinned ? 0 : 1} AS pinRank,
++      Thread.lastMessageReceivedTimestamp AS received, Thread.id AS threadId
++      FROM Thread JOIN (${makeQuery(pinned).idsOnly().limit(offset + limit).sql()}) page ON page.id=Thread.id`;
++    const result = await DatabaseStore._query(`SELECT data FROM (${branch(true)} UNION ALL ${branch(false)})
++      ORDER BY pinRank, received DESC, threadId ASC LIMIT ${limit} OFFSET ${offset}`, [], true);
++    rows = result.map(row => new Thread(JSON.parse(row.data)));
++  } else rows = await makeQuery().offset(offset);
+   input.accountIds.forEach((id) => access.check(id, false));
+   return rows.filter((t) => isThreadAllowed(access.grant(), t));
+ }
+--- a/app/src/services/mail-core/local-triage.ts
++++ b/app/src/services/mail-core/local-triage.ts
+@@ -59,6 +59,7 @@
+       await DatabaseStore._query('SELECT 1');
+       if (!AppEnv.isMainWindow()) throw new Error('local-triage-requires-main-window');
+       writer = new Sqlite3(DatabaseStore._databasePath, { fileMustExist: true, timeout: 10000 });
++      sql('CREATE INDEX IF NOT EXISTS PaperReedThreadAccountDate ON Thread(accountId,lastMessageReceivedTimestamp DESC,id ASC)');
+       sql(
+         'CREATE TABLE IF NOT EXISTS PaperReedLocalThread (accountId TEXT NOT NULL, threadId TEXT NOT NULL, pinned INTEGER NOT NULL DEFAULT 0, snoozeUntil INTEGER, baseline TEXT, PRIMARY KEY(accountId, threadId))'
+       );
+--- a/app/src/services/mail-access/filter.ts
++++ b/app/src/services/mail-access/filter.ts
+@@ -306,7 +306,7 @@
+     case 'in': {
+       const ids = [...new Set(list(value).flatMap((v) => categoryIdsFor(v, ctx)))];
+       if (ids.length === 0) return '(0)';
+-      return `(\`Thread\`.\`id\` IN (SELECT \`id\` FROM \`ThreadCategory\` WHERE \`value\` IN (${ids
++      return `(EXISTS (SELECT 1 FROM \`ThreadCategory\` WHERE \`ThreadCategory\`.\`id\` = \`Thread\`.\`id\` AND \`value\` IN (${ids
+         .map(sqlString)
+         .join(', ')})))`;
+     }

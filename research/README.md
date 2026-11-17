@@ -48,3 +48,5 @@ node --test research/harness/check-feasibility.cjs
 [第一阶段实现](search-performance-review-2026-11-17/IMPLEMENTATION.md) 接通即时搜索与 IME，隔离输入渲染并减少无关刷新；快捷键统一、命令面板和中文子词检索继续按阶段推进。
 
 [工作区快捷键与命令面板](command-panel-validation-2026-11-17/README.md) 接通现有命令体系和轻量面板，附打包应用真实按键测试日志；中文子词检索与大集合查询仍待继续。
+
+[中文片段检索与大邮箱查询](search-scale-validation-2026-11-17/README.md) 接通中文片段和字段限定，优化普通邮箱有序分页，附十万封缓存的结果对照、实际 GUI 与回归日志。

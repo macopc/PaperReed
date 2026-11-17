@@ -1,0 +1,208 @@
+2026-11-17T15:18:22.676638+00:00
+Command: sandbox-exec -f research/harness/loopback-only.sb node research/harness/check-search-scale.cjs
+Fixture: seed-100000
+{
+  "threads": 100002,
+  "cases": [
+    {
+      "query": "",
+      "offset": 0,
+      "rows": 17
+    },
+    {
+      "query": "",
+      "offset": 1,
+      "rows": 17
+    },
+    {
+      "query": "",
+      "offset": 3,
+      "rows": 17
+    },
+    {
+      "query": "",
+      "offset": 49,
+      "rows": 17
+    },
+    {
+      "query": "",
+      "offset": 100,
+      "rows": 17
+    },
+    {
+      "query": "project",
+      "offset": 0,
+      "rows": 17
+    },
+    {
+      "query": "project",
+      "offset": 1,
+      "rows": 17
+    },
+    {
+      "query": "project",
+      "offset": 3,
+      "rows": 17
+    },
+    {
+      "query": "project",
+      "offset": 49,
+      "rows": 17
+    },
+    {
+      "query": "project",
+      "offset": 100,
+      "rows": 17
+    },
+    {
+      "query": "设计",
+      "offset": 0,
+      "rows": 17
+    },
+    {
+      "query": "设计",
+      "offset": 1,
+      "rows": 17
+    },
+    {
+      "query": "设计",
+      "offset": 3,
+      "rows": 17
+    },
+    {
+      "query": "设计",
+      "offset": 49,
+      "rows": 17
+    },
+    {
+      "query": "设计",
+      "offset": 100,
+      "rows": 17
+    },
+    {
+      "query": "subject:设计",
+      "offset": 0,
+      "rows": 0
+    },
+    {
+      "query": "subject:设计",
+      "offset": 1,
+      "rows": 0
+    },
+    {
+      "query": "subject:设计",
+      "offset": 3,
+      "rows": 0
+    },
+    {
+      "query": "subject:设计",
+      "offset": 49,
+      "rows": 0
+    },
+    {
+      "query": "subject:设计",
+      "offset": 100,
+      "rows": 0
+    },
+    {
+      "query": "project NOT 设计",
+      "offset": 0,
+      "rows": 0
+    },
+    {
+      "query": "project NOT 设计",
+      "offset": 1,
+      "rows": 0
+    },
+    {
+      "query": "project NOT 设计",
+      "offset": 3,
+      "rows": 0
+    },
+    {
+      "query": "project NOT 设计",
+      "offset": 49,
+      "rows": 0
+    },
+    {
+      "query": "project NOT 设计",
+      "offset": 100,
+      "rows": 0
+    },
+    {
+      "query": "设计 OR missingword",
+      "offset": 0,
+      "rows": 17
+    },
+    {
+      "query": "设计 OR missingword",
+      "offset": 1,
+      "rows": 17
+    },
+    {
+      "query": "设计 OR missingword",
+      "offset": 3,
+      "rows": 17
+    },
+    {
+      "query": "设计 OR missingword",
+      "offset": 49,
+      "rows": 17
+    },
+    {
+      "query": "设计 OR missingword",
+      "offset": 100,
+      "rows": 17
+    }
+  ],
+  "timings": [
+    {
+      "query": "",
+      "singleSortMs": [
+        42.30000019073486,
+        42.19999980926514,
+        41.80000019073486,
+        42.39999961853027
+      ],
+      "orderedRangesMs": [
+        4.600000381469727,
+        4.399999618530273,
+        4.300000190734863,
+        4.300000190734863
+      ]
+    },
+    {
+      "query": "project",
+      "singleSortMs": [
+        89.90000057220459,
+        89.80000019073486,
+        87.39999961853027,
+        87.89999961853027
+      ],
+      "orderedRangesMs": [
+        89.69999980926514,
+        88.19999980926514,
+        87.90000057220459,
+        88.19999980926514
+      ]
+    },
+    {
+      "query": "设计",
+      "singleSortMs": [
+        105.30000019073486,
+        105.19999980926514,
+        104.69999980926514,
+        106.59999942779541
+      ],
+      "orderedRangesMs": [
+        106,
+        106.5,
+        106.20000076293945,
+        105.69999980926514
+      ]
+    }
+  ]
+}
+PASS real GUI live Han search and subject-only exclusion
+PASS Han suffix, field scoping, NOT/OR and 30 pin/date/id pagination comparisons against single-sort reference
+Exit: 0

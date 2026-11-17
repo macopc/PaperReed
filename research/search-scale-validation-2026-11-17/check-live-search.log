@@ -1,0 +1,5 @@
+2026-11-17T15:18:26.393852+00:00
+Command: sandbox-exec -f research/harness/loopback-only.sb node research/harness/check-live-search.cjs
+Fixture: seed-10000
+PASS live typing, clear, IME, isolated input renders, unrelated events, unchanged send results, retained rows, late results and mail refresh
+Exit: 0
