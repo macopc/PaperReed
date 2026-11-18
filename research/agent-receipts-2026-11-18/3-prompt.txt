@@ -1,0 +1,2 @@
+请实际执行以下邮箱任务。可使用的邮件客户端 CLI 为 /Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/agent-receipt-run/session-3/paper-reed。仅通过此 CLI 操作邮箱；可用常规 shell 工具处理它返回的数据。请不要查看项目文件、CLI 实现或其他配置。
+看一下今天工作邮箱里有哪些邮件需要我回复，按紧急程度列出来。

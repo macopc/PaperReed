@@ -8,12 +8,12 @@ Paper Reed 是一个面向 macOS 的开源邮件客户端探索：重视阅读�
 
 ## 当前状态
 
-**0.0.1 本机测试包已构建，尚未公开发行。** 当前实现基于固定版本的 Mailspring / Mailspring-Sync 补丁，保留研究与设计过程，面向 macOS Apple Silicon。
+**[0.0.1 测试版已发布](https://github.com/macopc/PaperReed/releases/tag/v0.0.1)。** 当前实现基于固定版本的 Mailspring / Mailspring-Sync 补丁，保留研究与设计过程，面向 macOS Apple Silicon。
 
 - 产品：统一收件箱、即时搜索、快捷键、写信／回复、附件，以及置顶、稍后、标签与本机规则。
 - Agent：GUI 与 CLI 共用邮件、草稿和操作结果；提供本机 CLI 安装与连接诊断。内置 AI 后续考虑。
 - 验证：真实 Gmail 统一授权、重启和 CLI → GUI 草稿交接已有记录；其他服务商的覆盖以各项协议测试为准，不宣称全部真实邮箱已验证。
-- 测试包：简单应用图标与 `0.0.1` 版本已接入；安装包、验证材料和已知限制见 [0.0.1 测试记录](research/version-001-validation-2026-11-17/README.md)。尚未完成 Developer ID 签名、公证及面向其他用户的 Google 发布配置验收。
+- 测试包：简单应用图标与 `0.0.1` 版本已接入；安装包、验证材料和已知限制见 [0.0.1 测试记录](research/version-001-validation-2026-11-17/README.md)。该记录对应开发机的构建；公开下载包和校验值见版本发布页。
 - 开源：GPL-3.0-only。历史原型与文档保留当时状态，当前实现以最新验证记录为准。
 
 ## 阅读入口

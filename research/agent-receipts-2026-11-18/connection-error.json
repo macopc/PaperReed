@@ -1,0 +1,5 @@
+{
+  "error": "Cannot reach Paper Reed.",
+  "code": "connection-unavailable",
+  "hint": "Send outcome may be unknown. Have an operationId? Use operation-get to check its status. If the receipt was lost before you got an operationId, repeat draft-send with exactly the original input, including expectedRevision and requestId."
+}

@@ -4,7 +4,7 @@
 
 Paper Reed is an open-source macOS email client exploration focused on thoughtful reading, writing, and organization, with convenient access for external agents such as Claude Code, Codex, and OpenCode.
 
-**A local 0.0.1 test package is built; no public release yet.** The implementation uses ordered patches over pinned Mailspring / Mailspring-Sync sources on Apple Silicon macOS. Real Gmail authorization, restart and CLI-to-GUI draft handoff have recorded evidence. Developer ID signing, notarization and Google distribution readiness remain open; see the [0.0.1 package verification](research/version-001-validation-2026-11-17/README.md).
+**[Paper Reed 0.0.1 is available as a prerelease](https://github.com/macopc/PaperReed/releases/tag/v0.0.1).** The implementation uses ordered patches over pinned Mailspring / Mailspring-Sync sources on Apple Silicon macOS. Real Gmail authorization, restart and CLI-to-GUI draft handoff have recorded evidence. The [0.0.1 package verification](research/version-001-validation-2026-11-17/README.md) covers the local development build. The release page hosts the distribution archive and its checksum.
 
 ## What is here
 

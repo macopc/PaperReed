@@ -1,0 +1,2 @@
+请实际执行以下邮箱任务。可使用的邮件客户端 CLI 为 /Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/agent-receipt-run/session-7/paper-reed。仅通过此 CLI 操作邮箱；可用常规 shell 工具处理它返回的数据。请不要查看项目文件、CLI 实现或其他配置。
+把工作邮箱里项目 A 已处理完的通知归档，待我回复的保留。归档完成后把刚才那封验收通知放回来。

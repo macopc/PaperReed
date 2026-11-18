@@ -1,0 +1,4 @@
+paper-reed draft-reply --input '{"accountId":"ACCOUNT_ID","threadId":"THREAD_ID","type":"reply-all","body":"<div>Thank you.</div>"}'
+Or pass the same JSON through stdin. Results are JSON; failures exit 1.
+A saved receipt confirms the draft and its body were saved. Use draft-get with accountId and draftId to review it.
+

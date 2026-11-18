@@ -1,0 +1,6 @@
+Built Paper Reed 0.0.1 from 1037d28d2c6baef451c9c60e2736c9285ddeca7a-dirty; signing/notarization depend on build configuration.
+PASS: 49 patches applied; 129 source files checked; CLI copies match.
+
+> mailspring-root@0.0.1 typecheck
+> ./node_modules/.bin/tsc -p app/tsconfig.json --noEmit
+
