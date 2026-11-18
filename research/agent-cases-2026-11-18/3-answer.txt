@@ -1,0 +1,10 @@
+已通过 CLI 检查今天（11 月 18 日）工作邮箱 operations@cedar.example.test 的邮件及已有回复。需要你回复的有 **2 封**：
+
+| 优先级 | 邮件 / 发件人 | 需要回复的内容 | 截止时间 |
+|---|---|---|---|
+| **高** | **Project A signoff question** · Rina | 确认 Project A 签核；目前未见回复 | **今天 15:00**，原文未注明时区 |
+| **中** | **Budget approval** · Marta | 审批差旅预算估算并回复 | **本周五（11 月 20 日）** |
+
+其余无需回复：Badge renewal 已回复批准；Quarterly figures FYI、Project A deployment notice、Project A acceptance notice 均明确为知会或无需回复。
+
+未发送邮件或修改邮箱。

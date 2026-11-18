@@ -1,0 +1,4 @@
+已发送，发送状态为 `accepted`，副本已归档至已发送邮件。
+
+- 收件人：receiver@example.test
+- 主题：Approved test shipment A
