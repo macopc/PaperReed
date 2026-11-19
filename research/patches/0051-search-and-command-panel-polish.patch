@@ -1,0 +1,126 @@
+diff --git a/app/internal_packages/paper-reed/lib/command-panel.tsx b/app/internal_packages/paper-reed/lib/command-panel.tsx
+index 95933f8..3e6b788 100644
+--- a/app/internal_packages/paper-reed/lib/command-panel.tsx
++++ b/app/internal_packages/paper-reed/lib/command-panel.tsx
+@@ -11,6 +11,9 @@ export default class CommandPanel extends React.Component<{
+   render() {
+     const commands = this.props.commands.filter(c =>
+       `${c.title} ${c.id}`.toLowerCase().includes(this.state.query.toLowerCase()));
++    const available = commands.filter(command => !command.disabled);
++    const currentIndex = Math.min(this.state.index, Math.max(0, available.length - 1));
++    const active = available[currentIndex];
+     const execute = (command: MailCommand) => {
+       if (!command || command.disabled) return;
+       this.props.onClose(); command.run();
+@@ -21,24 +24,29 @@ export default class CommandPanel extends React.Component<{
+         event.stopPropagation();
+         if (event.nativeEvent.isComposing) return;
+         if (event.key === 'ArrowDown' || event.key === 'ArrowUp') {
+-          event.preventDefault(); this.setState({ index: Math.max(0, Math.min(commands.length - 1,
+-            this.state.index + (event.key === 'ArrowDown' ? 1 : -1))) });
++          event.preventDefault();
++          this.setState({ index: Math.max(0, Math.min(available.length - 1,
++            currentIndex + (event.key === 'ArrowDown' ? 1 : -1))) });
+         } else if (event.key === 'Enter' && event.target instanceof HTMLInputElement) {
+-          event.preventDefault(); execute(commands[this.state.index]);
++          event.preventDefault(); execute(active);
+         }
+       }}>
+-      <header><span>跳转与操作</span><button aria-label="关闭命令面板" onClick={this.props.onClose}>Esc</button></header>
++      <header><span>命令面板</span><button aria-label="关闭命令面板" onClick={this.props.onClose}><kbd>Esc</kbd></button></header>
+       <input autoFocus aria-label="查找命令" placeholder="搜索操作、文件夹或设置…" value={this.state.query}
+         onChange={event => this.setState({ query: event.target.value, index: 0 })} />
+       <div className="pr-command-results">
+-        {commands.map((command, index) => <button key={command.id} disabled={command.disabled}
+-          className={index === this.state.index ? 'active' : ''} onClick={() => execute(command)}>
++        {commands.map((command) => <button key={command.id} disabled={command.disabled}
++          className={command === active ? 'active' : ''} onClick={() => execute(command)}>
+           <span>{command.title}</span><kbd>{(AppEnv.keymaps.getBindingsForCommand(command.id) || [])
+             .slice(0, 1).join('').replace(/mod|command/g, '⌘')}</kbd>
+         </button>)}
+-        {!commands.length && <p>没有匹配的操作</p>}
++        {!commands.length && <p className="pr-command-empty" role="status">没有匹配的命令</p>}
+       </div>
+-      <footer>↑↓ 浏览 · Enter 执行 · Esc 关闭</footer>
++      {available.length > 0 ? (
++        <footer>↑↓ 选择 · Enter 执行</footer>
++      ) : commands.length > 0 && (
++        <footer role="status">匹配的命令在当前位置不可用</footer>
++      )}
+     </dialog>;
+   }
+ }
+diff --git a/app/internal_packages/paper-reed/lib/workspace.tsx b/app/internal_packages/paper-reed/lib/workspace.tsx
+index 0686160..5319850 100644
+--- a/app/internal_packages/paper-reed/lib/workspace.tsx
++++ b/app/internal_packages/paper-reed/lib/workspace.tsx
+@@ -651,7 +651,6 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+         <MailSearch key={`${this.state.folder}:${this.state.accountId}`}
+           query={this.state.query} onSearch={this.search}
+           onPending={() => { this.generation++; }} />
+-        {this.state.loading && <span role="status">正在更新结果 · 下方暂为上次列表</span>}
+         <div className="pr-list-tools">
+           {(this.state.folder !== 'drafts' || this.state.query) && (
+             <label>
+@@ -671,8 +670,10 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+               <span>{selected.length ? `已选 ${selected.length} 个会话` : '选择当前列表'}</span>
+             </label>
+           )}
+-          {!selected.length && this.state.query && (
+-            <span className="pr-search-scope">当前邮箱范围 · 本机已同步邮件</span>
++          {this.state.loading ? (
++            <span className="pr-search-scope" role="status">正在更新 · 暂显示上次列表</span>
++          ) : !selected.length && this.state.query && (
++            <span className="pr-search-scope">仅搜索本机已同步邮件</span>
+           )}
+           {(this.state.folder !== 'drafts' || this.state.query) && (
+             <label className="pr-unread-filter">
+@@ -1118,11 +1119,11 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                 <div className="pr-mail-list" aria-label={title} aria-busy={loading}>
+                   {rows.map(this.renderRow)}
+                   {!rows.length && (
+-                    <p className="pr-empty">
++                    <p className="pr-empty" role="status">
+                       {loading
+                         ? '正在读取邮件…'
+                         : this.state.query
+-                          ? '没有匹配的本机邮件。试试其他关键词，或清除搜索。'
++                          ? '没找到匹配的邮件。请试试其他关键词或邮箱范围。'
+                           : '这里还没有邮件'}
+                     </p>
+                   )}
+diff --git a/app/internal_packages/paper-reed/styles/paper-reed.less b/app/internal_packages/paper-reed/styles/paper-reed.less
+index eb31d8e..69718e1 100644
+--- a/app/internal_packages/paper-reed/styles/paper-reed.less
++++ b/app/internal_packages/paper-reed/styles/paper-reed.less
+@@ -690,13 +690,26 @@
+ }
+ 
+ .pr-command-trigger { margin-left:auto; background:transparent; border:0; color:#626b60; font-size:12px; }
+-.pr-command-panel { width:480px; max-height:70vh; padding:20px; border:1px solid #d9ddd2; border-radius:12px; color:#303730; background:#faf9f4; box-shadow:0 20px 70px #25322530; }
++.pr-command-panel { width:min(480px, calc(100vw - 48px)); max-height:70vh; padding:20px; border:1px solid #d9ddd2; border-radius:12px; color:#303730; background:#faf9f4; box-shadow:0 20px 70px #25322530; }
+ .pr-command-panel::backdrop { background:#25322535; }
+-.pr-command-panel header { display:flex; justify-content:space-between; align-items:center; margin-bottom:16px; }
++.pr-command-panel header { display:flex; justify-content:space-between; align-items:center; margin-bottom:12px; font-size:13px; font-weight:500; }
+ .pr-command-panel header button { background:none; border:0; color:#626b60; }
+-.pr-command-panel input { width:100%; margin-bottom:12px; }
++.pr-command-panel input {
++  box-sizing:border-box;
++  width:100%;
++  margin-bottom:8px;
++  padding:7px 10px;
++  color:#303730;
++  font:inherit;
++  border:1px solid #d9ddd2;
++  border-radius:5px;
++  background:#fffefa;
++}
++.pr-command-panel input:focus { border-color:#4b634f; outline:1px solid #4b634f; }
++.pr-command-panel kbd { color:#626b60; font:inherit; font-size:11px; }
++.pr-command-empty { margin:24px 0; text-align:center; color:#626b60; }
+ .pr-command-results { max-height:42vh; overflow:auto; }
+ .pr-command-results button { display:flex; align-items:center; justify-content:space-between; width:100%; padding:10px 12px; border:0; border-radius:6px; background:transparent; text-align:left; }
+-.pr-command-results button.active, .pr-command-results button:hover { background:#e9eee5; }
++.pr-command-results button.active, .pr-command-results button:not(:disabled):hover { background:#e9eee5; }
+ .pr-command-results button:disabled { opacity:.4; }
+ .pr-command-panel footer { margin-top:16px; color:#747a70; font-size:11px; }

@@ -39,6 +39,28 @@ module.exports=async({app,main,cdp,work,account,cli,click,evaluate,until,restart
  await frame('inbox-narrow');
  await cdp.send('Emulation.setDeviceMetricsOverride',{width:1440,height:900,deviceScaleFactor:1,mobile:false});
  const search=main.locator('.pr-search-input');
+ await search.fill('no matching fixture mail');
+ await main.getByRole('status').filter({hasText:'没找到匹配的邮件'}).waitFor();
+ await screenshot('search-empty');
+ await main.locator('.pr-command-trigger').click();
+ const paletteInput=main.getByRole('textbox',{name:'查找命令'});
+ await paletteInput.fill('归档');
+ const activeCommand=main.locator('.pr-command-results button.active');
+ assert((await activeCommand.innerText()).includes('前往归档'));
+ assert(await main.locator('.pr-command-results button:disabled').count());
+ await paletteInput.press('ArrowDown');
+ assert((await activeCommand.innerText()).includes('前往归档'),'Arrow navigation skips disabled commands');
+ await screenshot('command-available');
+ await paletteInput.fill('core:archive-item');
+ await main.getByRole('status').filter({hasText:'当前位置不可用'}).waitFor();
+ assert.equal(await activeCommand.count(),0);
+ await paletteInput.press('Enter');
+ await main.locator('.pr-command-panel').waitFor();
+ await screenshot('command-unavailable');
+ await paletteInput.fill('no matching command');
+ await main.getByRole('status').filter({hasText:'没有匹配的命令'}).waitFor();
+ await paletteInput.press('Escape');
+ await main.locator('.pr-command-panel').waitFor({state:'hidden'});
  await search.fill('Project kickoff');
  await until(()=>evaluate(cdp,`document.querySelectorAll('.pr-mail-row').length===1 &&
    document.querySelector('.pr-mail-row').innerText.includes('Project kickoff')`),'live search results');
@@ -95,7 +117,15 @@ module.exports=async({app,main,cdp,work,account,cli,click,evaluate,until,restart
    }))`);
    const toolbarBottom=await evaluate(cdp,`Math.ceil(document.querySelector('.pr-editor .pr-compose-actions').getBoundingClientRect().bottom)`);
    assert(toolbarBottom<=height,`Draft actions visible without scrolling at ${width}×${height} (bottom = ${toolbarBottom})`);
-   if (width===740) await frame('long-subject-narrow');
+   if (width===740) {
+     assert(await evaluate(cdp,`(() => {
+       const header = document.querySelector('.pr-draft-header');
+       const centerY = el => { const r = el.getBoundingClientRect(); return r.top + r.height / 2; };
+       return Math.abs(centerY(header.querySelector('.pr-back')) -
+         centerY(header.querySelector('.pr-save-draft'))) <= 1;
+     })()`),'Back and Save share the same row in the narrow draft');
+     await frame('long-subject-narrow');
+   }
    if (height===768) await frame('long-subject-768');
  }
  await cdp.send('Emulation.setDeviceMetricsOverride',{width:1440,height:900,deviceScaleFactor:1,mobile:false});
