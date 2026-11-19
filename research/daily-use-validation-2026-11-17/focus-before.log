@@ -1,0 +1,14 @@
+PASS command palette with no list row focused
+PASS Gmail J moves to next row; X selects and Escape clears
+AssertionError [ERR_ASSERTION]: Returning from a thread must restore its list row focus
+
+-1 !== 3
+
+    at /Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/harness/check-command-panel.cjs:83:10 {
+  generatedMessage: false,
+  code: 'ERR_ASSERTION',
+  actual: -1,
+  expected: 3,
+  operator: 'strictEqual',
+  diff: 'simple'
+}

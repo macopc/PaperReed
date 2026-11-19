@@ -1,0 +1,10 @@
+已检查工作邮箱 operations@cedar.example.test 今天（11 月 18 日）的邮件及回复记录，有 **2 封需要你回复**，按紧急程度排序：
+
+| 优先级 | 邮件 / 发件人 | 需要回复的内容 | 截止时间 |
+|---|---|---|---|
+| **高，优先处理** | **Project A signoff question** — Rina | 确认 Project A 是否签核通过 | **今天 15:00**，邮件未注明时区 |
+| **中** | **Budget approval** — Marta | 审批差旅费用预估并回复 | **本周五（11 月 20 日）前** |
+
+其余今天的邮件无需回复：Badge renewal 已由你回复批准；Quarterly figures FYI、Project A deployment notice 和 Project A acceptance notice 均为知会或存档通知。
+
+仅做了查看，未发送邮件。

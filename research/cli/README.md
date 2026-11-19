@@ -59,9 +59,11 @@ JSON
 | `archive` / `spam` / `trash` / `restore-inbox` | 归档、垃圾邮件、废纸篓、移回收件箱 |
 | `change-get` / `undo` | 查询整理任务／撤销一个可恢复的整理任务 |
 
+`draft-create` 和 `draft-reply` 成功时，回执中的 `status: "saved"` 表示草稿及正文已经保存。需要核对时，用返回的 `accountId` 和 `draftId` 调用 `draft-get`。
+
 每个邮件命令都提供 `paper-reed <command> --help` 和输入示例。`draft-create` 要求显式 `accountId` 和 `to` 数组。正文遵循草稿的 `plaintext` 格式，不能通过正文更新切换格式；编辑接口可修改主题、正文与 `to` / `cc` / `bcc`，其余字段保留。收件人字段省略表示不修改，传 `[]` 表示清空；发送前必须至少有一个有效收件人。
 
-`draft-send` 输入为 `{accountId,draftId,expectedRevision,requestId}`。重试间必须保持 `requestId` 不变。结果可能只是 `queued` 或 `pending-admission`，随后使用返回的 operation ID 查询 `operation-get`。结果未知、连接中断或超时时，不生成新请求 ID 重发；先检查操作状态或邮箱。详见 [共用接口记录](../shared-core-validation.md)。
+`draft-send` 输入为 `{accountId,draftId,expectedRevision,requestId}`。重试间必须保持 `requestId` 不变。结果可能只是 `queued` 或 `pending-admission`，随后使用返回的 operation ID 查询 `operation-get`。如果首个回执丢失，手里只有 requestId，则用首次提交的完整参数（包括原 expectedRevision 和 requestId）重试 `draft-send`。若已受理，会返回同一发送操作的结果；若首次请求未到达，则按原授权提交。详见 [共用接口记录](../shared-core-validation.md)。
 
 ## 回复与附件
 

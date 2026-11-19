@@ -4,7 +4,7 @@
 
 Paper Reed is an open-source macOS email client exploration focused on thoughtful reading, writing, and organization, with convenient access for external agents such as Claude Code, Codex, and OpenCode.
 
-**Early exploration: the current interface is the first-version baseline; architecture and technology choices remain undecided.** The mail core and a connected desktop UI are being validated through source patches. There is no installable mail client or release yet. Mailspring is a candidate, not a selected foundation.
+**[Paper Reed 0.0.1 is available as a prerelease](https://github.com/macopc/PaperReed/releases/tag/v0.0.1).** The implementation uses ordered patches over pinned Mailspring / Mailspring-Sync sources on Apple Silicon macOS. Real Gmail authorization, restart and CLI-to-GUI draft handoff have recorded evidence. The [0.0.1 package verification](research/version-001-validation-2026-11-17/README.md) covers the local development build. The release page hosts the distribution archive and its checksum.
 
 ## What is here
 
@@ -13,8 +13,8 @@ Paper Reed is an open-source macOS email client exploration focused on thoughtfu
 - Research into Mailspring and Zero, with pinned source provenance and isolated feasibility checks.
 - Candidate architecture and CLI / agent interactions; built-in AI is a later priority.
 - A proposed [first-version mail core](design/MAIL-CORE.md) and [domain glossary](GLOSSARY.md), covering shared UI / CLI state, drafts, account boundaries and operation results. These documents are in Chinese.
-- A [technology recommendation](design/TECH-CHOICE.md) with source evidence and validation criteria: investigate a Mailspring product fork first; the native engine now builds and passes loopback protocol checks, while real provider authentication remains unverified.
-- An experimental CLI and Electron UI using the same local mail core. The connected inbox, conversation/reply and composer are tested against local IMAP/SMTP fixtures, including conflicts and recovery. See the [UI integration record](research/ui-validation-2026-11-16/README.md). This is not an installable release or real-provider validation.
+- A [technology recommendation](design/TECH-CHOICE.md) with source evidence and validation criteria: investigate a Mailspring product fork first; the native engine now builds and passes loopback protocol checks, with real Gmail authorization subsequently verified.
+- An experimental CLI and Electron UI using the same local mail core. The connected inbox, conversation/reply and composer are tested against local IMAP/SMTP fixtures, including conflicts and recovery. See the [UI integration record](research/ui-validation-2026-11-16/README.md). The historical record describes that stage; newer package and Gmail checks are linked above.
 
 ## Try the prototype
 

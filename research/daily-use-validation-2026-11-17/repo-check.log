@@ -1,0 +1,3 @@
+12 standalone previews are current
+PASS: 71 JavaScript syntax checks; JSON and local Markdown links valid.
+Browser interaction, visual design and real mailbox integration are not tested here.

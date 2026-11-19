@@ -1,0 +1,6 @@
+可以访问两个邮箱：
+
+- `operations@cedar.example.test`：从地址判断，这是工作邮箱。
+- `me@personal.example.test`：从地址判断，这是个人邮箱。
+
+两个账户显示名均为 “Harness Test”，因此工作邮箱的判断依据是邮箱地址。

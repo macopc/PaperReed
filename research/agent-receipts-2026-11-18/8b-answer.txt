@@ -1,0 +1,1 @@
+已发送给 receiver@example.test，主题为「Approved test shipment B」。CLI 确认发送请求已接受，且邮件已归入“已发送”。

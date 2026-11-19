@@ -1,0 +1,6 @@
+可访问两个邮箱：
+
+- `operations@cedar.example.test`
+- `me@personal.example.test`
+
+根据邮箱地址判断，工作邮箱应是 **`operations@cedar.example.test`**；另一个应是个人邮箱。

@@ -2,6 +2,7 @@
 """Build a configured Paper Reed macOS preview using the prepared upstream checkout."""
 import argparse
 import os
+import shutil
 from pathlib import Path
 import subprocess
 import sys
@@ -11,13 +12,17 @@ parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--upstream', type=Path, default=ROOT / 'research/.local/Mailspring')
 parser.add_argument('--google-client', type=Path, default=os.environ.get('PAPER_REED_GOOGLE_CLIENT_FILE'),
                     help='Project Google Desktop client JSON (or PAPER_REED_GOOGLE_CLIENT_FILE)')
-parser.add_argument('--version', default='0.1.0-preview.1')
+parser.add_argument('--version', default='0.0.1')
 parser.add_argument('--skip-archive', action='store_true', help='Build .app without the ZIP archive')
 args = parser.parse_args()
 if sys.platform != 'darwin':
     parser.error('This entry point builds the macOS preview.')
 if not args.google_client or not args.google_client.is_file():
     parser.error('Provide the project Google Desktop client JSON with --google-client.')
+for asset, target in [('paper-reed.icns', 'app/build/resources/mac/paper-reed.icns'),
+                      ('app-icon.png', 'app/static/paper-reed-icon.png'),
+                      ('mark.svg', 'app/static/paper-reed-mark.svg')]:
+    shutil.copy2(ROOT / 'assets/brand' / asset, args.upstream / target)
 revision = subprocess.check_output(['git', 'rev-parse', 'HEAD'], cwd=ROOT, text=True).strip()
 if subprocess.check_output(['git', 'status', '--porcelain'], cwd=ROOT, text=True).strip():
     revision += '-dirty'

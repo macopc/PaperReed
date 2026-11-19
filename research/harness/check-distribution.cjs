@@ -6,7 +6,7 @@ const folder=fs.mkdtempSync(path.join(path.dirname(upstream),'distribution-check
 let app;
 (async()=>{
  const env={...process.env};delete env.ELECTRON_RUN_AS_NODE;delete env.PLAYWRIGHT;delete env.PAPER_REED_GOOGLE_CLIENT_FILE;
- app=await _electron.launch({executablePath:executable,args:['--no-sandbox','--config-dir-path',folder],env});
+ app=await _electron.launch({executablePath:executable,args:[...(process.env.TEST_NORMAL_LAUNCH ? [] : ['--no-sandbox']),'--config-dir-path',folder],env});
  const page=await app.firstWindow();await page.locator('[data-provider=gmail]').waitFor();
  const cdp=await app.context().newCDPSession(page);
  const run=async expression=>{
@@ -25,7 +25,7 @@ let app;
    projectMatches:config.installed.client_id===expected.installed.client_id&&config.installed.client_secret===expected.installed.client_secret,
    onlyProjectConfig:Object.keys(config).join(',')==='installed'&&Object.keys(config.installed).sort().join(',')==='client_id,client_secret'};
  })()`);
- assert.equal(metadata.version,'0.1.0-preview.1');assert(/^[a-f0-9]{40}(-dirty)?$/.test(metadata.revision));
+ assert.equal(metadata.version,'0.0.1');assert(/^[a-f0-9]{40}(-dirty)?$/.test(metadata.revision));
  assert.equal(metadata.repository,'https://github.com/macopc/PaperReed.git');
  assert(metadata.configured&&metadata.projectMatches&&metadata.onlyProjectConfig);
  await run(`require('electron').shell.openExternal=async url=>{window.__googleURL=url;};true`);
@@ -45,7 +45,8 @@ let app;
  await assert.rejects(fetch(callback), 'Cancelled authorization listener must close');
  assert.equal(await run('require("mailspring-exports").AccountStore.accounts().length'),0);
  fs.mkdirSync(path.dirname(output),{recursive:true});
- fs.writeFileSync(output,JSON.stringify({...metadata,noOAuthEnvironment:true,bundledLogin:true,cancelClosesCallback:true,noAccountSaved:true,externalNetwork:false},null,2)+'\n');
+ await page.screenshot({path:path.join(path.dirname(output),'installed-onboarding.png')});
+ fs.writeFileSync(output,JSON.stringify({...metadata,noOAuthEnvironment:true,bundledLogin:true,cancelClosesCallback:true,noAccountSaved:true,normalLaunch:!!process.env.TEST_NORMAL_LAUNCH,outboundNetworkRestricted:!process.env.TEST_NORMAL_LAUNCH},null,2)+'\n');
  console.log('PASS configured package identity, project match, browser login handoff and cancellation');
 })().catch(error=>{console.error(error.message);process.exitCode=1}).finally(async()=>{
  if(app)await app.close();fs.rmSync(folder,{recursive:true,force:true});

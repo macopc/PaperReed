@@ -1,0 +1,108 @@
+diff --git a/app/build/build.js b/app/build/build.js
+--- a/app/build/build.js
++++ b/app/build/build.js
+@@ -27,7 +27,7 @@
+ const tmpdir = path.resolve(os.tmpdir(), 'nylas-build');
+ const packageJSON = require(path.join(appDir, 'package.json'));
+ const upstreamVersion = packageJSON.version;
+-packageJSON.version = process.env.PAPER_REED_VERSION || '0.1.0-preview.1';
++packageJSON.version = process.env.PAPER_REED_VERSION || '0.0.1';
+ let googleClient = null;
+ const { compilerOptions } = require(path.join(appDir, 'tsconfig.json'));
+ 
+@@ -293,12 +293,12 @@
+     tmpdir,
+     arch,
+     icon: {
+-      darwin: path.resolve(appDir, 'build', 'resources', 'mac', 'mailspring.icns'),
++      darwin: path.resolve(appDir, 'build', 'resources', 'mac', 'paper-reed.icns'),
+       win32: path.resolve(appDir, 'build', 'resources', 'win', 'mailspring-square.ico'),
+       linux: undefined,
+     }[platform],
+     name: { darwin: 'Paper Reed', win32: 'Mailspring', linux: 'mailspring' }[platform],
+-    appCopyright: `Copyright (C) 2014-${new Date().getFullYear()} Foundry 376, LLC. All rights reserved.`,
++    appCopyright: `Copyright © ${new Date().getFullYear()} Paper Reed contributors. Based on Mailspring © 2014–${new Date().getFullYear()} Foundry 376, LLC.`,
+     derefSymlinks: false,
+     asar: {
+       unpack:
+@@ -470,7 +470,7 @@
+ }
+ 
+ async function createMacZip() {
+-  const zipPath = path.join(outputDir, 'Paper Reed.zip');
++  const zipPath = path.join(outputDir, `Paper-Reed-${packageJSON.version}-macOS-${arch}.zip`);
+   if (fs.existsSync(zipPath)) {
+     fs.unlinkSync(zipPath);
+   }
+diff --git a/app/src/browser/application.ts b/app/src/browser/application.ts
+--- a/app/src/browser/application.ts
++++ b/app/src/browser/application.ts
+@@ -564,8 +564,15 @@
+     });
+ 
+     if (process.platform === 'darwin') {
++      app.setAboutPanelOptions({
++        applicationName: 'Paper Reed',
++        applicationVersion: app.getVersion(),
++        iconPath: path.join(this.resourcePath, 'static', 'paper-reed-icon.png'),
++        copyright: '© Paper Reed contributors · GPL-3.0-only',
++        credits: 'Based on Mailspring by Foundry 376 and contributors.',
++      });
+       this.on('application:about', () => {
+-        Menu.sendActionToFirstResponder('orderFrontStandardAboutPanel:');
++        app.showAboutPanel();
+       });
+       this.on('application:bring-all-windows-to-front', () => {
+         Menu.sendActionToFirstResponder('arrangeInFront:');
+diff --git a/app/internal_packages/paper-reed/lib/workspace.tsx b/app/internal_packages/paper-reed/lib/workspace.tsx
+--- a/app/internal_packages/paper-reed/lib/workspace.tsx
++++ b/app/internal_packages/paper-reed/lib/workspace.tsx
+@@ -962,9 +962,9 @@
+       <div className="pr-workspace">
+         {this.state.palette && <CommandPanel commands={this.commands().filter(c => !['paper-reed:commands','core:focus-search','core:next-item','core:previous-item','core:select-item'].includes(c.id))} onClose={() => this.setState({ palette: false })} />}
+         <header className="pr-titlebar">
+-          <span className="pr-brand">Paper Reed</span>
++          <span className="pr-brand"><img src={`file://${AppEnv.getLoadSettings().resourcePath}/static/paper-reed-mark.svg`} alt="" />Paper Reed</span>
+           <button className="pr-command-trigger" onClick={() => this.setState({ palette: true })}>命令 <kbd>⌘K</kbd></button>
+-          <span className="pr-build-label">邮件工作台 · 实验版</span>
++          <span className="pr-build-label">{AppEnv.getVersion().split('-')[0]} · 测试版</span>
+         </header>
+         <div className="pr-layout">
+           <aside className="pr-sidebar" aria-label="邮箱导航">
+diff --git a/app/internal_packages/paper-reed/styles/paper-reed.less b/app/internal_packages/paper-reed/styles/paper-reed.less
+--- a/app/internal_packages/paper-reed/styles/paper-reed.less
++++ b/app/internal_packages/paper-reed/styles/paper-reed.less
+@@ -11,7 +11,8 @@
+   .pr-workspace button:focus-visible, .pr-workspace select:focus-visible, .pr-draft-status button:focus-visible { outline: 2px solid var(--pr-reed); outline-offset: 2px; }
+   .pr-workspace button:disabled, .pr-draft-status button:disabled { opacity: .5; cursor: wait; }
+   .pr-titlebar { height: 64px; flex-shrink: 0; display: flex; align-items: center; gap: 20px; padding: 0 36px 0 100px; -webkit-app-region: drag; border-bottom: 1px solid var(--pr-line); }
+-  .pr-brand { font: 22px/32px 'Iowan Old Style', Palatino, Georgia, serif; letter-spacing: -.4px; }
++  .pr-brand { display: inline-flex; align-items: center; gap: 8px; font: 22px/32px 'Iowan Old Style', Palatino, Georgia, serif; letter-spacing: -.4px; }
++  .pr-brand img { width: 26px; height: 28px; object-fit: contain; }
+   .pr-build-label { margin-left: auto; color: var(--pr-muted); font-size: 11px; }
+   .pr-layout { display: flex; flex: 1; min-height: 0; }
+   .pr-sidebar { display: flex; flex-direction: column; width: 168px; flex-shrink: 0; padding: 24px 16px 20px; border-right: 1px solid var(--pr-line); }
+diff --git a/app/internal_packages/mcp-server/bin/paper-reed.cjs b/app/internal_packages/mcp-server/bin/paper-reed.cjs
+--- a/app/internal_packages/mcp-server/bin/paper-reed.cjs
++++ b/app/internal_packages/mcp-server/bin/paper-reed.cjs
+@@ -3,7 +3,7 @@
+ const fs = require('node:fs');
+ const path = require('node:path');
+ const { createRequire } = require('node:module');
+-const VERSION = '0.1.0-experimental';
++const VERSION = '0.0.1';
+ const mailActions = {
+   'mark-read': 'read',
+   'mark-unread': 'unread',
+diff --git a/app/internal_packages/mcp-server/bin/install.cjs b/app/internal_packages/mcp-server/bin/install.cjs
+--- a/app/internal_packages/mcp-server/bin/install.cjs
++++ b/app/internal_packages/mcp-server/bin/install.cjs
+@@ -112,7 +112,7 @@
+     env: cleanEnv(),
+     timeout: 8000,
+   });
+-  if (probe.stdout.trim() !== '0.1.0-experimental')
++  if (probe.stdout.trim() !== '0.0.1')
+     throw new Error('当前应用的 CLI 运行环境不可用。');
+   fs.mkdirSync(path.dirname(p.command), { recursive: true });
+   fs.mkdirSync(path.dirname(p.profile), { recursive: true, mode: 0o700 });

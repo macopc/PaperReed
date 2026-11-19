@@ -1,0 +1,23 @@
+{
+  "rootHead": "aa5561c342380a08a3f9eb6accd2c704e00fb0be",
+  "patch": "0047-release-boundaries.patch",
+  "patchSHA256": "0480c1c3d465e4d2202ed0115efcde260d63a718d6bc9c05d282945e9d884c4f",
+  "sha256": {
+    "app/src/key-manager.ts": "df7f4d5ef324f0842cc167f556506e5ed0bcb34f7e2a447f0a6c0303eed529a2",
+    "app/src/browser/application.ts": "e9a408a32b8b8ee59fae5fc8f67c5980622fcf094cfb2cc3ceb6d6ab2cd63bc0",
+    "app/src/flux/stores/database-store.ts": "5d2289594907a471b97a080279c17ac4247df5aabbbcc13506428e389b85ff90",
+    "app/src/flux/stores/database-agent.js": "e0f95921b08dcb1a8a84bc5d846744cb3a702d247af3555cc1430f070593d399",
+    "app/src/services/mail-core/local-triage.ts": "5d2a1aba295a5f561726722f6da08d1e55c08052873349f0b340cc5aa954c9fa",
+    "app/src/services/sanitize-transformer.ts": "30b61c524a9d022e7754d959fea91610e2b83d5f5f4a033222843772d84cefae",
+    "app/internal_packages/message-list/lib/email-frame.tsx": "174c13e7e8a60dd43afd7788a518172a1ab54050832ecfa0ec1be98ff134e8ed",
+    "app/internal_packages/message-autoload-images/lib/autoload-images-store.ts": "0c88bb23430dd454abe03f1de6ecdd6ce1cf60b7ce5ce0a8792b65d11ddbb3a0",
+    "app/internal_packages/message-autoload-images/lib/autoload-images-extension.ts": "deleted",
+    "app/internal_packages/message-autoload-images/lib/main.ts": "3f97cd9a4bdc55f3b3f201a78b8e0c9c3137032835108a6233ae6d895d96a7e0",
+    "app/internal_packages/mcp-server/lib/mcp-http-server.ts": "05779c5fca6f0fb5c956fd48e2641e21b9566a28eb37733c0b3ea1011cd7b833",
+    "app/spec/key-manager-spec.ts": "96c9fd56d1e63ac8c2b406261c4510cd886e4be0fbc7dfefcc2e03196793706d",
+    "app/package.json": "5a93eb0f64235375e0a9a8265cc3c0c2d39e86a2058cb7726ef8e5e40a229de4",
+    "app/package-lock.json": "52fadc87dfd11a27c3d8ffba0b6b852cb11bf715bf779e1c82484b46ce8a3483",
+    "app/internal_packages/message-autoload-images/specs/autoload-images-extension-spec.ts": "209249996aca17f388b06c3ed2389c5be0bcda3bcb12d2e99af3045e30ac2551",
+    "app/src/browser/credential-store.ts": "9a3e3906f1798928213b6bf12350d2988a2db23568529c2e1610071b7ad55ef6"
+  }
+}

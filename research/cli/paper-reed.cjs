@@ -3,7 +3,7 @@
 const fs = require('node:fs');
 const path = require('node:path');
 const { createRequire } = require('node:module');
-const VERSION = '0.1.0-experimental';
+const VERSION = '0.0.1';
 const mailActions = {
   'mark-read': 'read',
   'mark-unread': 'unread',
@@ -276,9 +276,21 @@ function inputFor(command, args) {
     );
   return data;
 }
+const sendRecoveryHint =
+  'Have an operationId? Use operation-get to check its status. If the receipt was lost before you got an operationId, repeat draft-send with exactly the original input, including expectedRevision and requestId.';
+
 function help(command) {
-  if (commands[command])
-    return `paper-reed ${command} --input '${JSON.stringify(examples[command])}'\nOr pass the same JSON through stdin. Results are JSON; failures exit 1.\n${mailActions[command] ? 'Returns per-target task receipts. queued is not success; poll change-get. Reuse requestId only for the same targets/action while task history remains.\n' : ''}${command === 'draft-send' ? 'Send only with explicit user approval. Keep requestId stable across retries; inspect operation-get after uncertain results.\n' : ''}`;
+  if (commands[command]) {
+    let note = '';
+    if (mailActions[command])
+      note = 'Returns per-target task receipts. queued is not success; poll change-get. Reuse requestId only for the same targets/action while task history remains.';
+    if (command === 'draft-send')
+      note = 'Send only with explicit user approval. ' + sendRecoveryHint;
+    if (command === 'draft-create' || command === 'draft-reply')
+      note = 'A saved receipt confirms the draft and its body were saved. Use draft-get with accountId and draftId to review it.';
+    return `paper-reed ${command} --input '${JSON.stringify(examples[command])}'\nOr pass the same JSON through stdin. Results are JSON; failures exit 1.\n` +
+      (note ? note + '\n' : '');
+  }
   return `Paper Reed CLI ${VERSION}\n\nStart here:\n  paper-reed doctor             Check the local connection (read-only)\n  paper-reed accounts           List authorized accounts\n  paper-reed <command> --help   Show a JSON example\n\nRead: accounts, folders, threads, search, thread-get, attachment-get\nDrafts: draft-get, draft-create, draft-reply, draft-update, draft-attach, draft-detach, draft-send, operation-get\nRules: rules, rule-save, rule-delete, rules-reorder, rules-preview, rules-apply\nClassification: classify, classify-auto\nLocal: pin, unpin, snooze, unsnooze, local-list, local-state, labels, label-create, label-update, label-delete, label-add, label-remove\nOrganize: mark-read, mark-unread, archive, spam, trash, restore-inbox, change-get, undo\n\nJSON input: --input '{...}' or stdin. JSON output; errors exit 1.\nInstall/connect from Paper Reed → Settings → Agent. Keep the app running.\nNo mail is sent by installation or doctor. Sending requires permission and user approval.\n`;
 }
 async function main() {
@@ -401,7 +413,7 @@ async function main() {
         'connection-unavailable',
         'Cannot reach Paper Reed.',
         command === 'draft-send'
-          ? 'Send outcome may be unknown. Keep requestId unchanged; inspect the operation or mailbox before retrying.'
+          ? 'Send outcome may be unknown. ' + sendRecoveryHint
           : 'Keep Paper Reed running, enable Agent access, and update the CLI connection if the port changed.'
       );
     throw error;

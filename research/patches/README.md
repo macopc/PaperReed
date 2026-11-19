@@ -41,10 +41,20 @@
 | `0035-reviewed-send-revision.patch` | Mailspring 根目录，在 0033 后应用 | 桌面固定基线及此前桌面补丁 |
 | `0036-gmail-shared-oauth.patch` | `mailsync/` 子模块，在 0034 后应用 | 原生固定基线及此前原生补丁 |
 | `0037-google-login-reconnect.patch` | Mailspring 根目录，在 0035 后应用 | 桌面固定基线及此前桌面补丁；需要 0036 引擎 |
+| `0038-provider-scope.patch` | Mailspring 根目录，在 0037 后应用 | 桌面固定基线及此前桌面补丁 |
+| `0039-configured-preview.patch` | Mailspring 根目录，在 0038 后应用 | 桌面固定基线及此前桌面补丁 |
+| `0040-live-mail-search.patch` | Mailspring 根目录，在 0039 后应用 | 桌面固定基线及此前桌面补丁 |
+| `0041-mail-commands.patch` | Mailspring 根目录，在 0040 后应用 | 桌面固定基线及此前桌面补丁 |
+| `0042-search-and-mailbox-query.patch` | Mailspring 根目录，在 0041 后应用 | 桌面固定基线及此前桌面补丁 |
+| `0043-search-account-handoff.patch` | Mailspring 根目录，在 0042 后应用 | 桌面固定基线及此前桌面补丁 |
+| `0044-yield-delayed-package-activation.patch` | Mailspring 根目录，在 0043 后应用 | 桌面固定基线及此前桌面补丁 |
+| `0045-use-image-directory-entry-types.patch` | Mailspring 根目录，在 0044 后应用 | 桌面固定基线及此前桌面补丁 |
+| `0046-restore-mail-list-focus.patch` | Mailspring 根目录，在 0045 后应用 | 桌面固定基线及此前桌面补丁 |
+| `0047-release-boundaries.patch` | Mailspring 根目录，在 0046 后应用 | 桌面固定基线及此前桌面补丁 |
 
 在干净的固定版本 checkout 中，使用补丁的绝对路径分别执行 `git apply --check <patch>`、`git apply <patch>`。0001、0008、0023、0024、0026、0028、0032、0034、0036 按顺序在子模块根目录应用；其余补丁按编号在桌面根目录应用。应用全部原生补丁后重新构建引擎，并替换实验桌面 `app/mailsync`；0010 不要求额外原生构建。本轮已在临时目录恢复各文件的基线版本、实际应用补丁，并逐字节比对测试过的源码。
 
-当前工作区的 `research/.local/Mailspring` 已应用三十九份补丁，**不要重复应用**。安装过程中产生的上游 `app/package-lock.json` 变化不在补丁内。
+当前工作区的 `research/.local/Mailspring` 已应用 47 份补丁，**不要重复应用**。0047 已包含当前验证环境的 `app/package-lock.json` 差异，补丁重放会比对该锁文件。
 
 接入方式：新增一个 `MailMutationGuard.hpp`，只依赖现有 SQLiteCpp / nlohmann。它由 `TaskProcessor.cpp` 和 `MailStore.cpp` 直接包含，不新增构建目标、服务、数据库或任务调度器。迁移在原数据库中建立 `PaperReedSend` 表和活动草稿唯一索引；实验阶段不改变上游 `user_version`。正式分支需要接入自己的版本化迁移。
 
@@ -125,3 +135,11 @@
 0044 将延迟模块的批量激活拆成按序的事件循环任务，保留同步初始化、原有启动延迟与模块行为。无原生改动。见 [启动长任务证据与修复](../startup-task-validation-2026-11-17/README.md)。
 
 0045 使用带类型的目录项构建原有图标映射，降低首次打开邮件时的同步目录扫描成本。无原生改动。见 [首次阅读器长任务验证](../reader-task-validation-2026-11-17/README.md)。
+
+0046 返回列表时聚焦原邮件／草稿行，没有对应行时聚焦搜索框，恢复连续键盘浏览。无原生改动。见 [真实 Gmail 日用闭环](../daily-use-validation-2026-11-17/README.md)。
+
+0047 修复共享凭据竞态、renderer 同步写入阻塞、查询悬空、远程图片策略绕过及 MCP 请求资源边界。复用主进程可信 IPC 与现有数据库辅助进程，保留事务、发送和授权边界；更新 3 个相关直接依赖，并补录测试环境此前已有的锁文件差异。无原生改动。见 [发布前修复与真实运行证据](../release-fixes-2026-11-17/README.md)。
+
+0048 接入原创应用图标、0.0.1 用户可见版本、原生关于窗口和带版本／架构的 ZIP 名称；CLI 与安装器使用同一首测版本。图标由仓库 assets/brand 通过准备／构建脚本复制，无原生引擎改动。见 [安装包验证](../version-001-validation-2026-11-17/README.md)。
+
+0049 在建稿成功回执中返回 `status: "saved"`，并在 CLI 帮助、连接错误和 GUI 交接说明中写明发送回执丢失时如何使用原参数恢复。见 [Agent 复测记录](../agent-receipts-2026-11-18/README.md)。

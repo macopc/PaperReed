@@ -1,0 +1,4 @@
+paper-reed draft-send --input '{"accountId":"ACCOUNT_ID","draftId":"DRAFT_ID","expectedRevision":1,"requestId":"STABLE_REQUEST_ID"}'
+Or pass the same JSON through stdin. Results are JSON; failures exit 1.
+Send only with explicit user approval. Have an operationId? Use operation-get to check its status. If the receipt was lost before you got an operationId, repeat draft-send with exactly the original input, including expectedRevision and requestId.
+

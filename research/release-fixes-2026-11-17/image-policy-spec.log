@@ -1,0 +1,12 @@
+Running database migrations
+
+Running Setup
+{"error":null}
+[90432:1117/113303.370041:INFO:CONSOLE:26244] "%cDownload the React DevTools for a better development experience: https://reactjs.org/link/react-devtools
+You might need to use a local HTTP server (instead of file://): https://reactjs.org/link/react-devtools-faq font-weight:bold", source: /Users/macopc/.t3/scratch/2026-11-14-spark-desktop-78887ca4/research/.local/Mailspring/app/node_modules/react-dom/cjs/react-dom.development.js (26244)
+
+  Remote content policy
+    ✓ blocks even CSS forms not recognized by the notice regexp
+
+
+  1 passing

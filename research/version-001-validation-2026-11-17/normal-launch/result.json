@@ -1,0 +1,14 @@
+{
+  "version": "0.0.1",
+  "revision": "84526aacc3cc6aaa6d5149a93fd6266d1dd88356-dirty",
+  "repository": "https://github.com/macopc/PaperReed.git",
+  "configured": true,
+  "projectMatches": true,
+  "onlyProjectConfig": true,
+  "noOAuthEnvironment": true,
+  "bundledLogin": true,
+  "cancelClosesCallback": true,
+  "noAccountSaved": true,
+  "normalLaunch": true,
+  "outboundNetworkRestricted": false
+}

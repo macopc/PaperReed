@@ -1,0 +1,11 @@
+{
+  "version": "0.0.1",
+  "bundleIdentifier": "io.github.macopc.paperreed",
+  "iconMatchesSource": true,
+  "noUpstreamIconCatalog": true,
+  "archive": "Paper-Reed-0.0.1-macOS-arm64.zip",
+  "bytes": 221564451,
+  "sha256": "6998d633063fb88c21df3d89c8bed7e70707b663cb1d78cddbf073b74b5a99e1",
+  "architecture": "arm64",
+  "host": "26.5.2"
+}

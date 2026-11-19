@@ -2,6 +2,8 @@
 
 状态：可行性探索，不代表已最终选定产品底座或完成生产验证。
 
+[真实 Gmail 日用闭环](daily-use-validation-2026-11-17/README.md) 完成统一授权、重启连接、同步中搜索阅读与 Codex 草稿回 GUI 审阅；0046 修复返回列表丢失焦点。本轮无真实发送，公开证据已脱敏。
+
 [首次打开邮件的长任务](reader-task-validation-2026-11-17/README.md) 已定位到图标目录扫描，0045 仅调整目录读取方式，保存了三次完整负载 Trace、截图与映射兼容性检查。
 
 实现进展：[CLI / GUI 共用草稿与发送结果接口](shared-core-validation.md)，包括可应用补丁、实验 CLI、真实引擎交接与请求重试检查。
@@ -56,3 +58,5 @@ node --test research/harness/check-feasibility.cjs
 [复杂正文与多账号负载](mail-load-validation-2026-11-17/README.md) 覆盖三个账号、复杂 HTML、长会话、并发查询与本地协议断线恢复；修复待执行搜索在账号切换时丢失的问题，记录启动后长任务的未决边界。
 
 [启动后长任务定位](startup-task-validation-2026-11-17/README.md) 用原始 Chromium Trace 定位延迟模块批量激活，改为逐模块让出事件循环，附前后证据与实际回归结果。
+
+[发布前性能与安全修复](release-fixes-2026-11-17/README.md) 记录 5 项问题的修复、发行包隔离验证、CLI／GUI 截图、跨窗口凭据测试、数据库写锁与进程退出实验，以及 47 个补丁重放结果。

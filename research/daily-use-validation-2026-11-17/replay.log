@@ -1,0 +1,9 @@
+warning: app/internal_packages/mcp-server/bin/paper-reed.cjs has type 100755, expected 100644
+warning: app/internal_packages/mcp-server/bin/paper-reed.cjs has type 100755, expected 100644
+warning: app/internal_packages/mcp-server/bin/paper-reed.cjs has type 100755, expected 100644
+warning: app/internal_packages/mcp-server/bin/paper-reed.cjs has type 100755, expected 100644
+warning: app/internal_packages/mcp-server/bin/paper-reed.cjs has type 100755, expected 100644
+warning: app/internal_packages/mcp-server/bin/paper-reed.cjs has type 100755, expected 100644
+warning: app/internal_packages/mcp-server/bin/paper-reed.cjs has type 100755, expected 100644
+warning: app/internal_packages/mcp-server/bin/paper-reed.cjs has type 100755, expected 100644
+PASS: 46 patches applied; 117 source files checked; CLI copies match.

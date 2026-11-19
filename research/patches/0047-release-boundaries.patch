@@ -1,0 +1,1767 @@
+diff --git a/app/src/key-manager.ts b/app/src/key-manager.ts
+--- a/app/src/key-manager.ts
++++ b/app/src/key-manager.ts
+@@ -1,220 +1,78 @@
+ import { localized } from './intl';
+ import { Account } from 'mailspring-exports';
++import { ipcRenderer } from 'electron';
++import type { KeySet, CredentialChange } from './browser/credential-store';
+ 
+-interface KeySet {
+-  [key: string]: string;
+-}
++const accountKeys = (email: string) =>
++  ['imap', 'smtp', 'refresh-token', 'gmail-refresh-token', 'gmail-client-secret'].map(
++    (k) => `${email}-${k}`
++  );
++const secretFields = [
++  'imap_password',
++  'smtp_password',
++  'refresh_token',
++  'gmail_refresh_token',
++  'gmail_client_secret',
++];
+ 
+-interface DecryptResult {
+-  result: string;
+-  shouldReEncrypt: boolean;
+-}
+-
+-const { safeStorage } = require('@electron/remote');
+-
+-const configCredentialsKey = 'credentials';
+-
+-// The real keychain varies by platform and may be locked or absent, so specs replace this.
+-export const secureStorage = {
+-  isAvailable: (): Promise<boolean> => safeStorage.isAsyncEncryptionAvailable(),
+-  encrypt: (plaintext: string): Promise<Buffer> => safeStorage.encryptStringAsync(plaintext),
+-  decrypt: (encrypted: Buffer): Promise<DecryptResult> => safeStorage.decryptStringAsync(encrypted),
+-  // The synchronous API is kept only to read blobs written by 1.23 and earlier. On KWallet the
+-  // two APIs key off different wallet entries (sync: "Chromium Keys", async: "Mailspring Keys"),
+-  // so a 1.23 blob is unreadable through decryptStringAsync even though both are tagged "v11".
+-  decryptLegacy: (encrypted: Buffer): string => safeStorage.decryptString(encrypted),
+-};
+-
+-// On Linux, Chromium's async keyring always has a last-resort provider whose key is a hardcoded
+-// constant ("peanuts"); its ciphertexts are tagged "v10" instead of a real keyring's "v11".
+-// isAsyncEncryptionAvailable() resolves true even when only that provider initialized, so the
+-// tag is the only signal that the desktop keyring is unusable.
+-const usesPlaintextFallbackKey = (encrypted: Buffer) =>
+-  process.platform === 'linux' && encrypted.subarray(0, 3).toString() === 'v10';
+-
+-/**
+- * A basic wrap around electron's secure key management. Consolidates all of
+- * our keys under a single namespaced keymap and provides migration
+- * support.
+- *
+- * Consolidating this prevents a ton of key authorization popups for each
+- * and every key we want to access.
+- */
+ class KeyManager {
+   private _fatalErrorReported = false;
+-  private _reEncryptAttempted = false;
+ 
+-  async deleteAccountSecrets(account: Account) {
++  private async update(change: CredentialChange) {
+     try {
+-      const keys = await this._getKeyHash();
+-      delete keys[`${account.emailAddress}-imap`];
+-      delete keys[`${account.emailAddress}-smtp`];
+-      delete keys[`${account.emailAddress}-refresh-token`];
+-      delete keys[`${account.emailAddress}-gmail-refresh-token`];
+-      delete keys[`${account.emailAddress}-gmail-client-secret`];
+-      await this._writeKeyHash(keys);
++      await ipcRenderer.invoke('credentials:update', change);
+     } catch (err) {
+       this._reportFatalError(err);
+     }
+   }
+ 
++  deleteAccountSecrets(account: Account) {
++    return this.update({ remove: accountKeys(account.emailAddress) });
++  }
++
+   async extractAndStoreAccountSecrets(account: Account) {
+-    try {
+-      const keys = await this._getKeyHash();
+-      keys[`${account.emailAddress}-imap`] = account.settings.imap_password;
+-      keys[`${account.emailAddress}-smtp`] = account.settings.smtp_password;
+-      keys[`${account.emailAddress}-refresh-token`] = account.settings.refresh_token;
+-      keys[`${account.emailAddress}-gmail-refresh-token`] = account.settings.gmail_refresh_token;
+-      keys[`${account.emailAddress}-gmail-client-secret`] = account.settings.gmail_client_secret;
+-      await this._writeKeyHash(keys);
+-    } catch (err) {
+-      this._reportFatalError(err);
+-    }
++    const keys = accountKeys(account.emailAddress);
++    await this.update({
++      set: Object.fromEntries(keys.map((key, i) => [key, account.settings[secretFields[i]]])),
++    });
+     const next = account.clone();
+-    delete next.settings.imap_password;
+-    delete next.settings.smtp_password;
+-    delete next.settings.refresh_token;
+-    delete next.settings.gmail_refresh_token;
+-    delete next.settings.gmail_client_secret;
++    secretFields.forEach((field) => delete next.settings[field]);
+     return next;
+   }
+ 
+   async insertAccountSecrets(account: Account, keys: KeySet = null) {
+     const next = account.clone();
+-    if (!keys) keys = await this._getKeyHash();
+-    next.settings.imap_password = keys[`${account.emailAddress}-imap`];
+-    next.settings.smtp_password = keys[`${account.emailAddress}-smtp`];
+-    next.settings.refresh_token = keys[`${account.emailAddress}-refresh-token`];
+-    next.settings.gmail_refresh_token = keys[`${account.emailAddress}-gmail-refresh-token`];
+-    next.settings.gmail_client_secret = keys[`${account.emailAddress}-gmail-client-secret`];
++    keys = keys || (await this._getKeyHash());
++    accountKeys(account.emailAddress).forEach(
++      (key, i) => (next.settings[secretFields[i]] = keys[key])
++    );
+     return next;
+   }
+ 
+-  async replacePassword(keyName: string, newVal: string) {
++  replacePassword(keyName: string, newVal: string) {
++    return this.update({ set: { [keyName]: newVal } });
++  }
++
++  deletePassword(keyName: string) {
++    return this.update({ remove: [keyName] });
++  }
++
++  deletePasswordsWithPrefix(prefix: string) {
++    if (typeof prefix !== 'string' || !prefix)
++      throw new Error('deletePasswordsWithPrefix requires a non-empty prefix.');
++    return this.update({ removePrefix: prefix });
++  }
++
++  async getPassword(keyName: string) {
++    return (await this._getKeyHash())[keyName];
++  }
++
++  async _getKeyHash(): Promise<KeySet> {
+     try {
+-      const keys = await this._getKeyHash();
+-      keys[keyName] = newVal;
+-      await this._writeKeyHash(keys);
++      return await ipcRenderer.invoke('credentials:read');
+     } catch (err) {
+       this._reportFatalError(err);
+     }
+-  }
+-
+-  async deletePassword(keyName: string) {
+-    try {
+-      const keys = await this._getKeyHash();
+-      delete keys[keyName];
+-      await this._writeKeyHash(keys);
+-    } catch (err) {
+-      this._reportFatalError(err);
+-    }
+-  }
+-
+-  async deletePasswordsWithPrefix(prefix: string) {
+-    // An empty prefix matches every key, including every account's passwords.
+-    if (typeof prefix !== 'string' || !prefix) {
+-      throw new Error('deletePasswordsWithPrefix requires a non-empty prefix.');
+-    }
+-    try {
+-      const keys = await this._getKeyHash();
+-      const doomed = Object.keys(keys).filter((k) => k.startsWith(prefix));
+-      if (!doomed.length) return;
+-      doomed.forEach((k) => delete keys[k]);
+-      await this._writeKeyHash(keys);
+-    } catch (err) {
+-      this._reportFatalError(err);
+-    }
+-  }
+-
+-  async getPassword(keyName: string) {
+-    try {
+-      const keys = await this._getKeyHash();
+-      return keys[keyName];
+-    } catch (err) {
+-      this._reportFatalError(err);
+-    }
+-  }
+-
+-  async _getKeyHash(): Promise<KeySet> {
+-    const encryptedCredentials = AppEnv.config.get(configCredentialsKey);
+-    // Check for different null values to prevent issues if a migration from keytar has failed
+-    if (
+-      encryptedCredentials === undefined ||
+-      encryptedCredentials === null ||
+-      encryptedCredentials === 'null'
+-    ) {
+-      return {} as KeySet;
+-    }
+-
+-    const encrypted = Buffer.from(encryptedCredentials, 'utf-8');
+-    let decrypted: DecryptResult;
+-    try {
+-      decrypted = await secureStorage.decrypt(encrypted);
+-    } catch (asyncErr) {
+-      try {
+-        // A blob from 1.23 or earlier. Flag it so it is rewritten with the async key below.
+-        decrypted = { result: secureStorage.decryptLegacy(encrypted), shouldReEncrypt: true };
+-      } catch (syncErr) {
+-        // Stored-but-unreadable is not the same as nothing stored. Resolving to an empty keyset
+-        // would let the next read-modify-write mutator persist it, erasing every account's
+-        // password over a locked keyring or a secret service that has not started yet.
+-        console.error('Mailspring could not read saved passwords.', asyncErr, syncErr);
+-        this._reportFatalError(
+-          new Error(
+-            localized('Mailspring could not read your saved passwords and cannot continue.') +
+-              this._encryptionUnavailableHint()
+-          )
+-        );
+-      }
+-    }
+-
+-    let keys: KeySet;
+-    try {
+-      keys = JSON.parse(decrypted.result) as KeySet;
+-    } catch (err) {
+-      // Decrypted to something that is not a keyset: no passwords left to preserve.
+-      return {} as KeySet;
+-    }
+-
+-    // Set by Chromium when the provider that encrypts new data is not the one this blob was
+-    // written with (e.g. Linux users moving to org.freedesktop.portal.Secret), and by the legacy
+-    // path above. The old key still decrypts, so this is hygiene: rewrite once, and never let a
+-    // failure become fatal.
+-    if (decrypted.shouldReEncrypt && !this._reEncryptAttempted) {
+-      this._reEncryptAttempted = true;
+-      try {
+-        await this._writeKeyHash(keys);
+-      } catch (err) {
+-        console.warn('Mailspring could not re-encrypt your saved passwords with the new key.', err);
+-      }
+-    }
+-
+-    return keys;
+-  }
+-
+-  _encryptionUnavailableHint() {
+-    return process.platform === 'linux'
+-      ? localized(
+-          ' On Linux, Mailspring stores passwords in your desktop keyring (KWallet, GNOME Keyring, or another Secret Service provider). Please make sure it is installed, running, and unlocked, then restart Mailspring.'
+-        )
+-      : '';
+-  }
+-
+-  async _writeKeyHash(keys: KeySet) {
+-    const unavailable = () =>
+-      new Error(
+-        localized(
+-          `Mailspring could not store your password securely because encryption is not available on this system.`
+-        ) + this._encryptionUnavailableHint()
+-      );
+-    if (!(await secureStorage.isAvailable())) {
+-      throw unavailable();
+-    }
+-    const encryptedCredentials = await secureStorage.encrypt(JSON.stringify(keys));
+-    if (usesPlaintextFallbackKey(encryptedCredentials)) {
+-      throw unavailable();
+-    }
+-    AppEnv.config.set(configCredentialsKey, encryptedCredentials);
+   }
+ 
+   _reportFatalError(err: Error): never {
+diff --git a/app/src/browser/application.ts b/app/src/browser/application.ts
+--- a/app/src/browser/application.ts
++++ b/app/src/browser/application.ts
+@@ -1,3 +1,4 @@
++import { CredentialStore } from './credential-store';
+ /* eslint global-require: "off" */
+ 
+ import '../safe-shell';
+@@ -979,6 +980,11 @@
+       sourceWindow.setSize(params.width, params.height);
+     });
+ 
++    const credentials = new CredentialStore(this.config);
++    handleFromMailspringWindows(ipcMain, 'credentials:read', () => credentials.read());
++    handleFromMailspringWindows(ipcMain, 'credentials:update', (_event, change) =>
++      credentials.update(change)
++    );
+     registerQuickpreviewIPCHandlers(ipcMain);
+     registerNotificationIPCHandlers(ipcMain);
+     registerViewSessionIPCHandlers(ipcMain);
+diff --git a/app/src/flux/stores/database-store.ts b/app/src/flux/stores/database-store.ts
+--- a/app/src/flux/stores/database-store.ts
++++ b/app/src/flux/stores/database-store.ts
+@@ -222,58 +222,55 @@
+   //
+   // If a query is made before the database has been opened, the query will be
+   // held in a queue and run / resolved when the database is ready.
+-  _query(query: SQLString, values: SQLValue[] = [], background = false) {
+-    // eslint-disable-next-line no-async-promise-executor
+-    return new Promise<{ [key: string]: any }[]>(async (resolve, reject) => {
+-      if (!this._open) {
+-        this._waiting.push(() => this._query(query, values).then(resolve, reject));
+-        return;
+-      }
+-
+-      // Undefined, True, and False are not valid SQLite datatypes:
+-      // https://www.sqlite.org/datatype3.html
+-      values.forEach((val, idx) => {
+-        if (val === false) {
+-          values[idx] = 0;
+-        } else if (val === true) {
+-          values[idx] = 1;
+-        } else if (val === undefined) {
+-          values[idx] = null;
+-        }
++  async _query(query: SQLString, values: SQLValue[] = [], background = false) {
++    if (!this._open) {
++      return new Promise<{ [key: string]: any }[]>((resolve, reject) => {
++        this._waiting.push(() => this._query(query, values, background).then(resolve, reject));
+       });
+-
+-      const start = Date.now();
+-
+-      if (!background) {
+-        const results = await this._executeLocally(query, values);
+-        const msec = Date.now() - start;
+-        if (msec > 100) {
+-          this._prettyConsoleLog(
+-            `DatabaseStore._executeLocally took more than 100ms - ${msec}msec: ${query}`
+-          );
+-        }
+-        resolve(results);
+-      } else {
+-        const { results, agentTime, error } = await this._executeInBackground(query, values);
+-        if (error) {
+-          reject(new Error(`DatabaseStore: Query ${query} failed in background: ${error}`));
+-          return;
+-        }
+-        const msec = Date.now() - start;
+-        if (debugVerbose.enabled) {
+-          const q = `🔶 (${msec}ms) Background: ${query}`;
+-          debugVerbose(trimTo(q));
+-        }
+-
+-        if (msec > 100) {
+-          const msgPrefix = msec > 100 ? '_executeInBackground took more than 100ms - ' : '';
+-          this._prettyConsoleLog(
+-            `${msgPrefix}${msec}msec (${agentTime}msec in background): ${query}`
+-          );
+-        }
+-        resolve(results);
++    }
++
++    // Undefined, True, and False are not valid SQLite datatypes:
++    // https://www.sqlite.org/datatype3.html
++    values.forEach((val, idx) => {
++      if (val === false) {
++        values[idx] = 0;
++      } else if (val === true) {
++        values[idx] = 1;
++      } else if (val === undefined) {
++        values[idx] = null;
+       }
+     });
++
++    const start = Date.now();
++
++    if (!background) {
++      const results = await this._executeLocally(query, values);
++      const msec = Date.now() - start;
++      if (msec > 100) {
++        this._prettyConsoleLog(
++          `DatabaseStore._executeLocally took more than 100ms - ${msec}msec: ${query}`
++        );
++      }
++      return results;
++    } else {
++      const { results, agentTime, error } = await this._executeInBackground(query, values);
++      if (error) {
++        throw new Error(`DatabaseStore: Query ${query} failed in background: ${error}`);
++      }
++      const msec = Date.now() - start;
++      if (debugVerbose.enabled) {
++        const q = `🔶 (${msec}ms) Background: ${query}`;
++        debugVerbose(trimTo(q));
++      }
++
++      if (msec > 100) {
++        const msgPrefix = msec > 100 ? '_executeInBackground took more than 100ms - ' : '';
++        this._prettyConsoleLog(
++          `${msgPrefix}${msec}msec (${agentTime}msec in background): ${query}`
++        );
++      }
++      return results;
++    }
+   }
+ 
+   async _executeLocally(query: SQLString, values: SQLValue[]) {
+@@ -357,66 +354,66 @@
+   }
+ 
+   _agent?: ChildProcess;
+-  _agentSpawnFailed = false;
+-  _agentOpenQueries: { [id: string]: (args: AgentResponse) => void };
+-
+-  _executeInBackground(query: SQLString, values: SQLValue[]) {
+-    if (!this._agent && !this._agentSpawnFailed) {
+-      this._agentOpenQueries = {};
++  _agentOpenQueries: { [id: string]: (args: AgentResponse) => void } = {};
++
++  // Internal local-triage batches only; this is never exposed as a CLI/MCP SQL endpoint.
++  async _localTransaction(statements: { query: string; values?: SQLValue[] }[]) {
++    const response = await this._executeInBackground('', [], statements);
++    if (response.error) throw new Error(response.error);
++    return response.results;
++  }
++
++  _executeInBackground(
++    query: SQLString,
++    values: SQLValue[],
++    localStatements?: { query: string; values?: SQLValue[] }[]
++  ) {
++    if (!this._agent) {
++      const pending: typeof this._agentOpenQueries = {};
++      const agent = childProcess.fork(AGENT_PATH, [], {
++        silent: true,
++        env: Object.assign(Object.create(null), process.env),
++      });
++      this._agent = agent;
++      this._agentOpenQueries = pending;
++      const failed = (error: string) => {
++        if (this._agent === agent) this._agent = null;
++        for (const id of Object.keys(pending)) {
++          pending[id]({ results: [], agentTime: -1, error });
++          delete pending[id];
++        }
++      };
++      agent.stdout?.on('data', (data) => console.log(data.toString()));
++      agent.stderr?.on('data', (data) => console.error(data.toString()));
++      agent.on('close', (code) => failed(`Database helper exited (${code}). Retry the operation.`));
++      agent.on('error', (err) => {
++        failed(err.message);
++        agent.kill();
++      });
++      agent.on('message', (message: Record<string, any>) => {
++        const { type, id, results, agentTime, error } = message;
++        if ((type === 'results' || type === 'error') && pending[id]) {
++          pending[id]({ results, agentTime, error });
++          delete pending[id];
++        }
++      });
++    }
++    const agent = this._agent,
++      pending = this._agentOpenQueries;
++    return new Promise<AgentResponse>((resolve, reject) => {
++      const id = Utils.generateTempId();
++      pending[id] = resolve;
+       try {
+-        // Pass a null-prototype copy of the environment so a prototype-pollution
+-        // bug elsewhere in the process cannot inject inherited properties into
+-        // this forked Node agent's environment. See GHSA-gjr7-3mj2-cr54.
+-        this._agent = childProcess.fork(AGENT_PATH, [], {
+-          silent: true,
+-          env: Object.assign(Object.create(null), process.env),
+-        });
+-        if (this._agent.stdout)
+-          this._agent.stdout.on('data', (data) => console.log(data.toString()));
+-        if (this._agent.stderr)
+-          this._agent.stderr.on('data', (data) => console.error(data.toString()));
+-        this._agent.on('close', (code) => {
+-          debug(`Query Agent: exited with code ${code}`);
+-          this._agent = null;
+-        });
+-        this._agent.on('error', (err) => {
+-          console.error(`Query Agent: failed to start or receive message: ${err.toString()}`);
+-          if (this._agent) this._agent.kill('SIGTERM');
+-          this._agent = null;
+-        });
+-        this._agent.on('message', (message: Record<string, any>) => {
+-          const { type, id, results, agentTime, error } = message;
+-          if ((type === 'results' || type === 'error') && this._agentOpenQueries[id]) {
+-            this._agentOpenQueries[id]({ results, agentTime, error });
+-            delete this._agentOpenQueries[id];
++        agent.send({ query, values, id, dbpath: this._databasePath, localStatements }, (err) => {
++          if (err && pending[id]) {
++            delete pending[id];
++            reject(err);
+           }
+         });
+       } catch (err) {
+-        // On Windows, security software (antivirus / AppLocker) can deny the
+-        // fork() call with EPERM. Fall back to in-process queries rather than
+-        // crashing — the promise below already handles a null agent.
+-        // Set _agentSpawnFailed so we skip the fork on every subsequent query
+-        // rather than re-attempting and spamming the console.
+-        console.error(
+-          `Query Agent: failed to spawn (${err.toString()}), falling back to local execution`
+-        );
+-        this._agent = null;
+-        this._agentSpawnFailed = true;
+-      }
+-    }
+-
+-    // eslint-disable-next-line no-async-promise-executor
+-    return new Promise<AgentResponse>(async (resolve) => {
+-      if (!this._agent) {
+-        // Something bad has happened and we were immediately unable to spawn the query helper.
+-        // Fall back to running the query in-process.
+-        const results = await this._executeLocally(query, values);
+-        resolve({ results, agentTime: -1 });
+-        return;
+-      }
+-      const id = Utils.generateTempId();
+-      this._agentOpenQueries[id] = resolve;
+-      this._agent.send({ query, values, id, dbpath: this._databasePath });
++        delete pending[id];
++        reject(err);
++      }
+     });
+   }
+ 
+diff --git a/app/src/flux/stores/database-agent.js b/app/src/flux/stores/database-agent.js
+--- a/app/src/flux/stores/database-agent.js
++++ b/app/src/flux/stores/database-agent.js
+@@ -1,42 +1,35 @@
+ const Sqlite3 = require('better-sqlite3');
+-const dbs = {};
+-
++const dbs = new Map();
+ const deathDelay = 5000;
+ let deathTimer = setTimeout(() => process.exit(0), deathDelay);
+ 
+-function getDatabase(dbpath) {
+-  if (dbs[dbpath]) {
+-    return Promise.resolve(dbs[dbpath]);
++function getDatabase(dbpath, localWriter) {
++  const key = `${dbpath}:${localWriter ? 'local' : 'read'}`;
++  if (!dbs.has(key)) {
++    dbs.set(
++      key,
++      new Sqlite3(dbpath, { readonly: !localWriter, fileMustExist: true, timeout: 10000 })
++    );
+   }
+-
+-  try {
+-    dbs[dbpath] = new Sqlite3(dbpath, { readonly: true, timeout: 10000 });
+-  } catch (err) {
+-    console.error(err);
+-    process.exit(1);
+-  }
+-
+-  return Promise.resolve(dbs[dbpath]);
++  return dbs.get(key);
+ }
+ 
+-process.on('message', m => {
++process.on('message', ({ query, values, id, dbpath, localStatements }) => {
+   clearTimeout(deathTimer);
+-  const { query, values, id, dbpath } = m;
+   const start = Date.now();
+-
+-  getDatabase(dbpath).then(db => {
+-    clearTimeout(deathTimer);
+-    const fn = query.startsWith('SELECT') ? 'all' : 'run';
+-    try {
+-      const stmt = db.prepare(query);
+-      const results = stmt[fn](values);
+-      process.send({ type: 'results', results, id, agentTime: Date.now() - start });
+-    } catch (err) {
+-      // Without a reply the caller's promise would never settle.
+-      process.send({ type: 'error', error: err.toString(), id, agentTime: Date.now() - start });
+-    }
+-
+-    clearTimeout(deathTimer);
+-    deathTimer = setTimeout(() => process.exit(0), deathDelay);
+-  });
++  try {
++    const db = getDatabase(dbpath, !!localStatements);
++    const execute = (sql, args = []) => {
++      const stmt = db.prepare(sql);
++      return stmt.reader ? stmt.all(args) : { changes: stmt.run(args).changes };
++    };
++    // A local batch is one transaction, preserving labels/state snapshots and rule commits.
++    const results = localStatements
++      ? db.transaction(() => localStatements.map((s) => execute(s.query, s.values)))()
++      : execute(query, values);
++    process.send({ type: 'results', results, id, agentTime: Date.now() - start });
++  } catch (err) {
++    process.send({ type: 'error', error: err.toString(), id, agentTime: Date.now() - start });
++  }
++  deathTimer = setTimeout(() => process.exit(0), deathDelay);
+ });
+diff --git a/app/src/services/mail-core/local-triage.ts b/app/src/services/mail-core/local-triage.ts
+--- a/app/src/services/mail-core/local-triage.ts
++++ b/app/src/services/mail-core/local-triage.ts
+@@ -1,7 +1,13 @@
+-import Sqlite3 from 'better-sqlite3';
+ import { z } from 'zod';
+ import { randomUUID, createHash } from 'crypto';
+-import { AccountStore, CategoryStore, DatabaseStore, Label, Message, Thread } from 'mailspring-exports';
++import {
++  AccountStore,
++  CategoryStore,
++  DatabaseStore,
++  Label,
++  Message,
++  Thread,
++} from 'mailspring-exports';
+ import type { InboxAccess, MailTarget } from './inbox';
+ import { isThreadAllowed } from '../mail-access/grant';
+ 
+@@ -45,48 +51,45 @@
+ function changed() {
+   listeners.forEach((fn) => fn());
+ }
+-// The upstream renderer connection is read-only. One local writer uses the same database,
+-// and writes only our local tables; mail mutations stay with the native engine.
+-let writer: Sqlite3.Database;
+-const sql = (query: string, values: any[] = []): any[] => {
+-  const statement = writer.prepare(query);
+-  return statement.reader ? statement.all(values) : (statement.run(values), []);
+-};
++// Execute local state SQL in the existing database helper, never in the UI thread.
++type Statement = { query: string; values?: any[] };
++const batch = (statements: Statement[]) => DatabaseStore._localTransaction(statements);
++const sql = async (query: string, values: any[] = []): Promise<any[]> =>
++  (await batch([{ query, values }]))[0];
+ let ready: Promise<void>;
+ export function ensureLocalTriage() {
+   if (!ready)
+     ready = (async () => {
+       await DatabaseStore._query('SELECT 1');
+       if (!AppEnv.isMainWindow()) throw new Error('local-triage-requires-main-window');
+-      writer = new Sqlite3(DatabaseStore._databasePath, { fileMustExist: true, timeout: 10000 });
+-      sql('CREATE INDEX IF NOT EXISTS PaperReedThreadAccountDate ON Thread(accountId,lastMessageReceivedTimestamp DESC,id ASC)');
+-      sql(
++      await sql(
++        'CREATE INDEX IF NOT EXISTS PaperReedThreadAccountDate ON Thread(accountId,lastMessageReceivedTimestamp DESC,id ASC)'
++      );
++      await sql(
+         'CREATE TABLE IF NOT EXISTS PaperReedLocalThread (accountId TEXT NOT NULL, threadId TEXT NOT NULL, pinned INTEGER NOT NULL DEFAULT 0, snoozeUntil INTEGER, baseline TEXT, PRIMARY KEY(accountId, threadId))'
+       );
+-      sql(
++      await sql(
+         'CREATE TABLE IF NOT EXISTS PaperReedLocalLabel (id TEXT PRIMARY KEY, name TEXT NOT NULL, nameKey TEXT NOT NULL UNIQUE, color TEXT NOT NULL)'
+       );
+-      sql(
++      await sql(
+         'CREATE TABLE IF NOT EXISTS PaperReedLocalThreadLabel (accountId TEXT NOT NULL, threadId TEXT NOT NULL, labelId TEXT NOT NULL, PRIMARY KEY(accountId, threadId, labelId))'
+       );
+-      const columns = sql('PRAGMA table_info(PaperReedLocalThread)');
++      const columns = await sql('PRAGMA table_info(PaperReedLocalThread)');
+       if (!columns.some((c) => c.name === 'category'))
+-        sql(
++        await sql(
+           "ALTER TABLE PaperReedLocalThread ADD COLUMN category TEXT NOT NULL DEFAULT 'ordinary'"
+         );
+       if (!columns.some((c) => c.name === 'categoryManual'))
+-        sql(
++        await sql(
+           'ALTER TABLE PaperReedLocalThread ADD COLUMN categoryManual INTEGER NOT NULL DEFAULT 0'
+         );
+-      sql(
++      await sql(
+         'CREATE TABLE IF NOT EXISTS PaperReedLocalRule (id TEXT PRIMARY KEY, accountId TEXT NOT NULL, name TEXT NOT NULL, field TEXT NOT NULL, query TEXT NOT NULL, action TEXT NOT NULL, value TEXT NOT NULL, enabled INTEGER NOT NULL, position INTEGER NOT NULL, baseline TEXT)'
+       );
+-      sql(
++      await sql(
+         'CREATE TABLE IF NOT EXISTS PaperReedRuleProcessed (accountId TEXT NOT NULL,messageId TEXT NOT NULL,PRIMARY KEY(accountId,messageId))'
+       );
+     })().catch((error) => {
+-      writer?.close();
+-      writer = undefined;
+       ready = undefined;
+       throw error;
+     });
+@@ -111,7 +114,7 @@
+ }
+ export async function localLabels(): Promise<LocalLabel[]> {
+   await ensureLocalTriage();
+-  return sql('SELECT id, name, color FROM PaperReedLocalLabel ORDER BY nameKey');
++  return await sql('SELECT id, name, color FROM PaperReedLocalLabel ORDER BY nameKey');
+ }
+ function globalLabelAccess(access: InboxAccess) {
+   const ids = AccountStore.accountIds();
+@@ -132,13 +135,14 @@
+     if (input.remove) {
+       if (!old) throw new Error('label-not-found');
+       globalLabelAccess(access);
+-      writer.transaction(() => {
+-        writer
+-          .prepare("UPDATE PaperReedLocalRule SET enabled=0 WHERE action='label' AND value=?")
+-          .run(input.id);
+-        writer.prepare('DELETE FROM PaperReedLocalLabel WHERE id = ?').run(input.id);
+-        writer.prepare('DELETE FROM PaperReedLocalThreadLabel WHERE labelId = ?').run(input.id);
+-      })();
++      await batch([
++        {
++          query: "UPDATE PaperReedLocalRule SET enabled=0 WHERE action='label' AND value=?",
++          values: [input.id],
++        },
++        { query: 'DELETE FROM PaperReedLocalLabel WHERE id=?', values: [input.id] },
++        { query: 'DELETE FROM PaperReedLocalThreadLabel WHERE labelId=?', values: [input.id] },
++      ]);
+       changed();
+       return { id: input.id, deleted: true };
+     }
+@@ -151,7 +155,7 @@
+       throw new Error('duplicate-label-name');
+     const id = input.id || randomUUID();
+     globalLabelAccess(access);
+-    sql(
++    await sql(
+       'INSERT INTO PaperReedLocalLabel (id,name,nameKey,color) VALUES (?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,nameKey=excluded.nameKey,color=excluded.color',
+       [id, name, name.toLowerCase(), color]
+     );
+@@ -170,7 +174,7 @@
+   const threads = await DatabaseStore.findAll<Thread>(Thread).where(
+     Thread.attributes.id.in(targets.map((t) => t.threadId))
+   );
+-  // No awaits after this authorization boundary; state and labels share a local snapshot.
++  // State and labels are read together in one helper transaction.
+   const byId = new Map(threads.map((t) => [t.id, t]));
+   for (const target of targets) {
+     access.check(target.accountId, false);
+@@ -191,22 +195,28 @@
+   }
+   const marks = targets.map(() => '?').join(',');
+   const ids = targets.map((t) => t.threadId);
+-  writer.transaction(() => {
+-    const states = sql(`SELECT * FROM PaperReedLocalThread WHERE threadId IN (${marks})`, ids);
+-    const labels = sql(
+-      `SELECT t.threadId,l.id,l.name,l.color FROM PaperReedLocalThreadLabel t
++  const [states, labels] = await batch([
++    { query: `SELECT * FROM PaperReedLocalThread WHERE threadId IN (${marks})`, values: ids },
++    {
++      query: `SELECT t.threadId,l.id,l.name,l.color FROM PaperReedLocalThreadLabel t
+       JOIN PaperReedLocalLabel l ON l.id=t.labelId WHERE t.threadId IN (${marks}) ORDER BY l.nameKey`,
+-      ids
+-    );
+-    for (const state of states)
+-      Object.assign(result[state.threadId], {
+-        category: state.category,
+-        categoryManual: !!state.categoryManual,
+-        pinned: !!state.pinned,
+-        snoozeUntil: state.snoozeUntil > Date.now() ? state.snoozeUntil : null,
+-      });
+-    for (const { threadId, ...label } of labels) result[threadId].labels.push(label);
+-  })();
++      values: ids,
++    },
++  ]);
++  // Permissions can change while the helper reads the snapshot.
++  for (const target of targets) {
++    access.check(target.accountId, false);
++    if (!isThreadAllowed(access.grant(), byId.get(target.threadId)))
++      throw new Error('thread-not-found');
++  }
++  for (const state of states)
++    Object.assign(result[state.threadId], {
++      category: state.category,
++      categoryManual: !!state.categoryManual,
++      pinned: !!state.pinned,
++      snoozeUntil: state.snoozeUntil > Date.now() ? state.snoozeUntil : null,
++    });
++  for (const { threadId, ...label } of labels) result[threadId].labels.push(label);
+   return result;
+ }
+ function inboxSyncRole(accountId: string) {
+@@ -217,15 +227,15 @@
+     ? (message.labels || []).includes('\\Inbox')
+     : message.categories().some((c) => c.role === 'inbox');
+ }
+-function inboxBaseline(accountId: string) {
+-  const rows = sql(
++async function inboxBaseline(accountId: string) {
++  const rows = await sql(
+     "SELECT id,data FROM Folder WHERE accountId=? AND json_extract(data,'$.role')=?",
+     [accountId, inboxSyncRole(accountId)]
+   );
+   const folder = rows[0];
+   const status = folder && JSON.parse(folder.data).localStatus;
+   if (!status?.uidvalidity || !status?.uidnext) throw new Error('snooze-needs-synced-inbox');
+-  const [max] = sql(
++  const [max] = await sql(
+     'SELECT MAX(remoteUID) AS uid FROM MessageFolder WHERE accountId=? AND folderId=?',
+     [accountId, folder.id]
+   );
+@@ -270,7 +280,7 @@
+             thread.categories.some((c) => ['spam', 'trash'].includes(c.role))
+           )
+             throw new Error('snooze-requires-inbox');
+-          const cursor = inboxBaseline(target.accountId);
++          const cursor = await inboxBaseline(target.accountId);
+           const known = await DatabaseStore.findAll<Message>(Message).where({
+             accountId: target.accountId,
+             threadId: target.threadId,
+@@ -297,27 +307,27 @@
+               : ruleEffects(await latestIncoming(target), await storedRules(target.accountId))
+                   .category || 'ordinary';
+           await allowed(target, access, true);
+-          sql(
++          await sql(
+             'INSERT INTO PaperReedLocalThread (accountId,threadId,category,categoryManual) VALUES (?,?,?,?) ON CONFLICT(accountId,threadId) DO UPDATE SET category=excluded.category,categoryManual=excluded.categoryManual',
+             [...args, category, input.action === 'classify' ? 1 : 0]
+           );
+         } else if (input.action === 'pin' || input.action === 'unpin')
+-          sql(
++          await sql(
+             'INSERT INTO PaperReedLocalThread (accountId,threadId,pinned) VALUES (?,?,?) ON CONFLICT(accountId,threadId) DO UPDATE SET pinned=excluded.pinned',
+             [...args, input.action === 'pin' ? 1 : 0]
+           );
+         else if (input.action === 'snooze' || input.action === 'unsnooze')
+-          sql(
++          await sql(
+             'INSERT INTO PaperReedLocalThread (accountId,threadId,snoozeUntil,baseline) VALUES (?,?,?,?) ON CONFLICT(accountId,threadId) DO UPDATE SET snoozeUntil=excluded.snoozeUntil,baseline=excluded.baseline',
+             [...args, input.action === 'snooze' ? until : null, baseline]
+           );
+         else if (input.action === 'label-add')
+-          sql(
++          await sql(
+             'INSERT OR IGNORE INTO PaperReedLocalThreadLabel (accountId,threadId,labelId) VALUES (?,?,?)',
+             [...args, input.labelId]
+           );
+         else
+-          sql(
++          await sql(
+             'DELETE FROM PaperReedLocalThreadLabel WHERE accountId=? AND threadId=? AND labelId=?',
+             [...args, input.labelId]
+           );
+@@ -333,7 +343,7 @@
+ // UID baseline rejects historical backfill even when its Date header is newer. No remote move.
+ export async function reconcileLocalSnoozes() {
+   await ensureLocalTriage();
+-  const rows = sql(
++  const rows = await sql(
+     'SELECT accountId,threadId,snoozeUntil,baseline FROM PaperReedLocalThread WHERE snoozeUntil IS NOT NULL'
+   );
+   let count = 0;
+@@ -349,14 +359,14 @@
+       wake = true;
+     if (!wake) {
+       const baseline = JSON.parse(row.baseline);
+-      const [folder] = sql('SELECT data FROM Folder WHERE id=? AND accountId=?', [
++      const [folder] = await sql('SELECT data FROM Folder WHERE id=? AND accountId=?', [
+         baseline.folderId,
+         row.accountId,
+       ]);
+       const status = folder && JSON.parse(folder.data).localStatus;
+       // A UIDVALIDITY reset invalidates new-mail evidence; retain the timer, never guess.
+       if (status?.uidvalidity === baseline.validity) {
+-        const candidates = sql(
++        const candidates = await sql(
+           'SELECT m.id FROM Message m JOIN MessageFolder p ON p.messageId=m.id WHERE m.accountId=? AND m.threadId=? AND m.draft=0 AND p.folderId=? AND p.remoteUID>=?',
+           [row.accountId, row.threadId, baseline.folderId, baseline.nextUID]
+         );
+@@ -372,14 +382,16 @@
+     }
+     if (wake) {
+       // The scan does not own the write queue. Do not overwrite a later snooze.
+-      count += await serial(
+-        async () =>
+-          writer
+-            .prepare(
+-              'UPDATE PaperReedLocalThread SET snoozeUntil=NULL,baseline=NULL WHERE accountId=? AND threadId=? AND snoozeUntil=? AND baseline=?'
+-            )
+-            .run(row.accountId, row.threadId, row.snoozeUntil, row.baseline).changes
+-      );
++      count += await serial(async () => {
++        const [result] = await batch([
++          {
++            query:
++              'UPDATE PaperReedLocalThread SET snoozeUntil=NULL,baseline=NULL WHERE accountId=? AND threadId=? AND snoozeUntil=? AND baseline=?',
++            values: [row.accountId, row.threadId, row.snoozeUntil, row.baseline],
++          },
++        ]);
++        return result.changes;
++      });
+     }
+   }
+   if (count) changed();
+@@ -435,9 +447,11 @@
+ };
+ async function storedRules(accountId: string): Promise<LocalRule[]> {
+   await ensureLocalTriage();
+-  return sql('SELECT * FROM PaperReedLocalRule WHERE accountId=? ORDER BY position,id', [
+-    accountId,
+-  ]).map((r) => ({ ...r, enabled: !!r.enabled }));
++  return (
++    await sql('SELECT * FROM PaperReedLocalRule WHERE accountId=? ORDER BY position,id', [
++      accountId,
++    ])
++  ).map((r) => ({ ...r, enabled: !!r.enabled }));
+ }
+ const revisionOf = (rules: LocalRule[]) =>
+   createHash('sha256').update(JSON.stringify(rules)).digest('hex');
+@@ -449,7 +463,7 @@
+ export async function listLocalRules(accountId: string, access: InboxAccess) {
+   access.check(accountId, false);
+   const rules = await storedRules(accountId);
+-  const folders = sql('SELECT id,data FROM Folder WHERE accountId=?', [accountId]);
++  const folders = await sql('SELECT id,data FROM Folder WHERE accountId=?', [accountId]);
+   access.check(accountId, false);
+   return {
+     revision: revisionOf(rules),
+@@ -457,7 +471,9 @@
+       const baseline = r.baseline && JSON.parse(r.baseline);
+       const folder = baseline && folders.find((f) => f.id === baseline.folderId);
+       const status =
+-        folder && JSON.parse(folder.data).role === inboxSyncRole(accountId) && JSON.parse(folder.data).localStatus;
++        folder &&
++        JSON.parse(folder.data).role === inboxSyncRole(accountId) &&
++        JSON.parse(folder.data).localStatus;
+       const syncState = !r.enabled
+         ? 'paused'
+         : !status?.uidvalidity
+@@ -489,10 +505,10 @@
+       throw new Error('label-not-found');
+     if (input.action === 'category' && !Object.hasOwnProperty.call(categories, input.value))
+       throw new Error('invalid-category');
+-    const baseline = input.enabled ? JSON.stringify(inboxBaseline(input.accountId)) : null;
++    const baseline = input.enabled ? JSON.stringify(await inboxBaseline(input.accountId)) : null;
+     const id = input.id || randomUUID();
+     ruleAccess(input.accountId, access);
+-    sql(
++    await sql(
+       'INSERT INTO PaperReedLocalRule (id,accountId,name,field,query,action,value,enabled,position,baseline) VALUES (?,?,?,?,?,?,?,?,?,?) ON CONFLICT(id) DO UPDATE SET name=excluded.name,field=excluded.field,query=excluded.query,action=excluded.action,value=excluded.value,enabled=excluded.enabled,baseline=excluded.baseline',
+       [
+         id,
+@@ -514,7 +530,10 @@
+ export function deleteLocalRule(input: { accountId: string; id: string }, access: InboxAccess) {
+   return serial(async () => {
+     ruleAccess(input.accountId, access);
+-    sql('DELETE FROM PaperReedLocalRule WHERE accountId=? AND id=?', [input.accountId, input.id]);
++    await sql('DELETE FROM PaperReedLocalRule WHERE accountId=? AND id=?', [
++      input.accountId,
++      input.id,
++    ]);
+     changed();
+     return { deleted: true };
+   });
+@@ -533,13 +552,12 @@
+     )
+       throw new Error('rule-list-changed');
+     ruleAccess(input.accountId, access);
+-    writer.transaction(() =>
+-      input.ids.forEach((id, i) =>
+-        writer
+-          .prepare('UPDATE PaperReedLocalRule SET position=? WHERE accountId=? AND id=?')
+-          .run(i, input.accountId, id)
+-      )
+-    )();
++    await batch(
++      input.ids.map((id, i) => ({
++        query: 'UPDATE PaperReedLocalRule SET position=? WHERE accountId=? AND id=?',
++        values: [i, input.accountId, id],
++      }))
++    );
+     changed();
+     return { reordered: true };
+   });
+@@ -575,19 +593,22 @@
+   result.labelIds = [...new Set(result.labelIds)];
+   return result;
+ }
+-function commitEffects(target: MailTarget, effects: ReturnType<typeof ruleEffects>) {
+-  for (const labelId of effects.labelIds)
+-    writer
+-      .prepare(
+-        'INSERT OR IGNORE INTO PaperReedLocalThreadLabel (accountId,threadId,labelId) SELECT ?,?,id FROM PaperReedLocalLabel WHERE id=?'
+-      )
+-      .run(target.accountId, target.threadId, labelId);
++function effectStatements(
++  target: MailTarget,
++  effects: ReturnType<typeof ruleEffects>
++): Statement[] {
++  const statements: Statement[] = effects.labelIds.map((labelId) => ({
++    query:
++      'INSERT OR IGNORE INTO PaperReedLocalThreadLabel (accountId,threadId,labelId) SELECT ?,?,id FROM PaperReedLocalLabel WHERE id=?',
++    values: [target.accountId, target.threadId, labelId],
++  }));
+   if (effects.category)
+-    writer
+-      .prepare(
+-        'INSERT INTO PaperReedLocalThread (accountId,threadId,category) VALUES (?,?,?) ON CONFLICT(accountId,threadId) DO UPDATE SET category=CASE WHEN categoryManual=0 THEN excluded.category ELSE category END'
+-      )
+-      .run(target.accountId, target.threadId, effects.category);
++    statements.push({
++      query:
++        'INSERT INTO PaperReedLocalThread (accountId,threadId,category) VALUES (?,?,?) ON CONFLICT(accountId,threadId) DO UPDATE SET category=CASE WHEN categoryManual=0 THEN excluded.category ELSE category END',
++      values: [target.accountId, target.threadId, effects.category],
++    });
++  return statements;
+ }
+ export async function previewLocalRules(
+   input: { accountId: string; targets: MailTarget[] },
+@@ -641,7 +662,7 @@
+         if (!message || message.id !== target.messageId) throw new Error('preview-stale');
+         const effects = ruleEffects(message, rules);
+         await allowed(target, access, true);
+-        writer.transaction(() => commitEffects(target, effects))();
++        await batch(effectStatements(target, effects));
+         items.push({ ...target, status: effects.ruleIds.length ? 'succeeded' : 'unchanged' });
+       } catch (error) {
+         items.push({ ...target, status: 'rejected', error: error.message });
+@@ -661,7 +682,7 @@
+       const allRules = await storedRules(accountId);
+       const rules = allRules.filter((r) => r.enabled && r.baseline);
+       if (!rules.length) continue;
+-      const folders = sql('SELECT id,data FROM Folder WHERE accountId=?', [accountId]);
++      const folders = await sql('SELECT id,data FROM Folder WHERE accountId=?', [accountId]);
+       const valid = rules.filter((r) => {
+         const b = JSON.parse(r.baseline),
+           f = folders.find((f) => f.id === b.folderId);
+@@ -675,7 +696,7 @@
+       const baseline = JSON.parse(valid[0].baseline);
+       const minUID = Math.min(...valid.map((r) => JSON.parse(r.baseline).nextUID));
+       // A per-message marker avoids losing lower UIDs ingested after a higher UID.
+-      const candidates = sql(
++      const candidates = await sql(
+         'SELECT DISTINCT m.id,p.remoteUID FROM Message m JOIN MessageFolder p ON p.messageId=m.id WHERE m.accountId=? AND m.draft=0 AND p.folderId=? AND p.remoteUID>=? AND NOT EXISTS (SELECT 1 FROM PaperReedRuleProcessed seen WHERE seen.accountId=m.accountId AND seen.messageId=m.id) ORDER BY p.remoteUID,m.id LIMIT 100',
+         [accountId, baseline.folderId, minUID]
+       );
+@@ -702,14 +723,14 @@
+             revisionOf(await storedRules(accountId)) !== revisionOf(allRules)
+           )
+             return;
+-          writer.transaction(() => {
+-            commitEffects({ accountId, threadId: message.threadId }, effects);
+-            writer
+-              .prepare(
+-                'INSERT OR IGNORE INTO PaperReedRuleProcessed (accountId,messageId) VALUES (?,?)'
+-              )
+-              .run(accountId, message.id);
+-          })();
++          await batch([
++            ...effectStatements({ accountId, threadId: message.threadId }, effects),
++            {
++              query:
++                'INSERT OR IGNORE INTO PaperReedRuleProcessed (accountId,messageId) VALUES (?,?)',
++              values: [accountId, message.id],
++            },
++          ]);
+           count++;
+         });
+       }
+diff --git a/app/src/services/sanitize-transformer.ts b/app/src/services/sanitize-transformer.ts
+--- a/app/src/services/sanitize-transformer.ts
++++ b/app/src/services/sanitize-transformer.ts
+@@ -252,18 +252,11 @@
+ // same things. If a future consumer needs byte-for-byte fidelity, this hook
+ // is the wrong place to do it.
+ function stripAtImportRules(cssText: string): string {
+-  try {
+-    const sheet = new CSSStyleSheet();
+-    sheet.replaceSync(cssText);
+-    return Array.from(sheet.cssRules)
+-      .map((rule) => rule.cssText)
+-      .join('\n');
+-  } catch {
+-    // Parse failure — fall back to leaving the CSS untouched rather than
+-    // wiping the whole stylesheet. The DOMPurify allow-list still strips
+-    // <script>, <link>, etc., so this isn't a script-injection path.
+-    return cssText;
+-  }
++  const sheet = new CSSStyleSheet();
++  sheet.replaceSync(cssText);
++  return Array.from(sheet.cssRules)
++    .map((rule) => rule.cssText)
++    .join('\n');
+ }
+ 
+ DOMPurify.addHook('uponSanitizeElement', (node: Element, data: { tagName: string }) => {
+diff --git a/app/internal_packages/message-list/lib/email-frame.tsx b/app/internal_packages/message-list/lib/email-frame.tsx
+--- a/app/internal_packages/message-list/lib/email-frame.tsx
++++ b/app/internal_packages/message-list/lib/email-frame.tsx
+@@ -1,3 +1,4 @@
++import AutoloadImagesStore from '../../message-autoload-images/lib/autoload-images-store';
+ import { EventedIFrame } from 'mailspring-component-kit';
+ import React from 'react';
+ import ReactDOM from 'react-dom';
+@@ -45,6 +46,7 @@
+ 
+   _mounted = false;
+   _unlisten: () => void;
++  _unlistenImages: () => void;
+   _iframeComponent: EventedIFrame;
+   _iframeWrapperEl: HTMLDivElement;
+   _iframeDocObserver: ResizeObserver;
+@@ -60,6 +62,7 @@
+     );
+     this._writeContent();
+     this._unlisten = EmailFrameStylesStore.listen(this._writeContent);
++    this._unlistenImages = AutoloadImagesStore.listen(() => this.forceUpdate());
+   }
+ 
+   shouldComponentUpdate(nextProps: EmailFrameProps) {
+@@ -85,6 +88,7 @@
+     this._mounted = false;
+     if (this._iframeDocObserver) this._iframeDocObserver.disconnect();
+     if (this._unlisten) this._unlisten();
++    if (this._unlistenImages) this._unlistenImages();
+   }
+ 
+   _writeContent = () => {
+@@ -110,11 +114,16 @@
+       });
+     }
+ 
++    // Install policy before any mail markup is parsed. Restrict all remote resource
++    // types, including CSS shorthand, fonts and srcset, while preserving local CID images.
++    const policy = AutoloadImagesStore.shouldBlockRemoteContentIn(message)
++      ? `<meta http-equiv="Content-Security-Policy" content="default-src 'none'; img-src data: file: mailspring: cid:; style-src 'unsafe-inline' file: mailspring:; font-src data: file: mailspring:;">`
++      : '';
+     doc.open();
+ 
+     if (message.plaintext) {
+       doc.write(
+-        `<!DOCTYPE html>` +
++        `<!DOCTYPE html><head>${policy}</head>` +
+           `<style>${themeStyles}</style>` +
+           `<div id='inbox-plain-wrapper' class="${process.platform}"></div>`
+       );
+@@ -130,7 +139,7 @@
+       }
+     } else {
+       doc.write(
+-        `<!DOCTYPE html>` +
++        `<!DOCTYPE html><head>${policy}</head>` +
+           `<style>${themeStyles || ''}</style>` +
+           `<style data-email-render-mode>${renderModeStyles || ''}</style>` +
+           `<div id='inbox-html-wrapper' class="${process.platform}">${content}</div>`
+@@ -248,6 +257,11 @@
+         }}
+       >
+         <EventedIFrame
++          key={
++            AutoloadImagesStore.shouldBlockRemoteContentIn(this.props.message)
++              ? 'blocked'
++              : 'allowed'
++          }
+           searchable
+           sandbox="allow-forms allow-same-origin"
+           seamless={true}
+diff --git a/app/internal_packages/message-autoload-images/lib/autoload-images-store.ts b/app/internal_packages/message-autoload-images/lib/autoload-images-store.ts
+--- a/app/internal_packages/message-autoload-images/lib/autoload-images-store.ts
++++ b/app/internal_packages/message-autoload-images/lib/autoload-images-store.ts
+@@ -19,6 +19,7 @@
+ 
+     AppEnv.config.onDidChange('core.reading.autoloadImages', () => {
+       MessageBodyProcessor.resetCache();
++      this.trigger();
+     });
+   }
+ 
+@@ -40,7 +41,7 @@
+     return /<link\s+[^>]+>/gi;
+   };
+ 
+-  shouldBlockImagesIn = (message: Message) => {
++  shouldBlockRemoteContentIn = (message: Message) => {
+     const spam = CategoryStore.getSpamCategory(message.accountId);
+     const inSpam = !!spam && message.folderIds().includes(spam.id);
+ 
+@@ -54,9 +55,18 @@
+       return false;
+     }
+ 
+-    const containsImages = this.getImagesRegexp().test(message.body);
+-    const containsLinkTags = this.getLinkTagRegexp().test(message.body);
+-    return containsImages || containsLinkTags;
++    return true;
++  };
++
++  shouldBlockImagesIn = (message: Message) => {
++    if (!this.shouldBlockRemoteContentIn(message)) return false;
++    // This only controls the notice. Network blocking is enforced by the iframe CSP,
++    // independent of whether a resource is recognized here.
++    return (
++      this.getImagesRegexp().test(message.body) ||
++      this.getLinkTagRegexp().test(message.body) ||
++      /url\s*\(/i.test(message.body)
++    );
+   };
+ 
+   _loadWhitelist = () => {
+diff --git a/app/internal_packages/message-autoload-images/lib/autoload-images-extension.ts b/app/internal_packages/message-autoload-images/lib/autoload-images-extension.ts
+deleted file mode 100644
+--- a/app/internal_packages/message-autoload-images/lib/autoload-images-extension.ts
++++ /dev/null
+@@ -1,16 +0,0 @@
+-import { MessageViewExtension } from 'mailspring-exports';
+-import AutoloadImagesStore from './autoload-images-store';
+-
+-export default class AutoloadImagesExtension extends MessageViewExtension {
+-  static formatMessageBody = ({ message }) => {
+-    if (AutoloadImagesStore.shouldBlockImagesIn(message)) {
+-      message.body = message.body.replace(AutoloadImagesStore.getLinkTagRegexp(), '');
+-      message.body = message.body.replace(
+-        AutoloadImagesStore.getImagesRegexp(),
+-        (match, prefix) => {
+-          return `${prefix}#`;
+-        }
+-      );
+-    }
+-  };
+-}
+diff --git a/app/internal_packages/message-autoload-images/lib/main.ts b/app/internal_packages/message-autoload-images/lib/main.ts
+--- a/app/internal_packages/message-autoload-images/lib/main.ts
++++ b/app/internal_packages/message-autoload-images/lib/main.ts
+@@ -1,6 +1,5 @@
+-import { ComponentRegistry, ExtensionRegistry } from 'mailspring-exports';
++import { ComponentRegistry } from 'mailspring-exports';
+ 
+-import AutoloadImagesExtension from './autoload-images-extension';
+ import AutoloadImagesHeader from './autoload-images-header';
+ 
+ /*
+@@ -16,13 +15,11 @@
+ */
+ export function activate() {
+   // Register Message List Actions we provide globally
+-  ExtensionRegistry.MessageView.register(AutoloadImagesExtension);
+   ComponentRegistry.register(AutoloadImagesHeader, {
+     role: 'message:BodyHeader',
+   });
+ }
+ 
+ export function deactivate() {
+-  ExtensionRegistry.MessageView.unregister(AutoloadImagesExtension);
+   ComponentRegistry.unregister(AutoloadImagesHeader);
+ }
+diff --git a/app/internal_packages/mcp-server/lib/mcp-http-server.ts b/app/internal_packages/mcp-server/lib/mcp-http-server.ts
+--- a/app/internal_packages/mcp-server/lib/mcp-http-server.ts
++++ b/app/internal_packages/mcp-server/lib/mcp-http-server.ts
+@@ -6,15 +6,54 @@
+ import { isInitializeRequest } from '@modelcontextprotocol/sdk/types.js';
+ import { registerTools, registerResources } from './mcp-tools';
+ 
++const MAX_REQUEST_BYTES = 2 * 1024 * 1024;
++
++// New-session requests are parsed here; established sessions use the SDK's same limit.
++function readBody(req: http.IncomingMessage): Promise<string> {
++  return new Promise((resolve, reject) => {
++    const chunks: Buffer[] = [];
++    let size = 0;
++    const cleanup = () => {
++      req.off('data', data);
++      req.off('end', end);
++      req.off('error', error);
++      req.off('aborted', aborted);
++    };
++    const error = (err: Error) => {
++      cleanup();
++      reject(err);
++    };
++    const aborted = () => error(new Error('Request aborted'));
++    const data = (chunk: Buffer) => {
++      size += chunk.length;
++      if (size > MAX_REQUEST_BYTES) {
++        error(Object.assign(new Error('Request body too large'), { statusCode: 413 }));
++        req.resume();
++      } else chunks.push(chunk);
++    };
++    const end = () => {
++      cleanup();
++      resolve(Buffer.concat(chunks).toString('utf8'));
++    };
++    req.on('data', data);
++    req.once('end', end);
++    req.once('error', error);
++    req.once('aborted', aborted);
++  });
++}
++
+ export class McpHttpServer {
+   private httpServer: http.Server | null = null;
+   private transports: Record<string, StreamableHTTPServerTransport> = {};
+ 
+   private _createServer(): McpServer {
+-    const server = new McpServer({
+-      name: 'mailspring',
+-      version: '1.0.0',
+-    });
++    const server = new McpServer(
++      {
++        name: 'mailspring',
++        version: '1.0.0',
++      },
++      { maxToolInputElements: 10000 }
++    );
+     registerTools(server);
+     registerResources(server);
+     return server;
+@@ -25,8 +64,7 @@
+ 
+     this.httpServer = http.createServer(async (req, res) => {
+       // Only allow the /mcp endpoint
+-      const url = new URL(req.url || '/', `http://${req.headers.host || 'localhost'}`);
+-      if (url.pathname !== '/mcp') {
++      if ((req.url || '/').split('?')[0] !== '/mcp') {
+         res.writeHead(404, { 'Content-Type': 'application/json' });
+         res.end(JSON.stringify({ error: 'Not found' }));
+         return;
+@@ -67,11 +105,7 @@
+           transport = this.transports[sessionId];
+         } else if (req.method === 'POST') {
+           // Parse body to check if this is an initialize request
+-          const body = await new Promise<string>((resolve) => {
+-            let data = '';
+-            req.on('data', (chunk: Buffer) => (data += chunk));
+-            req.on('end', () => resolve(data));
+-          });
++          const body = await readBody(req);
+ 
+           let parsed: unknown;
+           try {
+@@ -100,6 +134,7 @@
+             // since we listen on 127.0.0.1 alone.
+             const newTransport = new StreamableHTTPServerTransport({
+               sessionIdGenerator: () => randomUUID(),
++              maxRequestBodySize: MAX_REQUEST_BYTES,
+               enableDnsRebindingProtection: true,
+               allowedHosts: [`127.0.0.1:${port}`, `localhost:${port}`],
+               onsessioninitialized: (sid: string) => {
+@@ -143,6 +178,12 @@
+ 
+         await transport.handleRequest(req, res);
+       } catch (err) {
++        if (req.destroyed) return;
++        if (err.statusCode === 413) {
++          res.writeHead(413, { 'Content-Type': 'application/json', Connection: 'close' });
++          res.end(JSON.stringify({ error: 'Request body too large' }));
++          return;
++        }
+         console.error('[MCP Server] Error handling request:', err);
+         if (!res.headersSent) {
+           res.writeHead(500, { 'Content-Type': 'application/json' });
+diff --git a/app/spec/key-manager-spec.ts b/app/spec/key-manager-spec.ts
+--- a/app/spec/key-manager-spec.ts
++++ b/app/spec/key-manager-spec.ts
+@@ -1,4 +1,6 @@
+-import KeyManager, { secureStorage } from '../src/key-manager';
++import KeyManager from '../src/key-manager';
++import { CredentialStore, secureStorage } from '../src/browser/credential-store';
++import { ipcRenderer } from 'electron';
+ 
+ const CREDENTIALS_KEY = 'credentials';
+ 
+@@ -9,13 +11,16 @@
+   beforeEach(function () {
+     // The manager is a singleton, so its once-per-session guards leak between specs.
+     (KeyManager as any)._fatalErrorReported = false;
+-    (KeyManager as any)._reEncryptAttempted = false;
+ 
+     this.config = {};
+     spyOn(AppEnv.config, 'get').andCallFake((key: string) => this.config[key]);
+     spyOn(AppEnv.config, 'set').andCallFake((key: string, val: any) => {
+       this.config[key] = val;
+     });
++    this.store = new CredentialStore(AppEnv.config, secureStorage);
++    spyOn(ipcRenderer, 'invoke').andCallFake((channel: string, change: any) =>
++      channel === 'credentials:read' ? this.store.read() : this.store.update(change)
++    );
+     spyOn(secureStorage, 'isAvailable').andCallFake(() => Promise.resolve(true));
+     spyOn(secureStorage, 'encrypt').andCallFake((plaintext: string) =>
+       Promise.resolve(Buffer.from(plaintext))
+@@ -107,14 +112,22 @@
+       expect(this.config[CREDENTIALS_KEY]).toEqual(Buffer.from('{"a-imap":"secret"}'));
+     });
+ 
+-    it('starts over when the decrypted value is not a keyset', async function () {
++    it('does not replace malformed decrypted credentials', async function () {
+       this.config[CREDENTIALS_KEY] = storedBlob();
+       spyOn(secureStorage, 'decrypt').andCallFake(() =>
+         Promise.resolve({ result: 'not json', shouldReEncrypt: false })
+       );
+-      spyOn(KeyManager, '_reportFatalError');
+-      expect(await KeyManager._getKeyHash()).toEqual({});
+-      expect(KeyManager._reportFatalError).not.toHaveBeenCalled();
++      spyOn(KeyManager, '_reportFatalError').andCallFake((err: Error) => {
++        throw err;
++      });
++      let failed = false;
++      try {
++        await KeyManager._getKeyHash();
++      } catch {
++        failed = true;
++      }
++      expect(failed).toBe(true);
++      expect(secureStorage.encrypt).not.toHaveBeenCalled();
+     });
+   });
+ 
+@@ -158,7 +171,7 @@
+       (secureStorage.isAvailable as jasmine.Spy).andCallFake(() => Promise.resolve(false));
+       let raised: Error = null;
+       try {
+-        await KeyManager._writeKeyHash({ 'a-imap': 'secret' });
++        await this.store.update({ set: { 'a-imap': 'secret' } });
+       } catch (err) {
+         raised = err;
+       }
+@@ -183,7 +196,7 @@
+         );
+         let raised: Error = null;
+         try {
+-          await KeyManager._writeKeyHash({ 'a-imap': 'secret' });
++          await this.store.update({ set: { 'a-imap': 'secret' } });
+         } catch (err) {
+           raised = err;
+         }
+@@ -195,7 +208,7 @@
+         (secureStorage.encrypt as jasmine.Spy).andCallFake(() =>
+           Promise.resolve(Buffer.from('v11keyring'))
+         );
+-        await KeyManager._writeKeyHash({ 'a-imap': 'secret' });
++        await this.store.update({ set: { 'a-imap': 'secret' } });
+         expect(this.config[CREDENTIALS_KEY]).toEqual(Buffer.from('v11keyring'));
+       });
+     });
+@@ -217,12 +230,17 @@
+     });
+ 
+     it('deletes only the keys that start with the prefix', async function () {
+-      spyOn(KeyManager, '_getKeyHash').andReturn(
+-        Promise.resolve({ 'view-credential:v1:a': '1', 'view-credential:v2:a': '2' } as any)
+-      );
+-      const write = spyOn(KeyManager, '_writeKeyHash').andReturn(Promise.resolve());
++      this.config[CREDENTIALS_KEY] = storedBlob();
++      spyOn(secureStorage, 'decrypt').andCallFake(() =>
++        Promise.resolve({
++          result: JSON.stringify({ 'view-credential:v1:a': '1', 'view-credential:v2:a': '2' }),
++          shouldReEncrypt: false,
++        })
++      );
+       await KeyManager.deletePasswordsWithPrefix('view-credential:v1:');
+-      expect(write.calls[0].args[0]).toEqual({ 'view-credential:v2:a': '2' });
++      expect(secureStorage.encrypt).toHaveBeenCalledWith(
++        JSON.stringify({ 'view-credential:v2:a': '2' })
++      );
+     });
+   });
+ 
+diff --git a/app/package.json b/app/package.json
+--- a/app/package.json
++++ b/app/package.json
+@@ -14,7 +14,7 @@
+   "dependencies": {
+     "@bengotow/slate-edit-list": "github:bengotow/slate-edit-list#b868e108",
+     "@electron/remote": "^2.1.2",
+-    "@modelcontextprotocol/sdk": "^1.29.0",
++    "@modelcontextprotocol/sdk": "1.32.0",
+     "@testing-library/react": "^12.1.5",
+     "app-module-path": "^2.2.0",
+     "better-sqlite3": "^12.8.0",
+@@ -24,7 +24,7 @@
+     "classnames": "^2.5.1",
+     "collapse-whitespace": "^1.1.7",
+     "debug": "github:emorikawa/debug#nylas",
+-    "dompurify": "^3.3.1",
++    "dompurify": "3.4.17",
+     "emoji-data": "^0.2.0",
+     "event-kit": "^1.0.2",
+     "getmac": "^1.2.1",
+@@ -74,7 +74,7 @@
+     "windows-iana": "^4.2.1",
+     "xdg-portal": "^1.2.0",
+     "xml2js": "^0.6.2",
+-    "zod": "4.4.3"
++    "zod": "4.6.7"
+   },
+   "overrides": {
+     "electron": "44.9.1",
+diff --git a/app/package-lock.json b/app/package-lock.json
+--- a/app/package-lock.json
++++ b/app/package-lock.json
+@@ -11,7 +11,7 @@
+       "dependencies": {
+         "@bengotow/slate-edit-list": "github:bengotow/slate-edit-list#b868e108",
+         "@electron/remote": "^2.1.2",
+-        "@modelcontextprotocol/sdk": "^1.29.0",
++        "@modelcontextprotocol/sdk": "1.32.0",
+         "@testing-library/react": "^12.1.5",
+         "app-module-path": "^2.2.0",
+         "better-sqlite3": "^12.8.0",
+@@ -21,7 +21,7 @@
+         "classnames": "^2.5.1",
+         "collapse-whitespace": "^1.1.7",
+         "debug": "github:emorikawa/debug#nylas",
+-        "dompurify": "^3.3.1",
++        "dompurify": "3.4.17",
+         "emoji-data": "^0.2.0",
+         "event-kit": "^1.0.2",
+         "getmac": "^1.2.1",
+@@ -71,7 +71,7 @@
+         "windows-iana": "^4.2.1",
+         "xdg-portal": "^1.2.0",
+         "xml2js": "^0.6.2",
+-        "zod": "4.4.3"
++        "zod": "4.6.7"
+       },
+       "optionalDependencies": {
+         "windows-focus-assist": "^1.4.0"
+@@ -289,9 +289,9 @@
+       "integrity": "sha512-GaHYm+c0O9MjZRu0ongGBRbinu8gVAMd2UZjji6jVmqKtZluZnptXGWhz1E8j8D2HJ3f/yMxKAUC0b+57wncIw=="
+     },
+     "node_modules/@modelcontextprotocol/sdk": {
+-      "version": "1.30.0",
+-      "resolved": "https://registry.npmjs.org/@modelcontextprotocol/sdk/-/sdk-1.30.0.tgz",
+-      "integrity": "sha512-xKd8OIzlqNzcqcNumGAa6g+PW2kjD5vrpcKOnfldAUPP3j7lnqMPwlTXQm8gF+UwH72z0lqaRbjr9hqGz0eITA==",
++      "version": "1.32.0",
++      "resolved": "https://registry.npmjs.org/@modelcontextprotocol/sdk/-/sdk-1.32.0.tgz",
++      "integrity": "sha512-8BviX/hK4Gd2eL1KdTwm0gfl4d3wdoErW0Jd00h6nomUAtk6IJk5vwQJc6kfWtJTzN5OEV/lgIiJKI8fiDGAlA==",
+       "license": "MIT",
+       "dependencies": {
+         "@hono/node-server": "^1.19.9 || ^2.0.5",
+@@ -1885,9 +1885,9 @@
+       }
+     },
+     "node_modules/dompurify": {
+-      "version": "3.4.16",
+-      "resolved": "https://registry.npmjs.org/dompurify/-/dompurify-3.4.16.tgz",
+-      "integrity": "sha512-sqo+pNp3qRhCIpbgRi1y8Tgk27Bo2Ry7w0dC1NBeNTdZChWjz9Xb/KOoZbRP/R6pQZ80Qw8YhXw13hWWBbMRnQ==",
++      "version": "3.4.17",
++      "resolved": "https://registry.npmjs.org/dompurify/-/dompurify-3.4.17.tgz",
++      "integrity": "sha512-B/pSlYVHQ58kqISD/yDjuJ1yfzI34m1gF4lAod2bwSRhiN4K5Cl3H8Af7hqB2PmTL911tdEudnnXn5FnhRoz0w==",
+       "license": "(MPL-2.0 OR Apache-2.0)",
+       "optionalDependencies": {
+         "@types/trusted-types": "^2.0.7"
+@@ -1963,9 +1963,9 @@
+       }
+     },
+     "node_modules/editions/node_modules/semver": {
+-      "version": "6.3.1",
+-      "resolved": "https://registry.npmjs.org/semver/-/semver-6.3.1.tgz",
+-      "integrity": "sha512-BR7VvDCVHO+q2xBEWskxS6DJE1qRnb7DxzUrogb71CWoSficBxYsiAGd+Kl0mmq/MprG9yArRkyrQxTO6XjMzA==",
++      "version": "6.3.2",
++      "resolved": "https://registry.npmjs.org/semver/-/semver-6.3.2.tgz",
++      "integrity": "sha512-GYrCADwpu6yV5OAvchkQ27Z5wwMxWAEMg5NNWjyHh/5DboFFqbdbvYNIvZouQpxXyeMPoTOh0vdPYKlf0ZswdQ==",
+       "license": "ISC",
+       "bin": {
+         "semver": "bin/semver.js"
+@@ -3786,9 +3786,10 @@
+       }
+     },
+     "node_modules/juice/node_modules/undici": {
+-      "version": "6.29.0",
+-      "resolved": "https://registry.npmjs.org/undici/-/undici-6.29.0.tgz",
+-      "integrity": "sha512-R+RODBqp6i2pPflGdq+xIOUkl+RNfGgHwoinecKu/JCuf2uO06cOKoDbI2P7Dn6KcswdKwrczbU6IYJ6K8X+wg==",
++      "version": "6.29.1",
++      "resolved": "https://registry.npmjs.org/undici/-/undici-6.29.1.tgz",
++      "integrity": "sha512-EvRlUt/QqAEvXdQeRMYUfwOQsfzpDztykrG2owGEE/rBOBoYv9uF39ZzsNDh4lTFHhTr2XOZjKkYgueD12ZmGA==",
++      "license": "MIT",
+       "engines": {
+         "node": ">=18.17"
+       }
+@@ -3957,9 +3958,9 @@
+       }
+     },
+     "node_modules/make-dir/node_modules/semver": {
+-      "version": "5.7.2",
+-      "resolved": "https://registry.npmjs.org/semver/-/semver-5.7.2.tgz",
+-      "integrity": "sha512-cBznnQ9KjJqU67B52RMC65CMarK2600WFnbkcaiwWq3xy/5haFJlshgnpjovMVJ+Hff49d8GEn0b87C5pDQ10g==",
++      "version": "5.7.3",
++      "resolved": "https://registry.npmjs.org/semver/-/semver-5.7.3.tgz",
++      "integrity": "sha512-kM18BPOqTi0+TB68703/GJRpAML5Me+IDQsR1J26YB3EFKKNEyHIVZuWDX7+WKQB3tHwDwgk24BfhdpWUbytvQ==",
+       "license": "ISC",
+       "optional": true,
+       "bin": {
+@@ -5412,9 +5413,9 @@
+       "license": "MIT"
+     },
+     "node_modules/semver": {
+-      "version": "7.8.5",
+-      "resolved": "https://registry.npmjs.org/semver/-/semver-7.8.5.tgz",
+-      "integrity": "sha512-Y7/KDsb8LjooZpwaqGyulO6DQlksgCncchHGk+sZIY4SBvUocMBEFH5Ur1fI4dV+Jvl0w6cjvucaIi40puRioA==",
++      "version": "7.8.6",
++      "resolved": "https://registry.npmjs.org/semver/-/semver-7.8.6.tgz",
++      "integrity": "sha512-9lpSSU4Mly3mrtruwLs1eLK6+gzbzqeBFwRNjIjE+9LuDpWdYctrQlQ3ej1Ilgi7gknpsTRnPoLP8DpCHqHIJw==",
+       "license": "ISC",
+       "bin": {
+         "semver": "bin/semver.js"
+@@ -6129,9 +6130,10 @@
+       }
+     },
+     "node_modules/strip-ansi/node_modules/ansi-regex": {
+-      "version": "6.4.0",
+-      "resolved": "https://registry.npmjs.org/ansi-regex/-/ansi-regex-6.4.0.tgz",
+-      "integrity": "sha512-KzTVk2tCWAHtYrvvvaP8bJKJq2pVinhLcGEQdtLIYPbmNGNyYe8QwNaTUYQp2J7/vIsUKt5QCqAfUkYyG9DkOw==",
++      "version": "6.6.0",
++      "resolved": "https://registry.npmjs.org/ansi-regex/-/ansi-regex-6.6.0.tgz",
++      "integrity": "sha512-XZ5apbzreCbXSKwPjJstu8R0zOi247w3XYwWxtwBXgpZrCyc1Ka7p9/xY0A9/diMewmHbEKz+FIraWaEWjlN5g==",
++      "license": "MIT",
+       "engines": {
+         "node": ">=12"
+       },
+@@ -6486,9 +6488,10 @@
+       "license": "BSD-3-Clause"
+     },
+     "node_modules/undici": {
+-      "version": "7.30.0",
+-      "resolved": "https://registry.npmjs.org/undici/-/undici-7.30.0.tgz",
+-      "integrity": "sha512-dkrQXeHSaoamnItlYbmzG0wFYrM0ZwDxCIg0A7aKjTyyhh9svRzCNFEzV+Vm05/yehjCzjDZ31KXfGEjYSztDQ==",
++      "version": "7.30.2",
++      "resolved": "https://registry.npmjs.org/undici/-/undici-7.30.2.tgz",
++      "integrity": "sha512-mLyPQnHwUxaM/rideoK/+KL8DaAJLRl4aBCfmX444aCSLnIaomqPLtNRe2jdCYcsk5wZzXrDIQC8ZeYNRAYyIA==",
++      "license": "MIT",
+       "engines": {
+         "node": ">=20.18.1"
+       }
+@@ -6942,9 +6945,9 @@
+       }
+     },
+     "node_modules/zod": {
+-      "version": "4.4.3",
+-      "resolved": "https://registry.npmjs.org/zod/-/zod-4.4.3.tgz",
+-      "integrity": "sha512-ytENFjIJFl2UwYglde2jchW2Hwm4GJFLDiSXWdTrJQBIN9Fcyp7n4DhxJEiWNAJMV1/BqWfW/kkg71UDcHJyTQ==",
++      "version": "4.6.7",
++      "resolved": "https://registry.npmjs.org/zod/-/zod-4.6.7.tgz",
++      "integrity": "sha512-g8W2D2kU6a8untc053fX1uVBKzM7yqAxW/3zwk83+6RyF2+SKOuV+c0wBDhUwzV1PaGapmZH+rmcUzPf+3CGwg==",
+       "license": "MIT",
+       "funding": {
+         "url": "https://github.com/sponsors/colinhacks"
+diff --git a/app/internal_packages/message-autoload-images/specs/autoload-images-extension-spec.ts b/app/internal_packages/message-autoload-images/specs/autoload-images-extension-spec.ts
+--- a/app/internal_packages/message-autoload-images/specs/autoload-images-extension-spec.ts
++++ b/app/internal_packages/message-autoload-images/specs/autoload-images-extension-spec.ts
+@@ -1,39 +1,16 @@
+-import fs from 'fs';
+-import path from 'path';
+-import AutoloadImagesExtension from '../lib/autoload-images-extension';
++import { Message, Contact } from 'mailspring-exports';
+ import AutoloadImagesStore from '../lib/autoload-images-store';
+ 
+-describe('AutoloadImagesExtension', function autoloadImagesExtension() {
+-  describe('formatMessageBody', () => {
+-    const scenarios = [];
+-    const fixtures = path.resolve(path.join(__dirname, 'fixtures'));
+-
+-    fs.readdirSync(fixtures).forEach((filename) => {
+-      if (filename.endsWith('-in.html')) {
+-        const name = filename.replace('-in.html', '');
+-
+-        scenarios.push({
+-          name: name,
+-          in: fs.readFileSync(path.join(fixtures, filename)).toString(),
+-          out: fs.readFileSync(path.join(fixtures, `${name}-out.html`)).toString(),
+-        });
+-      }
++describe('Remote content policy', () => {
++  it('blocks even CSS forms not recognized by the notice regexp', () => {
++    spyOn(AppEnv.config, 'get').andReturn(false);
++    const message = new Message({
++      id: 'policy-test',
++      accountId: 'test',
++      from: [new Contact({ email: 'policy@example.test' })],
+     });
+-
+-    scenarios.forEach((scenario) => {
+-      it(`should process ${scenario.name}`, () => {
+-        spyOn(AutoloadImagesStore, 'shouldBlockImagesIn').andReturn(true);
+-
+-        const message = {
+-          body: scenario.in,
+-        };
+-        AutoloadImagesExtension.formatMessageBody({ message });
+-
+-        // if (message.body !== scenario.out) {
+-        //   fs.writeFileSync(path.join(fixtures, `${scenario.name}-out.actual.html`), message.body);
+-        // }
+-        expect(message.body === scenario.out).toBe(true);
+-      });
+-    });
++    message.body = '<div style="background: red url(https://example.test/pixel)">mail</div>';
++    expect(AutoloadImagesStore.shouldBlockRemoteContentIn(message)).toBe(true);
++    expect(AutoloadImagesStore.shouldBlockImagesIn(message)).toBe(true);
+   });
+ });
+diff --git a/app/src/browser/credential-store.ts b/app/src/browser/credential-store.ts
+new file mode 100644
+--- /dev/null
++++ b/app/src/browser/credential-store.ts
+@@ -0,0 +1,82 @@
++import { safeStorage } from 'electron';
++
++export type KeySet = Record<string, string>;
++export type CredentialChange = { set?: KeySet; remove?: string[]; removePrefix?: string };
++
++export const secureStorage = {
++  isAvailable: () => safeStorage.isAsyncEncryptionAvailable(),
++  encrypt: (text: string) => safeStorage.encryptStringAsync(text),
++  decrypt: (bytes: Buffer) => safeStorage.decryptStringAsync(bytes),
++  decryptLegacy: (bytes: Buffer) => safeStorage.decryptString(bytes),
++};
++
++// One instance in the main process owns the whole keyset, including migration writes.
++// Queue failures propagate to their caller without stopping later requests.
++export class CredentialStore {
++  private pending: Promise<unknown> = Promise.resolve();
++  private reEncryptAttempted = false;
++  constructor(
++    private config: { get(key: string): any; set(key: string, value: any): void },
++    private storage = secureStorage
++  ) {}
++
++  private serial<T>(fn: () => Promise<T>): Promise<T> {
++    const result = this.pending.then(fn);
++    this.pending = result.catch(() => {});
++    return result;
++  }
++
++  read(): Promise<KeySet> {
++    return this.serial(() => this.readKeys());
++  }
++
++  update(change: CredentialChange): Promise<void> {
++    return this.serial(async () => {
++      if (change.removePrefix !== undefined && !change.removePrefix)
++        throw new Error('Credential removal requires a non-empty prefix.');
++      const keys = await this.readKeys();
++      Object.assign(keys, change.set);
++      for (const key of change.remove || []) delete keys[key];
++      if (change.removePrefix)
++        for (const key of Object.keys(keys))
++          if (key.startsWith(change.removePrefix)) delete keys[key];
++      await this.writeKeys(keys);
++    });
++  }
++
++  private async readKeys(): Promise<KeySet> {
++    const value = this.config.get('credentials');
++    if (value === undefined || value === null || value === 'null') return {};
++    const bytes = Buffer.from(value, 'utf8');
++    let decoded: { result: string; shouldReEncrypt: boolean };
++    try {
++      decoded = await this.storage.decrypt(bytes);
++    } catch {
++      // Existing pre-1.24 blobs use the synchronous keychain identity on some platforms.
++      // If both fail, propagate; never overwrite an unreadable keyset with an empty one.
++      decoded = { result: this.storage.decryptLegacy(bytes), shouldReEncrypt: true };
++    }
++    const keys = JSON.parse(decoded.result) as KeySet;
++    if (decoded.shouldReEncrypt && !this.reEncryptAttempted) {
++      this.reEncryptAttempted = true;
++      try {
++        await this.writeKeys(keys);
++      } catch {
++        // Successfully read credentials remain usable if an optional migration fails.
++        console.warn('Could not migrate saved credentials to the current keychain provider.');
++      }
++    }
++    return keys;
++  }
++
++  private async writeKeys(keys: KeySet) {
++    if (!(await this.storage.isAvailable()))
++      throw new Error(
++        'Secure credential storage is unavailable. Unlock your system keychain and restart.'
++      );
++    const bytes = await this.storage.encrypt(JSON.stringify(keys));
++    if (process.platform === 'linux' && bytes.subarray(0, 3).toString() === 'v10')
++      throw new Error('The desktop keyring is unavailable; refusing the plaintext fallback key.');
++    this.config.set('credentials', bytes);
++  }
++}

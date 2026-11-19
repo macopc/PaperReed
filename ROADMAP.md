@@ -16,6 +16,10 @@
 
 优先级：基础邮件体验与外部 Agent 接入优先；内置 AI 后置。暂不扩展到移动端、自建邮件服务器、团队协作平台或插件市场。
 
+最新日用证据：[真实 Gmail 统一授权、迁移与重启连接，以及同步期间搜索阅读、Codex 草稿回 GUI 审阅已完成](research/daily-use-validation-2026-11-17/README.md)。修复返回列表的焦点丢失。共享授权下的真实 HTTPS 再次发送未执行，正式签名、公证及更新发行仍待推进。
+
+发布前审查确认的 5 项问题已完成集中修复：[共享凭据、数据库响应与异常结束、邮件资源隔离、Agent 资源边界](research/release-fixes-2026-11-17/README.md)。下一步可恢复 Logo、0.0.1 与测试版包装；签名、公证和传递依赖风险仍需按发行范围处理。
+
 ## How decisions become final
 
 Design review and technical evidence inform decisions; creating a repository, merging a prototype or passing checks does not approve the product design or select a stack. Record the rationale and unresolved risks in the relevant document when a decision is accepted.

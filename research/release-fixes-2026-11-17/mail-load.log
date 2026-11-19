@@ -1,0 +1,394 @@
+PASS three-account scopes, foreign markers, sparse/empty folders, pin ordering, pagination, concurrent queries and grant exclusions
+PASS GUI pending search and account switching preserve scope
+PASS complex HTML body rendered through end marker, including table rows
+PASS 30-message conversation loaded with cached HTML content
+{
+  "synthetic": true,
+  "launchToRowsMs": 713,
+  "database": {
+    "threads": 30000
+  },
+  "phases": {
+    "queriesStart": 552,
+    "guiStart": 2080.800000190735,
+    "htmlStart": 2777.4000005722046
+  },
+  "queries": [
+    {
+      "accounts": [
+        "load0000",
+        "load0001",
+        "load0002"
+      ],
+      "query": "",
+      "rows": 50,
+      "elapsedMs": [
+        1.8999996185302734,
+        1.9000005722045898,
+        1.6999998092651367
+      ]
+    },
+    {
+      "accounts": [
+        "load0000",
+        "load0001",
+        "load0002"
+      ],
+      "query": "设计",
+      "rows": 50,
+      "elapsedMs": [
+        61.60000038146973,
+        53.59999942779541,
+        51.90000057220459
+      ]
+    },
+    {
+      "accounts": [
+        "load0000",
+        "load0001",
+        "load0002"
+      ],
+      "query": "账户1专属",
+      "rows": 50,
+      "elapsedMs": [
+        54.09999942779541,
+        51.69999980926514,
+        52.90000057220459
+      ]
+    },
+    {
+      "accounts": [
+        "load0000",
+        "load0001",
+        "load0002"
+      ],
+      "query": "quarterly",
+      "rows": 50,
+      "elapsedMs": [
+        12.09999942779541,
+        10.100000381469727,
+        10.100000381469727
+      ]
+    },
+    {
+      "accounts": [
+        "load0000",
+        "load0001",
+        "load0002"
+      ],
+      "query": "not-present-token",
+      "rows": 0,
+      "elapsedMs": [
+        1.0999994277954102,
+        0.9000005722045898,
+        1
+      ]
+    },
+    {
+      "accounts": [
+        "load0000"
+      ],
+      "query": "",
+      "rows": 50,
+      "elapsedMs": [
+        1,
+        0.9000005722045898,
+        0.7999992370605469
+      ]
+    },
+    {
+      "accounts": [
+        "load0000"
+      ],
+      "query": "设计",
+      "rows": 50,
+      "elapsedMs": [
+        35.60000038146973,
+        35.69999980926514,
+        35.90000057220459
+      ]
+    },
+    {
+      "accounts": [
+        "load0000"
+      ],
+      "query": "账户1专属",
+      "rows": 0,
+      "elapsedMs": [
+        45.69999980926514,
+        49.39999961853027,
+        72.19999980926514
+      ]
+    },
+    {
+      "accounts": [
+        "load0000"
+      ],
+      "query": "quarterly",
+      "rows": 50,
+      "elapsedMs": [
+        29.100000381469727,
+        9.600000381469727,
+        8.299999237060547
+      ]
+    },
+    {
+      "accounts": [
+        "load0000"
+      ],
+      "query": "not-present-token",
+      "rows": 0,
+      "elapsedMs": [
+        0.6000003814697266,
+        0.5,
+        0.2999992370605469
+      ]
+    },
+    {
+      "accounts": [
+        "load0001"
+      ],
+      "query": "",
+      "rows": 50,
+      "elapsedMs": [
+        0.8999996185302734,
+        0.9000005722045898,
+        0.8999996185302734
+      ]
+    },
+    {
+      "accounts": [
+        "load0001"
+      ],
+      "query": "设计",
+      "rows": 50,
+      "elapsedMs": [
+        36.5,
+        36.5,
+        44.19999980926514
+      ]
+    },
+    {
+      "accounts": [
+        "load0001"
+      ],
+      "query": "账户1专属",
+      "rows": 50,
+      "elapsedMs": [
+        51,
+        49,
+        49
+      ]
+    },
+    {
+      "accounts": [
+        "load0001"
+      ],
+      "query": "quarterly",
+      "rows": 50,
+      "elapsedMs": [
+        8.100000381469727,
+        7.800000190734863,
+        7.5
+      ]
+    },
+    {
+      "accounts": [
+        "load0001"
+      ],
+      "query": "not-present-token",
+      "rows": 0,
+      "elapsedMs": [
+        0.5,
+        0.3000001907348633,
+        0.40000057220458984
+      ]
+    },
+    {
+      "accounts": [
+        "load0002"
+      ],
+      "query": "",
+      "rows": 50,
+      "elapsedMs": [
+        0.8000001907348633,
+        0.5999994277954102,
+        0.8000001907348633
+      ]
+    },
+    {
+      "accounts": [
+        "load0002"
+      ],
+      "query": "设计",
+      "rows": 50,
+      "elapsedMs": [
+        35.30000019073486,
+        35.39999961853027,
+        35.70000076293945
+      ]
+    },
+    {
+      "accounts": [
+        "load0002"
+      ],
+      "query": "账户1专属",
+      "rows": 0,
+      "elapsedMs": [
+        43.69999980926514,
+        43.69999980926514,
+        43.89999961853027
+      ]
+    },
+    {
+      "accounts": [
+        "load0002"
+      ],
+      "query": "quarterly",
+      "rows": 50,
+      "elapsedMs": [
+        8,
+        7.800000190734863,
+        7.5
+      ]
+    },
+    {
+      "accounts": [
+        "load0002"
+      ],
+      "query": "not-present-token",
+      "rows": 0,
+      "elapsedMs": [
+        0.5,
+        0.3000001907348633,
+        0.5
+      ]
+    }
+  ],
+  "accountSwitchMs": [
+    {
+      "id": "load0000",
+      "ms": 38.378541999999925
+    },
+    {
+      "id": "load0002",
+      "ms": 36.30804100000023
+    },
+    {
+      "id": "",
+      "ms": 35.506875000000036
+    }
+  ],
+  "htmlOpenToBodyMs": 112.90487499999972,
+  "burst": {
+    "queries": 18,
+    "totalMs": 588.6999998092651
+  },
+  "htmlDOM": [
+    {
+      "textLength": 60788,
+      "rows": 160
+    }
+  ],
+  "longThreadOpenToBodyMs": 68.18737499999952,
+  "longTasks": [],
+  "rendererMetrics": [
+    {
+      "name": "Documents",
+      "value": 12
+    },
+    {
+      "name": "Nodes",
+      "value": 9478
+    },
+    {
+      "name": "TaskDuration",
+      "value": 0.531745
+    },
+    {
+      "name": "JSHeapUsedSize",
+      "value": 72987464
+    },
+    {
+      "name": "JSHeapTotalSize",
+      "value": 125681664
+    }
+  ],
+  "rendererCPU": [
+    {
+      "name": "(idle)",
+      "file": "",
+      "ms": 2662.088
+    },
+    {
+      "name": "(program)",
+      "file": "",
+      "ms": 160.388
+    },
+    {
+      "name": "PaperReedWorkspace.renderRow",
+      "file": "paper-reed/lib/workspace.js",
+      "ms": 10.582
+    },
+    {
+      "name": "parseChannelMessages",
+      "file": "node:internal/child_process/serialization",
+      "ms": 8.576
+    },
+    {
+      "name": "(garbage collector)",
+      "file": "",
+      "ms": 7.63
+    },
+    {
+      "name": "RegExp: (((([A-Za-z]{3,9}:(?:\\/\\/))(?:[\\-;:&=\\+\\$,\\w]+@)?(([a-zA-Z0-9-_]+\\.)*[a-zA-Z0-9][a-zA-Z0-9-_]+\\.[a-zA-Z]{2,11}|(?:[0-9]{1,3}\\.){3}[0-9]{1,3})|([A-Za-z]{3,9}:(?:\\/\\/))?(?:[\\-;:&=\\+\\$,\\w]+@)?(([a-zA-Z0-9-_]+\\.)*[a-zA-Z0-9][a-zA-Z0-9-_]+\\.(?:com|org|edu|gov|uk|net|ca|de|jp|fr|au|us|ru|ch|it|nl|se|no|es|mil|ly)|(?:[0-9]{1,3}\\.){3}[0-9]{1,3}))(?::d*)?|mailto:\\/*(?:\\w+\\.|[\\-;:&=\\+\\$.,\\w]+@)[A-Za-z0-9\\.\\-]+)((?:[\\+=~%\\/\\.\\w\\-_@:]*[\\+~%\\/\\w\\-:_])?(?:\\?[\\-\\+=&;:%@$\\(\\)'\\*\\/~\\!\\.,\\w_]*[\\-\\+=&;~%@\\w_\\/])*(?:#['\\$\\&\\(\\)\\*\\+,;=\\.\\!\\/\\\\\\w%-?]*[\\/\\\\\\w])?)?)",
+      "file": "",
+      "ms": 6.019
+    },
+    {
+      "name": "PaperReedWorkspace.renderRow",
+      "file": "paper-reed/lib/workspace.js",
+      "ms": 5.989
+    },
+    {
+      "name": "PaperReedWorkspace.renderRow",
+      "file": "paper-reed/lib/workspace.js",
+      "ms": 5.905
+    },
+    {
+      "name": "activateNext",
+      "file": "app.asar/src/package-manager.js",
+      "ms": 5.05
+    },
+    {
+      "name": "_executeLocally",
+      "file": "flux/stores/database-store.js",
+      "ms": 4.525
+    },
+    {
+      "name": "makeContextifyScript",
+      "file": "node:internal/vm",
+      "ms": 4.491
+    },
+    {
+      "name": "DOMPurify.sanitize",
+      "file": "dompurify/dist/purify.cjs.js",
+      "ms": 3.588
+    },
+    {
+      "name": "ensureImageCacheReady",
+      "file": "flux/models/utils.js",
+      "ms": 3.382
+    },
+    {
+      "name": "ReactElement",
+      "file": "react/cjs/react.development.js",
+      "ms": 3.028
+    },
+    {
+      "name": "normalizeString",
+      "file": "node:path",
+      "ms": 3.021
+    }
+  ]
+}

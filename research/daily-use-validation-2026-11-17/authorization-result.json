@@ -1,0 +1,12 @@
+{
+  "idPreserved": true,
+  "provider": "gmail",
+  "state": "ok",
+  "online": true,
+  "sharedRefreshToken": true,
+  "oldSendGrant": false,
+  "imapPassword": false,
+  "httpsSend": true,
+  "threads": 205,
+  "revision": "aa5561c342380a08a3f9eb6accd2c704e00fb0be"
+}

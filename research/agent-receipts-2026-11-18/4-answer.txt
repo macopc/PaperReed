@@ -1,0 +1,10 @@
+已保存回复草稿，尚未发送。
+
+收件人：vendor@partners.example.test  
+主题：Re: PO-418 delivery update
+
+> Hi,
+>
+> The revised dock arrival date of December 9 for PO-418 works for us. Please confirm the scheduled shipment date.
+>
+> Thank you.

@@ -1,0 +1,65 @@
+{
+  "drafts": {
+    "5": {
+      "subject": "Vendor scheduling memo",
+      "body": "<div>Delivery is agreed for December 12.</div><div>Could you please share the tracking number at your earliest convenience?</div><div>Thank you, Casey</div>",
+      "to": [
+        "vendor@partners.example.test"
+      ],
+      "cc": [],
+      "attachments": [
+        "schedule.txt"
+      ]
+    },
+    "6": {
+      "subject": "Opal quote for purchase",
+      "body": "<div>Please review the attached quote.</div>",
+      "to": [
+        "procurement@cedar.example.test"
+      ],
+      "cc": [],
+      "attachments": [
+        "opal-v2.txt"
+      ],
+      "fileCopiesInProfile": 2,
+      "sha256": "0ca86b1e1f622b906d1a92704f8cab61c7d012d37939872fb6a2b9d4a083029a"
+    },
+    "5a": {
+      "subject": "Vendor scheduling memo (review)",
+      "body": "<div>Delivery is agreed for December 9.</div><div>Could you please share the tracking number as soon as possible?</div><div>Thank you, Casey</div>",
+      "to": [
+        "vendor@partners.example.test"
+      ],
+      "cc": [],
+      "attachments": [
+        "schedule.txt"
+      ]
+    },
+    "4": {
+      "subject": "Re: PO-418 delivery update",
+      "body": "<div>Hi,</div><div><br></div><div>The revised dock arrival date of December 9 for PO-418 works for us. Please confirm the shipment date.</div><div><br></div><div>Thank you.</div>",
+      "threadId": "t:Ub7WMqkgkvuWEGEY85YyJw7zXG7LPv5kygusCDTR3",
+      "aid": "c-17",
+      "to": [
+        "vendor@partners.example.test"
+      ]
+    }
+  },
+  "sendLedger": [
+    [
+      "6AA229A8-F743-4E2A-861B-5CBD4C57ECB0@getmailspring.com",
+      "accepted",
+      "filed"
+    ],
+    [
+      "AC67F851-7AE6-4234-B5E5-5750BFCC2D66@getmailspring.com",
+      "accepted",
+      "filed"
+    ]
+  ],
+  "workDrafts": 4,
+  "smtp": [
+    2,
+    0
+  ]
+}
