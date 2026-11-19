@@ -25,6 +25,25 @@ async function stop(){const p=app.process();await app.evaluate(({app})=>app.quit
  const ids=[];for(const a of accounts)ids.push((await cli('search',{accountId:a.id,query:'in:inbox',limit:10}))[0].id);
  assert.notEqual(ids[0],ids[1]);const targets=accounts.map((a,i)=>({accountId:a.id,threadId:ids[i]}));
  await until(()=>evaluate('document.querySelectorAll(".pr-mail-row").length===2'),'unified inbox');
+ const otherRule=await cli('rule-save', {
+   accountId:accounts[1].id,name:'第二邮箱规则',field:'subject',
+   query:'shared subject',action:'category',value:'notifications',enabled:false,
+ });
+ await main.locator('.pr-sidebar button').filter({hasText:'设置'}).click();
+ await main.locator('[data-settings-tab="Mail Rules"]').click();
+ const mailbox=main.getByRole('combobox',{name:'规则邮箱'});
+ await mailbox.focus();
+ // Both fixture addresses start with “a”, so type-ahead advances to the other mailbox.
+ await main.keyboard.press('a');
+ await until(()=>evaluate(`document.activeElement.matches('select[aria-label="规则邮箱"]') &&
+   document.activeElement.value===${JSON.stringify(accounts[1].id)}`),'rule account switch restores focus');
+ await until(()=>evaluate('document.querySelector("#pr-local-rule-name").value==="第二邮箱规则"'),'rule from second account');
+ await mailbox.selectOption(accounts[0].id);
+ await until(()=>evaluate(`document.activeElement.matches('select[aria-label="规则邮箱"]') &&
+   document.activeElement.value===${JSON.stringify(accounts[0].id)}`),'reverse rule account switch restores focus');
+ await cli('rule-delete',{accountId:accounts[1].id,id:otherRule.id});
+ await main.locator('.pr-preferences-nav button').filter({hasText:'返回邮件'}).click();
+ pass('mail rule account switch keeps focus and loads the selected account rules');
  await main.locator('#pr-account').selectOption(accounts[0].id);await until(()=>evaluate('document.querySelectorAll(".pr-mail-row").length===1'),'filter Gmail');
  await main.locator('#pr-account').selectOption(accounts[1].id);await until(()=>evaluate(`document.querySelector('.pr-mail-row')?.dataset.threadId===${JSON.stringify(ids[1])}`),'filter IMAP');
  await main.locator('#pr-account').selectOption('');pass('unified inbox, account filters, identical Message-ID isolated');

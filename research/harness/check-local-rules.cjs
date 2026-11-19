@@ -57,8 +57,16 @@ module.exports = async ({
     () => run('!!document.querySelector(".pr-local-rule-editor")'),
     'local rules editor'
   );
+  assert.equal(await main.locator('.pr-local-rules .pr-rule-sidebar').count(), 0);
+  assert.equal(await main.getByRole('button', { name: '新建规则' }).count(), 0);
+  assert(!await run('document.querySelector(".pr-local-rule-preview").open'));
+  await shot('empty-editor');
+  await click('.pr-local-rule-preview summary');
+  assert.match(await main.locator('.pr-local-rule-preview').innerText(), /先保存并启用一条规则/);
+  await click('.pr-local-rule-preview summary');
   await main.locator('#pr-local-rule-name').fill('评审归为通知');
   await main.getByLabel('匹配关键词', { exact: true }).fill('review');
+  await shot('dirty-editor');
   await main.locator('.pr-local-rule-editor button[type=submit]').click();
   await until(
     async () => (await rules()).rules.length === 1,
@@ -66,6 +74,8 @@ module.exports = async ({
   );
   let first = (await rules()).rules[0];
   assert.equal(first.enabled, false);
+  await main.locator('.pr-local-rule-editor [role=status]').filter({hasText:'规则已保存'}).waitFor();
+  assert.equal(await main.locator('[data-local-rule] small').getAttribute('data-state'),'paused');
   assert.equal((await state(target.id)).category, 'ordinary');
   await main.locator('.pr-rule-enabled input').check();
   await main.locator('.pr-local-rule-editor button[type=submit]').click();
@@ -130,8 +140,83 @@ module.exports = async ({
     () => run('document.querySelectorAll("[data-local-rule]").length===3'),
     'CLI rules reflected'
   );
-  await main.locator('#pr-rule-search').fill('subject:review');
+  assert.equal(await main.locator('[data-local-rule] small[data-state=ready]').count(),3);
+  await shot('editor');
+  await cdp.send('Emulation.clearDeviceMetricsOverride');
+  await run('require("@electron/remote").getCurrentWindow().setContentSize(740,700); true');
+  await until(()=>run('innerWidth===740 && innerHeight===700'),'native narrow rule settings');
+  const picker=main.getByRole('combobox',{name:'已保存的规则'});
+  assert(await picker.isVisible());
+  assert.equal(await picker.locator('option').count(),3);
+  await picker.selectOption(third.id);
+  assert.equal(await main.locator('#pr-local-rule-name').inputValue(),'订阅优先');
+  await picker.focus();
+  await main.keyboard.press('Tab');
+  assert(await run('document.activeElement.textContent.trim()==="上移"'));
+  await main.keyboard.press('Enter');
+  await until(async()=>(await rules()).rules[1].id===third.id,'keyboard move up');
+  await until(()=>run('document.activeElement.textContent.trim()==="上移" && !document.activeElement.disabled'),'reorder focus restored');
+  await main.keyboard.press('Enter');
+  await until(async()=>(await rules()).rules[0].id===third.id,'keyboard move to first');
+  await until(()=>run('document.activeElement.matches(".pr-rule-picker")'),'first rule focus returns to picker');
+  await main.keyboard.press('Tab');
+  assert(await run('document.activeElement.textContent.trim()==="下移"'));
+  await main.keyboard.press('Enter');
+  await until(async()=>(await rules()).rules[1].id===third.id,'keyboard move down');
+  await until(()=>run('document.activeElement.textContent.trim()==="下移" && !document.activeElement.disabled'),'move down focus restored');
+  await main.keyboard.press('Enter');
+  await until(async()=>(await rules()).rules[2].id===third.id,'keyboard move to last');
+  await until(()=>run('document.activeElement.matches(".pr-rule-picker")'),'last rule focus returns to picker');
+  await picker.selectOption(first.id);
+  await main.getByLabel('匹配关键词',{exact:true}).fill('unsaved narrow check');
+  await main.getByRole('button',{name:'放弃修改'}).focus();
+  await main.keyboard.press('Enter');
+  assert.equal(await main.getByLabel('匹配关键词',{exact:true}).inputValue(),'review');
+  assert(await run('document.activeElement.id==="pr-local-rule-name"'));
+  await run('document.querySelector(".preferences-content .scroll-region-content").scrollTop=0; true');
+  assert(await run(`(()=>{
+    const page=document.querySelector('.pr-settings-page');
+    return page.scrollWidth<=page.clientWidth+1;
+  })()`));
+  await shot('narrow-editor');
+  await main.getByRole('button',{name:'新建规则'}).click();
+  assert(await run('document.activeElement.id==="pr-local-rule-name"'));
+  await main.locator('#pr-local-rule-name').fill('临时规则');
+  await main.getByLabel('匹配关键词', {exact:true}).fill('temporary');
+  await main.getByRole('button',{name:'保存规则'}).focus();
+  await main.keyboard.press('Enter');
+  await until(async()=> (await rules()).rules.length===4,'temporary rule created');
+  await main.locator('.pr-local-rule-editor [role=status]').filter({hasText:'规则已保存'}).waitFor();
+  await until(()=>run('document.activeElement.id==="pr-local-rule-name"'),'save focus returns to name');
+  await cdp.send('Emulation.setDeviceMetricsOverride', {width:1440,height:900,deviceScaleFactor:1,mobile:false});
+  await run(`window.prRuleOriginalDialog=require('@electron/remote').dialog.showMessageBoxSync;
+    require('@electron/remote').dialog.showMessageBoxSync=(_,options)=>{
+      window.prRuleDeleteDialog=options;
+      return window.prRuleDeleteResponse || options.cancelId;
+    }; true`);
+  try {
+    const remove=main.getByRole('button',{name:'删除规则…'});
+    await remove.focus(); await main.keyboard.press('Enter');
+    assert(await run('window.prRuleDeleteDialog.buttons[window.prRuleDeleteDialog.defaultId]==="取消" && window.prRuleDeleteDialog.defaultId===window.prRuleDeleteDialog.cancelId && window.prRuleDeleteDialog.message.includes("临时规则")'));
+    assert.equal((await rules()).rules.length,4);
+    await run('window.prRuleDeleteResponse=1; true');
+    await main.keyboard.press('Enter');
+    await until(async()=> (await rules()).rules.length===3,'temporary rule deleted');
+    await main.locator('.pr-local-rule-editor [role=status]').filter({hasText:'规则已删除'}).waitFor();
+    assert(await run('document.activeElement.id==="pr-local-rule-name"'));
+  } finally {
+    await run("require('@electron/remote').dialog.showMessageBoxSync=window.prRuleOriginalDialog; true");
+  }
+  await click(`[data-local-rule="${first.id}"]`);
+  await click('.pr-local-rule-preview summary');
+  await main.locator('#pr-rule-search').fill('subject:paperreed-no-match-98042');
   await main.locator('.pr-local-rule-preview form button').click();
+  await main.locator('.pr-local-rule-preview [role=status]').filter({hasText:'此范围内没有会话'}).waitFor();
+  assert.equal(await main.locator('.pr-local-rule-preview > button').count(),0);
+  await main.locator('#pr-rule-search').fill('subject:review');
+  const previewButton=main.getByRole('button',{name:'预览匹配'});
+  await previewButton.focus();
+  await main.keyboard.press('Enter');
   await until(
     () =>
       run(
@@ -139,17 +224,21 @@ module.exports = async ({
       ),
     'preview list'
   );
+  await until(()=>run('document.activeElement.textContent.trim()==="预览匹配"'),'preview focus restored');
   await main.locator('.pr-local-rule-preview').scrollIntoViewIfNeeded();
   await shot('preview');
   await main
     .locator('.pr-rule-preview-list input:not(:disabled)')
     .first()
     .check();
-  await main.locator('.pr-local-rule-preview > button').click();
+  const applyButton=main.locator('.pr-local-rule-preview > button');
+  await applyButton.focus();
+  await main.keyboard.press('Enter');
   await until(
     async () => (await state(target.id)).category === 'subscriptions',
     'GUI applies preview'
   );
+  await until(()=>run('document.activeElement.textContent.trim()==="预览匹配"'),'apply returns focus to preview');
   assert((await state(target.id)).labels.some((l) => l.id === label.id));
   assert.deepEqual(
     await run(
@@ -172,7 +261,7 @@ module.exports = async ({
   );
 
   await main
-    .locator('.pr-local-rule-editor footer button')
+    .locator('.pr-local-rules .pr-rule-order button')
     .filter({ hasText: '上移' })
     .click();
   await until(
@@ -180,7 +269,7 @@ module.exports = async ({
     'move once'
   );
   await main
-    .locator('.pr-local-rule-editor footer button')
+    .locator('.pr-local-rules .pr-rule-order button')
     .filter({ hasText: '上移' })
     .click();
   await until(
@@ -226,12 +315,13 @@ module.exports = async ({
 
   await click('[data-settings-tab=Appearance]');
   assert(await run('!!document.querySelector(".pr-local-rule-editor")'));
+  assert.match(await main.locator('.pr-local-rule-editor [role=status]').innerText(), /请先保存规则或放弃修改/);
   await main
     .locator('.pr-local-rule-editor footer button')
     .filter({ hasText: '放弃修改' })
     .click();
   assert.equal(
-    await main.locator('.pr-local-rule-notice').count(),
+    await main.locator('.pr-local-rule-editor .pr-local-rule-notice').count(),
     0,
     'discard clears obsolete warning'
   );
@@ -482,6 +572,15 @@ a=json.load(open(sys.argv[1]));d=json.loads(sys.argv[2]);m=EmailMessage();m['Fro
     ruleFolderScope: true,
     remoteStateUnchanged: true,
     compactLayout: true,
+    firstRuleHasOneEditor: true,
+    saveReceiptNearActions: true,
+    nativeRulePicker740: true,
+    nativeKeyboardReorderAndFocus: true,
+    nativeSaveDiscardFocus: true,
+    previewApplyFocus: true,
+    newRuleFocus: true,
+    deleteConfirmationDefaultCancel: true,
+    emptyPreviewFeedback: true,
     expectedSMTPSubmissions: 0,
   };
   fs.writeFileSync(

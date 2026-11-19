@@ -1,0 +1,672 @@
+diff --git a/app/internal_packages/paper-reed/lib/rules-settings.tsx b/app/internal_packages/paper-reed/lib/rules-settings.tsx
+index 1cca202..63995d6 100644
+--- a/app/internal_packages/paper-reed/lib/rules-settings.tsx
++++ b/app/internal_packages/paper-reed/lib/rules-settings.tsx
+@@ -43,11 +43,19 @@ const editable = (r: LocalRule): RuleInput => ({
+   value: r.value,
+   enabled: r.enabled,
+ });
++const ruleStatus = {
++  paused: '已暂停',
++  ready: '已启用',
++  'needs-sync': '等待同步',
++  'mailbox-reset': '需重新保存',
++};
+ function RulesForAccount({
+   accountId,
++  accountPicker,
+   onDirty,
+ }: {
+   accountId: string;
++  accountPicker: React.ReactNode;
+   onDirty: (dirty: boolean) => void;
+ }) {
+   const [rules, setRules] = useState<LocalRule[]>([]),
+@@ -56,7 +64,10 @@ function RulesForAccount({
+     [saved, setSaved] = useState(JSON.stringify(blank(accountId)));
+   const [busy, setBusy] = useState(false),
+     [notice, setNotice] = useState(''),
+-    [deleting, setDeleting] = useState(false);
++    [previewNotice, setPreviewNotice] = useState('');
++  const nameInput = useRef<HTMLInputElement>(null);
++  const ruleSidebar = useRef<HTMLElement>(null);
++  const previewButton = useRef<HTMLButtonElement>(null);
+   const [search, setSearch] = useState('in:inbox'),
+     [preview, setPreview] = useState<Awaited<ReturnType<typeof previewLocalRules>>>(null),
+     [checked, setChecked] = useState<string[]>([]);
+@@ -85,7 +96,6 @@ function RulesForAccount({
+     const d = r ? editable(r) : blank(accountId);
+     setDraft(d);
+     setSaved(JSON.stringify(d));
+-    setDeleting(false);
+     setNotice('');
+   };
+   const refresh = async () => {
+@@ -121,36 +131,69 @@ function RulesForAccount({
+       off();
+     };
+   }, [accountId]);
+-  const work = async (fn: () => Promise<void>) => {
++  const work = async (fn: () => Promise<void>, report = setNotice) => {
+     setBusy(true);
+-    setNotice('');
++    report('');
+     try {
+       await fn();
+     } catch (e) {
+-      setNotice(explain(e.message));
++      report(explain(e.message));
+     } finally {
+       if (mounted.current) setBusy(false);
+     }
+   };
+-  const save = () =>
+-    work(async () => {
++  const save = async () => {
++    await work(async () => {
+       const { id } = await saveLocalRule(draft, inboxDesktopAccess);
+       const next = await listLocalRules(accountId, inboxDesktopAccess);
+       setRules(next.rules as LocalRule[]);
+       choose(next.rules.find((r) => r.id === id) as LocalRule);
+       setPreview(null);
+-      setNotice('已保存；已有邮件未改动。');
++      setNotice('规则已保存。已有邮件未改动。');
+     });
+-  const reorder = (delta: number) =>
+-    work(async () => {
++    nameInput.current?.focus();
++  };
++  const reorder = async (delta: number, button: HTMLButtonElement) => {
++    await work(async () => {
+       const ids = rules.map((r) => r.id),
+         index = ids.indexOf(draft.id);
+       [ids[index], ids[index + delta]] = [ids[index + delta], ids[index]];
+       await reorderLocalRules({ accountId, ids }, inboxDesktopAccess);
++      const next = await listLocalRules(accountId, inboxDesktopAccess);
++      setRules(next.rules as LocalRule[]);
+       setPreview(null);
+     });
+-  const loadPreview = () =>
+-    work(async () => {
++    if (!mounted.current) return;
++    if (!button.disabled) {
++      button.focus();
++    } else {
++      const picker = ruleSidebar.current?.querySelector<HTMLSelectElement>('.pr-rule-picker');
++      const selected = ruleSidebar.current?.querySelector<HTMLButtonElement>('button[aria-current]');
++      (picker?.getClientRects().length ? picker : selected)?.focus();
++    }
++  };
++  const remove = async () => {
++    const { dialog, getCurrentWindow } = require('@electron/remote');
++    const result = dialog.showMessageBoxSync(getCurrentWindow(), {
++      type: 'warning',
++      message: `删除规则“${draft.name}”？`,
++      detail: '已添加的标签与分类会保留。',
++      buttons: ['取消', '删除规则'],
++      defaultId: 0,
++      cancelId: 0,
++    });
++    if (result === 1) {
++      await work(async () => {
++        await deleteLocalRule({ accountId, id: draft.id }, inboxDesktopAccess);
++        choose(rules[index + 1] || rules[index - 1]);
++        setPreview(null);
++        setNotice('规则已删除。已有标签与分类已保留。');
++      });
++      nameInput.current?.focus();
++    }
++  };
++  const loadPreview = async () => {
++    await work(async () => {
+       const threads = await queryInbox(
+         { accountIds: [accountId], query: search || 'in:inbox', limit: 51 },
+         inboxDesktopAccess
+@@ -161,10 +204,13 @@ function RulesForAccount({
+       );
+       setPreview(result);
+       setChecked([]);
+-      if (threads.length > 50) setNotice('仅预览前 50 个会话，请收窄搜索后再处理更多邮件。');
+-    });
+-  const apply = () =>
+-    work(async () => {
++      if (threads.length > 50) setPreviewNotice('已预览前 50 个会话。收窄搜索可查看更多。');
++      else if (!threads.length) setPreviewNotice('此范围内没有会话。');
++    }, setPreviewNotice);
++    previewButton.current?.focus();
++  };
++  const apply = async () => {
++    await work(async () => {
+       const targets = preview.items
+         .filter((i) => checked.includes(i.threadId) && i.messageId)
+         .map((i) => ({ accountId, threadId: i.threadId, messageId: i.messageId }));
+@@ -173,45 +219,82 @@ function RulesForAccount({
+         inboxDesktopAccess
+       );
+       const failed = result.items.filter((i) => i.status === 'rejected');
+-      setNotice(
++      setPreviewNotice(
+         `${result.items.length - failed.length} / ${result.items.length} 完成${failed.length ? ' · ' + explain(failed[0].error) : ' · 手动指定的分类已保留'}`
+       );
+       setChecked([]);
+       setPreview(null);
+-    });
++    }, setPreviewNotice);
++    previewButton.current?.focus();
++  };
+   const current = rules.find((r) => r.id === draft.id),
+     index = rules.indexOf(current);
++  const hasEnabled = rules.some((rule) => rule.enabled);
+   return (
+     <div className="pr-local-rules">
+       <div className="pr-rule-toolbar">
+-        <span>{rules.filter((r) => r.enabled).length} 条启用 · 按顺序执行</span>
+-        <button disabled={busy || dirty} onClick={() => choose()}>
+-          新建规则
+-        </button>
++        {accountPicker}
++        {rules.length > 0 && (
++          <button
++            type="button"
++            disabled={busy || dirty || !draft.id}
++            onClick={() => {
++              choose();
++              nameInput.current?.focus();
++            }}
++          >
++            新建规则
++          </button>
++        )}
+       </div>
+-      <p>只整理本机标签与分类。标签可以累加，分类采用最后一个匹配结果；手动指定的分类优先。</p>
+-      <div className="pr-rule-layout">
+-        <nav className="pr-rule-sidebar" aria-label="本机邮件规则">
+-          {rules.map((r, i) => (
+-            <button
+-              key={r.id}
+-              data-local-rule={r.id}
+-              aria-current={draft.id === r.id ? 'page' : undefined}
++      <p className="pr-rule-intro">按顺序整理此邮箱在本机的标签与分类。</p>
++      <div className={rules.length ? 'pr-rule-layout' : 'pr-rule-layout empty'}>
++        {rules.length > 0 && (
++          <aside ref={ruleSidebar} className="pr-rule-sidebar" aria-label="已保存的规则">
++            <nav aria-label="规则列表">
++              {rules.map((rule) => (
++                <button
++                  type="button"
++                  key={rule.id}
++                  data-local-rule={rule.id}
++                  aria-current={draft.id === rule.id ? 'true' : undefined}
++                  disabled={busy || dirty}
++                  onClick={() => choose(rule)}
++                >
++                  <span>{rule.name}</span>
++                  <small data-state={rule.syncState}>{ruleStatus[rule.syncState]}</small>
++                </button>
++              ))}
++            </nav>
++            <select
++              className="pr-rule-picker"
++              aria-label="已保存的规则"
+               disabled={busy || dirty}
+-              onClick={() => choose(r)}
++              value={draft.id || ''}
++              onChange={(e) => choose(rules.find((rule) => rule.id === e.target.value))}
+             >
+-              <span>
+-                {i + 1}. {r.name}
+-              </span>
+-              <small>
+-                {r.enabled ? (r.syncState === 'ready' ? '启用' : '等待重新同步 / 保存') : '暂停'}
+-              </small>
+-            </button>
+-          ))}
+-          {!rules.length && <p>从一个条件开始。</p>}
+-        </nav>
++              {!draft.id && <option value="" disabled>新规则</option>}
++              {rules.map((rule) => (
++                <option key={rule.id} value={rule.id}>
++                  {rule.name} · {ruleStatus[rule.syncState]}
++                </option>
++              ))}
++            </select>
++            {rules.length > 1 && (
++              <div className="pr-rule-order" role="group" aria-label="调整规则顺序">
++                <button type="button" disabled={busy || dirty || index <= 0} onClick={(event) => reorder(-1, event.currentTarget)}>
++                  上移
++                </button>
++                <button type="button" disabled={busy || dirty || index < 0 || index === rules.length - 1} onClick={(event) => reorder(1, event.currentTarget)}>
++                  下移
++                </button>
++              </div>
++            )}
++          </aside>
++        )}
+         <form
+           className="pr-local-rule-editor"
++          onChange={() => setNotice('')}
+           onSubmit={(e) => {
+             e.preventDefault();
+             save();
+@@ -221,6 +304,7 @@ function RulesForAccount({
+             规则名称
+             <input
+               id="pr-local-rule-name"
++              ref={nameInput}
+               value={draft.name}
+               maxLength={80}
+               required
+@@ -230,7 +314,7 @@ function RulesForAccount({
+           </label>
+           <div className="pr-rule-clause">
+             <label>
+-              当
++              匹配条件
+               <select
+                 aria-label="匹配字段"
+                 value={draft.field}
+@@ -294,147 +378,129 @@ function RulesForAccount({
+               disabled={busy}
+               onChange={(e) => setDraft({ ...draft, enabled: e.target.checked })}
+             />
+-            保存后启用，仅处理之后的新来信
++            启用后处理新邮件
+           </label>
+           <footer>
+             <button
+               type="submit"
++              className="pr-rule-primary"
+               disabled={busy || (!dirty && (!current?.enabled || current.syncState === 'ready'))}
+             >
+               保存规则
+             </button>
+-            <button type="button" disabled={busy || !dirty} onClick={() => choose(current)}>
++            <button
++              type="button"
++              disabled={busy || !dirty}
++              onClick={() => {
++                choose(current);
++                nameInput.current?.focus();
++              }}
++            >
+               放弃修改
+             </button>
+             {draft.id && (
+-              <>
+-                <button
+-                  type="button"
+-                  disabled={busy || dirty || index <= 0}
+-                  onClick={() => reorder(-1)}
+-                >
+-                  上移
+-                </button>
+-                <button
+-                  type="button"
+-                  disabled={busy || dirty || index === rules.length - 1}
+-                  onClick={() => reorder(1)}
+-                >
+-                  下移
+-                </button>
+-                <button type="button" disabled={busy || dirty} onClick={() => setDeleting(true)}>
+-                  删除
+-                </button>
+-              </>
++              <button type="button" className="pr-rule-delete" disabled={busy || dirty} onClick={remove}>
++                删除规则…
++              </button>
+             )}
+           </footer>
+-          {dirty && <small>有未保存的修改，请先保存或放弃。</small>}
+-          {deleting && (
+-            <div className="pr-rule-delete-confirm" role="alert">
+-              <p>删除规则“{draft.name}”？已经添加的标签与分类会保留。</p>
+-              <button type="button" onClick={() => setDeleting(false)}>
+-                取消
+-              </button>
+-              <button
+-                type="button"
+-                disabled={busy}
+-                onClick={() =>
+-                  work(async () => {
+-                    await deleteLocalRule({ accountId, id: draft.id }, inboxDesktopAccess);
+-                    choose();
+-                    setPreview(null);
+-                  })
+-                }
+-              >
+-                确认删除
+-              </button>
+-            </div>
++          {(notice || dirty) && (
++            <p className="pr-local-rule-notice" role="status" data-dirty={dirty ? 'true' : undefined}>
++              {notice || '有未保存的修改。'}
++            </p>
+           )}
+         </form>
+       </div>
+-      <section className="pr-local-rule-preview">
+-        <h2>处理已有邮件</h2>
+-        <p>预览所有已启用规则，依据每个会话的最新外部来信匹配。勾选后才会应用。</p>
+-        <form
+-          onSubmit={(e) => {
+-            e.preventDefault();
+-            loadPreview();
+-          }}
+-        >
+-          <label className="sr-only" htmlFor="pr-rule-search">
+-            预览范围
+-          </label>
+-          <input
+-            id="pr-rule-search"
+-            value={search}
+-            disabled={busy}
+-            onChange={(e) => {
+-              setSearch(e.target.value);
+-              setPreview(null);
+-              setChecked([]);
+-            }}
+-            placeholder="in:inbox 或搜索关键词"
+-          />
+-          <button disabled={busy || dirty || !rules.some((r) => r.enabled)}>预览匹配</button>
+-        </form>
+-        {preview && (
++      <details className="pr-settings-group pr-local-rule-preview">
++        <summary>处理已有邮件</summary>
++        {hasEnabled ? (
+           <>
+-            <div className="pr-rule-preview-list">
+-              {preview.items.map((item) => (
+-                <label key={item.threadId}>
+-                  <input
+-                    type="checkbox"
+-                    disabled={busy || !item.messageId || !item.ruleIds?.length}
+-                    checked={checked.includes(item.threadId)}
+-                    onChange={(e) =>
+-                      setChecked(
+-                        e.target.checked
+-                          ? [...checked, item.threadId]
+-                          : checked.filter((id) => id !== item.threadId)
+-                      )
+-                    }
+-                  />
+-                  <span>
+-                    <strong>{item.subject || '无主题'}</strong>
+-                    <small>
+-                      {item.status === 'rejected'
+-                        ? explain(item.error)
+-                        : !item.ruleIds.length
+-                          ? '无匹配规则'
+-                          : [
+-                              ...item.labelIds.map(
+-                                (id) =>
+-                                  '标签：' + (labels.find((l) => l.id === id)?.name || '已删除')
+-                              ),
+-                              item.category
+-                                ? item.categoryManual
+-                                  ? '保留手动分类：' + categories[item.currentCategory]
+-                                  : '分类为' + categories[item.category]
+-                                : '',
+-                            ]
+-                              .filter(Boolean)
+-                              .join(' · ')}
+-                    </small>
+-                  </span>
+-                </label>
+-              ))}
+-            </div>
+-            <button disabled={busy || dirty || !checked.length} onClick={apply}>
+-              应用到所选 {checked.length} 个会话
+-            </button>
++            <p>按各会话的最新外部来信匹配已启用的规则。勾选会话后，再点「应用到所选」。</p>
++            <form
++              onSubmit={(e) => {
++                e.preventDefault();
++                loadPreview();
++              }}
++            >
++              <label className="sr-only" htmlFor="pr-rule-search">
++                预览范围
++              </label>
++              <input
++                id="pr-rule-search"
++                value={search}
++                disabled={busy}
++                onChange={(e) => {
++                  setSearch(e.target.value);
++                  setPreview(null);
++                  setChecked([]);
++                  setPreviewNotice('');
++                }}
++                placeholder="in:inbox 或搜索关键词"
++              />
++              <button ref={previewButton} type="submit" disabled={busy || dirty}>预览匹配</button>
++            </form>
++            {!!preview?.items.length && (
++              <>
++                <div className="pr-rule-preview-list">
++                  {preview.items.map((item) => (
++                    <label key={item.threadId}>
++                      <input
++                        type="checkbox"
++                        disabled={busy || !item.messageId || !item.ruleIds?.length}
++                        checked={checked.includes(item.threadId)}
++                        onChange={(e) =>
++                          setChecked(
++                            e.target.checked
++                              ? [...checked, item.threadId]
++                              : checked.filter((id) => id !== item.threadId)
++                          )
++                        }
++                      />
++                      <span>
++                        <strong>{item.subject || '无主题'}</strong>
++                        <small>
++                          {item.status === 'rejected'
++                            ? explain(item.error)
++                            : !item.ruleIds.length
++                              ? '无匹配规则'
++                              : [
++                                  ...item.labelIds.map(
++                                    (id) =>
++                                      '标签：' + (labels.find((l) => l.id === id)?.name || '已删除')
++                                  ),
++                                  item.category
++                                    ? item.categoryManual
++                                      ? '保留手动分类：' + categories[item.currentCategory]
++                                      : '分类为' + categories[item.category]
++                                    : '',
++                                ]
++                                  .filter(Boolean)
++                                  .join(' · ')}
++                        </small>
++                      </span>
++                    </label>
++                  ))}
++                </div>
++                <button type="button" className="pr-rule-primary" disabled={busy || dirty || !checked.length} onClick={apply}>
++                  应用到所选 {checked.length} 个会话
++                </button>
++              </>
++            )}
+           </>
++        ) : (
++          <p>先保存并启用一条规则，再预览已有邮件。</p>
+         )}
+-      </section>
+-      {notice && (
+-        <p className="pr-local-rule-notice" role="status">
+-          {notice}
+-        </p>
+-      )}
+-      <details className="pr-rule-notes">
++        {previewNotice && (
++          <p className="pr-local-rule-notice" role="status">
++            {previewNotice}
++          </p>
++        )}
++      </details>
++      <details className="pr-settings-group pr-rule-notes">
+         <summary>执行范围与旧版规则</summary>
+         <p>
+-          仅在应用运行时处理同步后的新收件箱邮件，不回填历史缓存。暂停或修改规则不撤销旧结果。旧版上游规则保留，在
+-          Paper Reed 模式下暂停执行，不会自动迁移。
++          应用运行时处理同步后的新收件箱邮件。多个标签可以累加，分类取最后一个匹配结果，手动分类优先。
++          暂停或修改规则不会撤销旧结果。旧版规则仍保留，在 Paper Reed 模式下暂停执行。
+         </p>
+       </details>
+     </div>
+@@ -442,6 +508,7 @@ function RulesForAccount({
+ }
+ export default function LocalRulesSettings() {
+   const [dirty, setDirty] = useState(false);
++  const restoreAccountFocus = useRef(false);
+   const [accounts, setAccounts] = useState(AccountStore.accounts()),
+     [accountId, setAccountId] = useState(AccountStore.accountIds()[0] || '');
+   useEffect(() => {
+@@ -457,22 +524,37 @@ export default function LocalRulesSettings() {
+   if (!accountId) return <div className="pr-settings-empty">添加邮箱后，就可以设置本机规则。</div>;
+   return (
+     <div className="pr-rules">
+-      <label className="pr-local-rule-account">
+-        应用于
+-        <select
+-          aria-label="规则邮箱"
+-          disabled={dirty}
+-          value={accountId}
+-          onChange={(e) => setAccountId(e.target.value)}
+-        >
+-          {accounts.map((a) => (
+-            <option value={a.id} key={a.id}>
+-              {a.emailAddress}
+-            </option>
+-          ))}
+-        </select>
+-      </label>
+-      <RulesForAccount key={accountId} accountId={accountId} onDirty={setDirty} />
++      <RulesForAccount
++        key={accountId}
++        accountId={accountId}
++        onDirty={setDirty}
++        accountPicker={
++          <label className="pr-local-rule-account">
++            邮箱
++            <select
++              aria-label="规则邮箱"
++              ref={(select) => {
++                if (select && restoreAccountFocus.current) {
++                  restoreAccountFocus.current = false;
++                  select.focus();
++                }
++              }}
++              disabled={dirty}
++              value={accountId}
++              onChange={(e) => {
++                restoreAccountFocus.current = document.activeElement === e.currentTarget;
++                setAccountId(e.target.value);
++              }}
++            >
++              {accounts.map((a) => (
++                <option value={a.id} key={a.id}>
++                  {a.emailAddress}
++                </option>
++              ))}
++            </select>
++          </label>
++        }
++      />
+     </div>
+   );
+ }
+diff --git a/app/internal_packages/paper-reed/styles/paper-reed.less b/app/internal_packages/paper-reed/styles/paper-reed.less
+index dde321a..aab999c 100644
+--- a/app/internal_packages/paper-reed/styles/paper-reed.less
++++ b/app/internal_packages/paper-reed/styles/paper-reed.less
+@@ -721,34 +721,67 @@
+   .pr-classification-status { display:block; margin:0 10px 8px; color:#626b60; font-size:11px; }
+ }
+ .preferences-wrap.pr-preferences .pr-settings-page {
+-  .pr-local-rule-account { display:flex; gap:12px; align-items:center; margin-bottom:20px; }
+-  .pr-local-rule-account select { margin:0; }
+-  .pr-local-rules .pr-rule-sidebar { display:flex; flex-direction:column; gap:5px; }
+-  .pr-local-rules .pr-rule-sidebar button { text-align:left; padding:10px; border:0; background:transparent; }
+-  .pr-local-rules .pr-rule-sidebar button[aria-current] { background:#e9eee5; }
+-  .pr-local-rules .pr-rule-sidebar small { display:block; font-size:10px; color:#626b60; margin-top:4px; }
++  .pr-local-rules .pr-rule-toolbar { justify-content:space-between; gap:8px 12px; }
++  .pr-local-rule-account { display:flex; flex:1; gap:8px; align-items:center; min-width:0; margin:0; white-space:nowrap; }
++  .pr-local-rule-account select { flex:0 1 270px; min-width:0; margin:0; }
++  .pr-local-rules .pr-rule-toolbar > button { white-space:nowrap; }
++  .pr-local-rules .pr-rule-intro { margin:8px 0 0; }
++  .pr-local-rules .pr-rule-layout { gap:24px; margin:20px 0; }
++  .pr-local-rules .pr-rule-layout.empty { grid-template-columns:minmax(0,560px); }
++  .pr-local-rules .pr-rule-sidebar { min-width:0; }
++  .pr-local-rules .pr-rule-sidebar nav button { padding:8px; }
++  .pr-local-rules .pr-rule-sidebar small { margin-top:2px; font-size:11px; }
++  .pr-local-rules .pr-rule-sidebar small[data-state='ready'] { color:#4b634f; }
++  .pr-local-rules .pr-rule-sidebar small[data-state='needs-sync'],
++  .pr-local-rules .pr-rule-sidebar small[data-state='mailbox-reset'] { color:#795e3a; }
++  .pr-local-rules .pr-rule-sidebar small::before {
++    content:'';
++    display:inline-block;
++    width:5px;
++    height:5px;
++    border-radius:50%;
++    background:currentColor;
++    margin-right:5px;
++    vertical-align:middle;
++  }
++  .pr-local-rules .pr-rule-picker { display:none; }
++  .pr-local-rules .pr-rule-order { flex-shrink:0; margin-top:8px; }
+   .pr-local-rule-editor { min-width:0; }
+-  .pr-local-rule-editor > label, .pr-rule-clause label { display:flex; flex-direction:column; gap:8px; margin-bottom:20px; font-size:12px; }
++  .pr-local-rule-editor > label, .pr-rule-clause label {
++    display:flex;
++    flex-direction:column;
++    gap:6px;
++    margin-bottom:14px;
++    font-size:12px;
++  }
+   .pr-local-rule-editor input:not([type=checkbox]), .pr-local-rule-editor select { width:100%; margin:0; }
+-  .pr-rule-clause { display:grid; grid-template-columns:140px minmax(0,1fr); gap:16px; }
++  .pr-rule-clause { display:flex; flex-wrap:wrap; gap:0 12px; }
++  .pr-rule-clause label { flex:1 1 125px; min-width:0; }
++  .pr-rule-clause label + label { flex:3 1 150px; }
+   .pr-local-rule-editor .pr-rule-enabled { flex-direction:row; align-items:center; }
+-  .pr-local-rule-editor footer { display:flex; flex-wrap:wrap; gap:8px; border-top:1px solid #dfe2d9; padding-top:16px; }
+-  .pr-local-rule-editor > small { display:block; margin-top:8px; color:#626b60; }
+-  .pr-local-rule-preview { margin-top:32px; border-top:1px solid #dfe2d9; padding-top:20px; }
+-  .pr-local-rule-preview form { display:flex; gap:8px; margin-bottom:16px; }
+-  .pr-local-rule-preview form input { flex:1; min-width:0; margin:0; }
+-  .pr-rule-preview-list { margin-bottom:16px; }
++  .pr-local-rule-editor footer { display:flex; flex-wrap:wrap; gap:8px; border-top:1px solid #dfe2d9; padding-top:12px; }
++  .pr-local-rules button.pr-rule-primary:enabled { background:#4b634f; color:#fffefa; border-color:#4b634f; }
++  .pr-local-rules button.pr-rule-primary:enabled:hover { background:#3d5442; border-color:#3d5442; }
++  .pr-local-rules button.pr-rule-delete { margin-left:auto; color:#9a433e; }
++  .pr-local-rules button.pr-rule-delete:enabled:hover { background:#f7eeea; }
++  .pr-local-rules button:disabled:not([aria-current]):hover { background:transparent; }
++  .pr-local-rule-preview form { display:flex; flex-wrap:wrap; gap:8px; margin-bottom:12px; }
++  .pr-local-rule-preview form input { flex:1 1 140px; min-width:0; margin:0; }
++  .pr-rule-preview-list { margin-bottom:12px; }
+   .pr-rule-preview-list label { display:flex; gap:12px; align-items:center; padding:12px 0; border-bottom:1px solid #eceee7; }
+   .pr-rule-preview-list label > span { min-width:0; }
+   .pr-rule-preview-list strong { font-size:12px; font-weight:500; display:block; overflow:hidden; text-overflow:ellipsis; white-space:nowrap; }
+   .pr-rule-preview-list small { display:block; color:#626b60; font-size:11px; margin-top:4px; }
+-  .pr-local-rule-notice { color:#4b634f; padding:12px 0; }
+-  .pr-rule-notes { margin-top:24px; font-size:11px; color:#626b60; }
+-  @media(max-width:1100px) { .pr-local-rules .pr-rule-sidebar { flex-direction:row; overflow:auto; } .pr-local-rules .pr-rule-sidebar button { min-width:160px; } }
+-}
+-.preferences-wrap.pr-preferences .pr-settings-page {
+-  .pr-local-rule-preview h2 { font-size:14px; line-height:22px; font-weight:500; margin:0 0 8px; }
+-  .pr-local-rule-notice { position:sticky; bottom:0; background:#faf9f6; border-top:1px solid #dfe2d9; }
++  .pr-local-rules .pr-local-rule-notice { margin:8px 0 0; }
++  .pr-local-rules .pr-local-rule-notice[data-dirty] { color:#795e3a; }
++  .pr-rule-notes p { margin:0; }
++  @media(max-width:1100px) {
++    .pr-local-rules .pr-rule-layout { gap:12px; margin:14px 0 20px; }
++    .pr-local-rules .pr-rule-sidebar { display:flex; flex-wrap:wrap; align-items:center; gap:8px; padding-bottom:12px; }
++    .pr-local-rules .pr-rule-sidebar nav { display:none; }
++    .pr-local-rules .pr-rule-picker { display:block; flex:1 1 130px; min-width:0; margin:0; }
++    .pr-local-rules .pr-rule-order { margin:0; }
++  }
+ }
+ 
+ .paper-reed-enabled .pr-sync-status {
