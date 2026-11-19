@@ -1,0 +1,302 @@
+diff --git a/app/internal_packages/composer/lib/composer-header.tsx b/app/internal_packages/composer/lib/composer-header.tsx
+index 6bf36c1..138bf0d 100644
+--- a/app/internal_packages/composer/lib/composer-header.tsx
++++ b/app/internal_packages/composer/lib/composer-header.tsx
+@@ -139,7 +139,7 @@ export class ComposerHeader extends React.Component<ComposerHeaderProps, Compose
+     if (AppEnv.config.get('core.paperReed.enabled')) return (
+       <div className="pr-subject-heading">
+         <textarea aria-label="邮件主题" placeholder="邮件主题" rows={1}
+-          ref={el => { if (el) { this._els[Fields.Subject] = el; el.style.height = 'auto'; el.style.height = `${el.scrollHeight}px`; } }}
++          ref={el => { this._els[Fields.Subject] = el; }}
+           value={this.props.draft.subject} onChange={this._onSubjectChange}
+           onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); this.showAndFocusField(Fields.To); } }} />
+       </div>
+diff --git a/app/internal_packages/composer/lib/composer-view.tsx b/app/internal_packages/composer/lib/composer-view.tsx
+index 7753043..0fe398e 100644
+--- a/app/internal_packages/composer/lib/composer-view.tsx
++++ b/app/internal_packages/composer/lib/composer-view.tsx
+@@ -9,6 +9,7 @@ import {
+   Utils,
+   Actions,
+   DraftStore,
++  AttachmentStore,
+   DraftEditingSession,
+   MessageWithEditorState,
+   DragDropTypes,
+@@ -518,14 +519,15 @@ export default class ComposerView extends React.Component<ComposerViewProps, Com
+   };
+ 
+   copyForAgent = async () => {
+-    if (!cliStatus().ready) {
+-      Actions.switchPreferencesTab('MCP');
+-      Actions.openPreferences();
+-      return;
+-    }
+     try {
++      await AttachmentStore.waitForDraftAttachments(this.props.session.headerMessageId);
+       await this.props.session.changes.commit();
+       if (this.props.session.changes.isDirty()) throw new Error('new-edits');
++      if (!cliStatus().ready) {
++        Actions.switchPreferencesTab('MCP');
++        Actions.openPreferences();
++        return;
++      }
+       const draft = this.props.session.draft();
+       await clipboard.writeText(
+         agentHandoff({
+diff --git a/app/internal_packages/paper-reed/lib/mail-search.tsx b/app/internal_packages/paper-reed/lib/mail-search.tsx
+index 4f39104..56cc782 100644
+--- a/app/internal_packages/paper-reed/lib/mail-search.tsx
++++ b/app/internal_packages/paper-reed/lib/mail-search.tsx
+@@ -9,6 +9,7 @@ export default class MailSearch extends React.Component<{
+   state = { text: this.props.query, pending: false };
+   timer: ReturnType<typeof setTimeout>;
+   composing = false;
++  input = React.createRef<HTMLInputElement>();
+   componentDidUpdate(previous: Readonly<typeof this.props>) {
+     if (previous.query !== this.props.query && this.props.query !== this.state.text.trim()) {
+       clearTimeout(this.timer);
+@@ -34,7 +35,7 @@ export default class MailSearch extends React.Component<{
+         event.preventDefault(); this.submit();
+       }}>
+         <label className="sr-only" htmlFor="pr-mail-search">搜索本机邮件</label>
+-        <input id="pr-mail-search" className="pr-search-input" value={this.state.text}
++        <input ref={this.input} id="pr-mail-search" className="pr-search-input" value={this.state.text}
+           placeholder="搜索邮件 · 发件人、主题或正文"
+           onChange={(event) => this.change(event.target.value)}
+           onBlur={() => { if (this.state.pending) this.submit(); }}
+@@ -45,6 +46,7 @@ export default class MailSearch extends React.Component<{
+           clearTimeout(this.timer);
+           this.setState({ text: '', pending: false });
+           this.props.onSearch('');
++          this.input.current?.focus();
+         }}>清除</button>}
+       </form>
+     );
+diff --git a/app/internal_packages/paper-reed/lib/workspace.tsx b/app/internal_packages/paper-reed/lib/workspace.tsx
+index ec4c612..0686160 100644
+--- a/app/internal_packages/paper-reed/lib/workspace.tsx
++++ b/app/internal_packages/paper-reed/lib/workspace.tsx
+@@ -671,10 +671,8 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+               <span>{selected.length ? `已选 ${selected.length} 个会话` : '选择当前列表'}</span>
+             </label>
+           )}
+-          {!selected.length && (
+-            <span className="pr-search-scope">
+-              {this.state.query ? '当前邮箱范围 · 本机已同步邮件' : '快捷键随设置方案生效 · 命令面板 ⌘K'}
+-            </span>
++          {!selected.length && this.state.query && (
++            <span className="pr-search-scope">当前邮箱范围 · 本机已同步邮件</span>
+           )}
+           {(this.state.folder !== 'drafts' || this.state.query) && (
+             <label className="pr-unread-filter">
+@@ -691,6 +689,15 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+               仅未读
+             </label>
+           )}
++          <p className="pr-list-caption">
++            <span className="sr-only">
++              {this.state.accountId
++                ? AccountStore.accountForId(this.state.accountId)?.emailAddress
++                : '所有已连接邮箱'}
++            </span>
++            {this.state.rows.length}{this.state.more ? '+' : ''} 个
++            {this.state.folder === 'drafts' && !this.state.query ? '草稿' : '会话'}
++          </p>
+         </div>
+         {this.renderLocalControls()}
+         {!!selected.length && (
+@@ -1056,12 +1063,18 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                   ‹ 返回{this.state.query ? '搜索结果' : this.locationTitle()}
+                 </button>
+               )}
+-              <button
+-                className="pr-agent-button"
+-                onClick={() => this.setState({ agent: !agent, copied: false })}
+-              >
+-                {cliStatus().ready ? '交给 Agent ↗' : '连接 Agent ↗'}
+-              </button>
++              {(route !== 'compose' || agent) && (
++                <button
++                  className="pr-agent-button"
++                  aria-expanded={agent}
++                  onClick={() => this.setState({ agent: !agent, copied: false }, () => {
++                    if (agent && route === 'compose')
++                      document.querySelector<HTMLElement>('.pr-editor .pr-copy-agent')?.focus();
++                  })}
++                >
++                  {agent ? '收起交接' : cliStatus().ready ? '交给 Agent ↗' : '连接 Agent ↗'}
++                </button>
++              )}
+             </div>
+             {this.renderSyncStatus()}
+             {this.state.labelManager && (
+@@ -1071,9 +1084,6 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                 onClose={() => this.setState({ labelManager: false })}
+               />
+             )}
+-            {route === 'thread' &&
+-              selected &&
+-              this.renderLocalControls([{ accountId: selected.accountId, threadId: selected.id }])}
+             {this.renderMailReceipt()}
+             {this.state.notice && (
+               <div className="pr-notice" role="alert">
+@@ -1105,16 +1115,6 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+             {route === 'list' ? (
+               <>
+                 {this.renderListTools()}
+-                <p className="pr-list-caption">
+-                  {this.state.accountId
+-                    ? AccountStore.accountForId(this.state.accountId)?.emailAddress
+-                    : '所有已连接邮箱'}
+-                  <span>
+-                    {rows.length}
+-                    {this.state.more ? '+' : ''} 个
+-                    {folder === 'drafts' && !this.state.query ? '草稿' : '会话'}
+-                  </span>
+-                </p>
+                 <div className="pr-mail-list" aria-label={title} aria-busy={loading}>
+                   {rows.map(this.renderRow)}
+                   {!rows.length && (
+@@ -1139,6 +1139,8 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+               </>
+             ) : route === 'thread' ? (
+               <div className="pr-reader">
++                {selected &&
++                  this.renderLocalControls([{ accountId: selected.accountId, threadId: selected.id }])}
+                 <MessageList />
+               </div>
+             ) : (
+diff --git a/app/internal_packages/paper-reed/styles/paper-reed.less b/app/internal_packages/paper-reed/styles/paper-reed.less
+index 785e70c..eb31d8e 100644
+--- a/app/internal_packages/paper-reed/styles/paper-reed.less
++++ b/app/internal_packages/paper-reed/styles/paper-reed.less
+@@ -29,9 +29,9 @@
+   .pr-main h1 { margin: 0; font: 500 26px/38px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif; letter-spacing: -.4px; }
+   .pr-page-head .pr-agent-button { color: var(--pr-muted); font-size: 12px; }
+   .pr-page-head .pr-back { padding-left: 0; color: var(--pr-muted); }
+-  .pr-list-caption { display: flex; justify-content: space-between; color: var(--pr-muted); font-size: 12px; margin: 0 0 24px; }
+-  .pr-mail-list { border-top: 1px solid var(--pr-line); }
+-  .pr-workspace .pr-mail-row { width: 100%; display: grid; grid-template-columns: 32px 148px minmax(0, 1fr) 78px; align-items: center; gap: 12px; min-height: 68px; padding: 12px 0; border-bottom: 1px solid var(--pr-line); border-radius: 0; text-align: left; }
++  .pr-list-caption { margin: 0; white-space: nowrap; }
++  .pr-mail-list { container-type: inline-size; border-top: 1px solid var(--pr-line); }
++  .pr-workspace .pr-mail-row { width: 100%; display: grid; grid-template-columns: 32px clamp(104px, 15%, 148px) minmax(0, 1fr) 78px; align-items: center; gap: 12px; min-height: 68px; padding: 12px 0; border-bottom: 1px solid var(--pr-line); border-radius: 0; text-align: left; }
+   .pr-avatar { width: 32px; height: 32px; border: 1.5px solid; border-radius: 50%; padding: 3px; box-sizing: border-box; }
+   .pr-avatar > span { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: var(--pr-inset); border-radius: 50%; color: var(--pr-muted); font-size: 11px; }
+   .pr-sender { align-self: start; padding-top: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+@@ -45,12 +45,17 @@
+   .pr-load-more { display: block; margin: 20px auto; }
+   .pr-notice, .pr-agent-panel { border-left: 2px solid var(--pr-reed); padding: 12px 16px; background: var(--pr-inset); margin: 12px 0 20px; }
+   .pr-notice button { margin-left: 12px; }
++  .pr-route-thread .pr-agent-panel, .pr-route-compose .pr-agent-panel { max-width: 640px; margin-inline: auto; }
+   .pr-agent-panel strong { font-weight: 500; }
+   .pr-agent-panel p { margin: 6px 0 8px; color: var(--pr-muted); }
+   .pr-agent-panel small { display: block; margin-top: 8px; color: var(--pr-muted); }
+   .pr-editor, .pr-reader { max-width: 640px; margin: 28px auto 0; }
+   .pr-editor h1 { margin-bottom: 24px; }
+   .pr-reader { min-height: 400px; }
++  .pr-reader > .pr-local-controls { margin-bottom: 20px; padding-bottom: 8px; border-bottom: 1px solid var(--pr-line); }
++  .pr-reader > .pr-local-controls .pr-local-buttons button:first-child { padding-inline: 6px; }
++  .pr-reader > .pr-local-controls .pr-category-select select { width: 72px; }
++  .pr-reader > .pr-local-controls .pr-classification-status { margin-left: 0; }
+   .pr-reader #message-list { height: auto; min-height: 400px; background: transparent; }
+   .pr-reader #message-list .messages-wrap { position: static; overflow: visible; height: auto; padding: 0; background: transparent; }
+   .pr-reader #message-list .message-item-wrap { padding: 0; margin-bottom: 24px; }
+@@ -76,11 +81,23 @@
+   @media (max-width: 1000px) {
+     .pr-sidebar { width: 144px; padding-left: 12px; padding-right: 12px; }
+     .pr-main { padding-left: 24px; padding-right: 24px; }
+-    .pr-workspace .pr-mail-row { grid-template-columns: 32px minmax(0, 1fr) 70px; gap: 0 12px; min-height: 88px; padding: 10px 0; }
+-    .pr-avatar { grid-row: ~"1 / 3"; }
+-    .pr-sender { grid-column: 2; }
+-    .pr-date { grid-column: 3; grid-row: 1; }
+-    .pr-summary { grid-column: ~"2 / 4"; grid-row: 2; }
++  }
++  @container (max-width: 599px) {
++    .pr-workspace .pr-mail-list .pr-mail-row {
++      grid-template-columns: 32px minmax(0, 1fr) auto;
++      grid-template-areas: "avatar sender date" "avatar summary summary";
++      align-content: center;
++      gap: 2px 12px;
++      min-height: 88px;
++      padding: 10px 0;
++    }
++    .pr-avatar { grid-area: avatar; }
++    .pr-summary .pr-subject { font-weight: 500; }
++    .unread .pr-summary .pr-subject { font-weight: 600; }
++    .pr-sender { grid-area: sender; font-size: 12px; color: var(--pr-muted); }
++    .unread .pr-sender { color: var(--pr-ink); }
++    .pr-date { grid-area: date; }
++    .pr-summary { grid-area: summary; }
+   }
+ }
+ .paper-reed-enabled {
+@@ -111,7 +128,7 @@
+ .paper-reed-enabled {
+   .pr-composer { max-width: 640px; width: 100%; margin: 0 auto; color: var(--pr-ink); }
+   .pr-composer .pr-subject-heading { margin: 0 0 22px; }
+-  .pr-composer .pr-subject-heading textarea { display: block; box-sizing: border-box; width: 100%; min-height: 38px; padding: 0; border: 0; border-radius: 0; resize: none; overflow: hidden; background: transparent; color: var(--pr-ink); font: 500 26px/38px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif; letter-spacing: -.4px; box-shadow: none; }
++  .pr-composer .pr-subject-heading textarea { display: block; box-sizing: border-box; width: 100%; min-height: 38px; field-sizing: content; padding: 0; border: 0; border-radius: 0; resize: none; overflow: hidden; background: transparent; color: var(--pr-ink); font: 500 26px/38px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif; letter-spacing: -.4px; box-shadow: none; }
+   .pr-composer .pr-subject-heading textarea:focus { outline: none; box-shadow: 0 1px var(--pr-line); }
+   .pr-composer .pr-subject-heading textarea::placeholder { color: var(--pr-muted); }
+   .pr-composer .composer-header-actions { float: none; position: relative; display: flex; justify-content: flex-end; min-height: 28px; padding: 0 0 4px; gap: 14px; }
+@@ -132,7 +149,7 @@
+   .pr-composer .compose-body { margin-top: 24px; }
+   .pr-composer .RichEditor-root { padding-left: 0; padding-right: 0; }
+   .pr-composer .RichEditor-content { padding-top: 0; }
+-  .pr-composer [contenteditable] { font-size: 15px; line-height: 28px; min-height: 240px; }
++  .pr-composer [contenteditable] { font-size: 15px; line-height: 28px; min-height: 200px; }
+   .pr-reader .pr-composer [contenteditable] { min-height: 160px; }
+   .pr-composer:not(.pr-format-open) .RichEditor-toolbar { display: none; }
+   .pr-composer.pr-format-open .RichEditor-toolbar { margin-bottom: 16px; }
+@@ -162,7 +179,20 @@
+   .pr-compose-more[open] > button { position: absolute; right: 0; bottom: 38px; min-width: 100px; padding: 10px 12px; background: #fffefa; border: 1px solid var(--pr-line); z-index: 10; }
+   .pr-agent-receipt { margin: 10px 0 0; color: var(--pr-muted); font-size: 11px; line-height: 18px; }
+   .composer-full-window .pr-composer { padding: 20px 24px; box-sizing: content-box; width: calc(~'100% - 48px'); }
+-  @media (max-width: 800px) { .pr-compose-actions { gap: 8px; } .pr-format-toggle span { display: none; } }
++  .pr-editor { margin-top: 12px; }
++  .pr-editor .composer-body-wrap { min-height: 0; }
++  .pr-editor .pr-composer [contenteditable] { min-height: clamp(80px, calc(100vh - 670px), 200px); }
++  .pr-editor .pr-composer .pr-draft-status:not(.needs-attention) { margin-bottom: 8px; }
++  .pr-editor .pr-composer .pr-subject-heading { margin-bottom: 12px; }
++  .pr-editor .pr-composer .composer-participant-field { min-height: 42px; }
++  .pr-editor .pr-composer .composer-participant-field .tokenizing-field-wrap { padding: 6px 0; }
++  .pr-editor .pr-composer .compose-body { margin-top: 16px; }
++  .pr-editor .pr-composer .composer-action-bar-wrap { margin-top: 16px; padding: 12px 0; }
++  @media (max-width: 800px) {
++    .pr-editor .pr-composer .pr-subject-heading textarea { font-size: 23px; line-height: 32px; }
++    .pr-compose-actions { gap: 8px; }
++    .pr-format-toggle span { display: none; }
++  }
+ }
+ 
+ // Recipient suggestions, signature picker and formatting share the paper surface.
+@@ -532,9 +562,26 @@
+ }
+ 
+ .paper-reed-enabled .pr-workspace {
+-  .pr-search { display:flex; align-items:center; gap:12px; border-bottom:1px solid var(--pr-line); margin:22px 0 16px; padding-bottom:12px; }
++  .pr-search {
++    display: flex;
++    align-items: center;
++    gap: 8px;
++    max-width: 560px;
++    margin: 16px 0 12px;
++    padding: 0 10px 0 12px;
++    border: 1px solid var(--pr-line);
++    border-radius: 6px;
++    background: var(--pr-inset);
++  }
++  .pr-search:focus-within {
++    border-color: var(--pr-reed);
++    box-shadow: 0 0 0 1px var(--pr-reed);
++    background: var(--pr-paper);
++  }
++  .pr-search > [role=status] { color: var(--pr-muted); font-size: 11px; white-space: nowrap; }
+   .pr-search-input { flex:1; min-width:0; border:0; box-shadow:none; padding:6px 0; font:14px/22px -apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif; color:var(--pr-ink); background:transparent; }
+-  .pr-search-input:focus { outline:none; box-shadow:0 1px var(--pr-reed); }
++  .pr-search-input:focus { outline:none; box-shadow:none; }
++  .pr-search button:hover { background: rgba(63, 75, 60, .08); color: var(--pr-ink); }
+   .pr-search button { color:var(--pr-muted); white-space:nowrap; } .pr-search kbd { margin-left:8px; font:inherit; opacity:.65; }
+   .pr-list-tools { margin-bottom:8px; display:flex; flex-wrap:wrap; align-items:center; gap:12px 24px; min-height:28px; font-size:11px; color:var(--pr-muted); }
+   .pr-list-tools label { display:flex; align-items:center; gap:8px; cursor:pointer; }

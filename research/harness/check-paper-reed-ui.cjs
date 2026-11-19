@@ -17,15 +17,50 @@ module.exports=async({app,main,cdp,work,account,cli,click,evaluate,until,restart
  await screenshot('inbox');
  await cdp.send('Emulation.setDeviceMetricsOverride',{width:900,height:700,deviceScaleFactor:1,mobile:false});
  await screenshot('inbox-compact');
- const compact=await evaluate(cdp,`(()=>{const row=document.querySelector('.pr-mail-row'),subject=row.querySelector('.pr-summary');return {row:row.getBoundingClientRect().toJSON(),subject:subject.getBoundingClientRect().toJSON(),overflow:document.documentElement.scrollWidth>innerWidth};})()`);
- assert(!compact.overflow);assert(compact.subject.width>300,'Compact subject must not collapse into avatar column');
+ const listLayout=()=>evaluate(cdp,`(()=>{
+   const row=document.querySelector('.pr-mail-row');
+   const sender=row.querySelector('.pr-sender').getBoundingClientRect();
+   const summary=row.querySelector('.pr-summary').getBoundingClientRect();
+   const date=row.querySelector('.pr-date').getBoundingClientRect();
+   return {senderTop:sender.top,summaryTop:summary.top,width:summary.width,
+     dateRight:date.right,rowRight:row.getBoundingClientRect().right,
+     overflow:document.documentElement.scrollWidth>innerWidth};
+ })()`);
+ const compact=await listLayout();
+ assert(!compact.overflow);
+ assert.equal(compact.senderTop,compact.summaryTop,'900px window keeps horizontal scanning');
+ assert(compact.width>300,'Split-window subject stays readable');
+ await cdp.send('Emulation.setDeviceMetricsOverride',{width:740,height:700,deviceScaleFactor:1,mobile:false});
+ await evaluate(cdp,'new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');
+ const narrow=await listLayout();
+ assert(!narrow.overflow);
+ assert(narrow.summaryTop>narrow.senderTop,'Narrow content stacks sender above subject');
+ assert.equal(narrow.dateRight,narrow.rowRight,'Date stays on the trailing edge in the stacked layout');
+ await frame('inbox-narrow');
  await cdp.send('Emulation.setDeviceMetricsOverride',{width:1440,height:900,deviceScaleFactor:1,mobile:false});
+ const search=main.locator('.pr-search-input');
+ await search.fill('Project kickoff');
+ await until(()=>evaluate(cdp,`document.querySelectorAll('.pr-mail-row').length===1 &&
+   document.querySelector('.pr-mail-row').innerText.includes('Project kickoff')`),'live search results');
+ await main.locator('.pr-search button').click();
+ assert(await evaluate(cdp,'document.activeElement === document.querySelector(".pr-search-input")'),'Clear returns focus to search');
+ await until(()=>evaluate(cdp,'document.querySelectorAll(".pr-mail-row").length===8'),'cleared live search');
  await action('.pr-mail-row');
  await until(()=>evaluate(cdp,'!!document.querySelector(".pr-reader .messages-wrap.ready .message-item-wrap")'),'reader');
+ assert.equal(await main.locator('.pr-reader > .pr-local-controls').count(),1);
  await until(()=>evaluate(cdp,'Array.from(document.querySelectorAll("iframe")).some(e=>e.contentDocument?.body?.innerText.includes("Does the row"))'),'isolated message body');
  const readerWidth=await evaluate(cdp,'document.querySelector(".pr-reader").getBoundingClientRect().width');
  assert.equal(readerWidth,640);
  await screenshot('thread');
+ await cdp.send('Emulation.setDeviceMetricsOverride',{width:740,height:700,deviceScaleFactor:1,mobile:false});
+ await main.locator('[data-local-panel=snooze]').click();
+ const snoozePanel=main.locator('.pr-reader .pr-local-panel');
+ await snoozePanel.waitFor();
+ assert(await evaluate(cdp,`(()=>{const panel=document.querySelector('.pr-reader .pr-local-panel');return panel.scrollWidth<=panel.clientWidth;})()`),'Snooze fits the narrow reader');
+ await frame('thread-narrow');
+ await main.keyboard.press('Escape');
+ await snoozePanel.waitFor({state:'hidden'});
+ await cdp.send('Emulation.setDeviceMetricsOverride',{width:1440,height:900,deviceScaleFactor:1,mobile:false});
  await action('.footer-reply-area-wrap');
  await until(()=>evaluate(cdp,'!!document.querySelector(".pr-draft-status")'),'inline reply composer');
  await edit('Reply layout verification.');
@@ -52,6 +87,18 @@ module.exports=async({app,main,cdp,work,account,cli,click,evaluate,until,restart
  const titleHeight=await evaluate(cdp,'document.querySelector(".pr-subject-heading textarea").getBoundingClientRect().height');
  assert(titleHeight>=76,'Long subject wraps');
  await screenshot('long-subject');
+ for (const [width,height] of [[740,700],[900,700],[900,760],[900,768],[900,820],[1440,900]]) {
+   await cdp.send('Emulation.setDeviceMetricsOverride',{width,height,deviceScaleFactor:1,mobile:false});
+   await evaluate(cdp,`new Promise(resolve=>requestAnimationFrame(()=>{
+     document.querySelector('.pr-main').scrollTop=0;
+     requestAnimationFrame(resolve);
+   }))`);
+   const toolbarBottom=await evaluate(cdp,`Math.ceil(document.querySelector('.pr-editor .pr-compose-actions').getBoundingClientRect().bottom)`);
+   assert(toolbarBottom<=height,`Draft actions visible without scrolling at ${width}×${height} (bottom = ${toolbarBottom})`);
+   if (width===740) await frame('long-subject-narrow');
+   if (height===768) await frame('long-subject-768');
+ }
+ await cdp.send('Emulation.setDeviceMetricsOverride',{width:1440,height:900,deviceScaleFactor:1,mobile:false});
  await main.keyboard.press('Meta+A');await main.keyboard.insertText(created.subject);
  await edit('Paper Reed GUI edit — preserve this version.');
  assert((await text()).includes('尚未保存'));
@@ -98,16 +145,33 @@ module.exports=async({app,main,cdp,work,account,cli,click,evaluate,until,restart
  await action('[data-mailbox="drafts"]');
  await action(`[data-draft-id="${created.draftId}"]`);
  await until(()=>evaluate(cdp,'!!document.querySelector(".pr-editor [contenteditable=true]")'),'original restored');
+ await edit('Unsaved edit before Agent setup');
+ const firstAgentAction=main.getByRole('button',{name:'连接 Agent',exact:true});
+ await firstAgentAction.click();
+ await until(()=>evaluate(cdp,'!document.querySelector(".pr-workspace")'),'unsaved draft saved and Agent preferences opened');
+ assert((await cli('draft-get',ref)).body.includes('Unsaved edit before Agent setup'));
+ await evaluate(cdp,'require("mailspring-exports").Actions.selectRootSheet(require("mailspring-exports").WorkspaceStore.Sheet.Threads);true');
+ await main.locator('.pr-editor [contenteditable=true]').waitFor();
+ await edit('CLI newer version');
+ await action('.pr-draft-status button');
+ await until(async()=>(await text()).includes('已保存到本机'),'saved draft restored');
  await evaluate(cdp,`require(AppEnv.getLoadSettings().resourcePath+'/internal_packages/mcp-server/lib/paper-reed-cli').installCLI().then(()=>true)`);
- await action('.pr-agent-button');
- await action('.pr-agent-panel button');
-
- await until(async()=>(await text()).includes('已复制任务'),'context copied');
+ assert.equal(await main.locator('.pr-route-compose .pr-agent-button').count(),0,'Draft has one visible Agent entry');
+ await main.locator('.pr-editor .pr-copy-agent').click();
+ await until(async()=>(await text()).includes('已复制草稿引用'),'context copied');
  const context=await evaluate(cdp,'(async()=>JSON.parse(await require("@electron/remote").clipboard.readText()))()');
  assert.equal(context.context.draftId,created.draftId);assert.equal(context.context.revision,(await cli('draft-get',ref)).revision);
  await screenshot('agent-context');
- await action('.pr-agent-panel button + button');
- await until(()=>evaluate(cdp,'!document.querySelector(".pr-workspace")'),'agent settings');
+ await main.locator('.pr-command-trigger').click();
+ const commandSearch=main.getByRole('textbox',{name:'查找命令'});
+ await commandSearch.fill('交给 Agent');
+ await commandSearch.press('Enter');
+ await main.locator('.pr-agent-panel').waitFor();
+ await main.getByRole('button',{name:'收起交接'}).click();
+ await main.locator('.pr-agent-panel').waitFor({state:'hidden'});
+ assert(await evaluate(cdp,`document.activeElement === document.querySelector('.pr-editor .pr-copy-agent')`),'Closing handoff returns focus to toolbar');
+ await main.locator('.pr-sidebar-bottom button').click();
+ await until(()=>evaluate(cdp,'!document.querySelector(".pr-workspace")'),'settings');
  await evaluate(cdp,'require("mailspring-exports").Actions.selectRootSheet(require("mailspring-exports").WorkspaceStore.Sheet.Threads);true');
  await until(()=>evaluate(cdp,'!!document.querySelector(".pr-editor [contenteditable=true]")'),'return to same draft');
  assert(['CLI newer version','<div>CLI newer version</div>'].includes((await cli('draft-get',ref)).body),'Source text retained through editor HTML normalization');
@@ -141,7 +205,7 @@ module.exports=async({app,main,cdp,work,account,cli,click,evaluate,until,restart
  assert.equal((await evaluate(cdp,'document.querySelector(".pr-copy-badge").innerText')).trim(),'恢复副本 2','Deleting the first copy must not renumber the second');
  const renderer=fs.readFileSync(path.join(work,'renderer.log'),'utf8');
  assert(!renderer.includes('Failed to activate plugin'), 'All packages must activate');
- const result={realInboxThreads:8,compactSubjectWidth:compact.subject.width,readingAndReply:true,readerWidth,editorWidth,conflictingSendDisabled:true,sendPositionStable:true,
+ const result={realInboxThreads:8,compactSubjectWidth:compact.width,narrowSubjectWidth:narrow.width,readingAndReply:true,readerWidth,editorWidth,conflictingSendDisabled:true,sendPositionStable:true,
    cliDraftOpened:true,conflictVisible:true,navigationBlocked:true,recoveryPreservesBoth:true,newEditsRequireFreshCopy:true,
    explicitReload:true,contextUsesSavedRevision:true,settingsReturnToDraft:true,sentResultVisible:true,subjectWraps:true,composingEnterPreserved:true,formatToggleWorks:true,fromFirst:true,recoveryLabelsPersist:true,sourceNavigation:true,missingSourceExplained:true,deletedCopyHidden:true,expectedSMTPSubmissions:1};
  fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(result,null,2));
