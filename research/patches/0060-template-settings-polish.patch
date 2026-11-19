@@ -1,0 +1,668 @@
+diff --git a/app/internal_packages/composer-templates/lib/preferences-templates.tsx b/app/internal_packages/composer-templates/lib/preferences-templates.tsx
+index f27a11b..c0a1c3c 100644
+--- a/app/internal_packages/composer-templates/lib/preferences-templates.tsx
++++ b/app/internal_packages/composer-templates/lib/preferences-templates.tsx
+@@ -1,6 +1,7 @@
+ import fs from 'fs';
+ import React from 'react';
+ import ReactDOM from 'react-dom';
++import { shell } from '@electron/remote';
+ import { Flexbox, EditableList, ComposerEditor, ComposerSupport } from 'mailspring-component-kit';
+ import { Actions, localized, localizedReactFragment } from 'mailspring-exports';
+ import { Value } from 'slate';
+@@ -14,13 +15,20 @@ const {
+ 
+ interface TemplateEditorProps {
+   template: TemplateItem;
+-  onEditTitle: (title: string) => void;
++  onEditTitle: (title: string) => string;
+ }
+ class TemplateEditor extends React.Component<
+   TemplateEditorProps,
+   { readOnly: boolean; editorState: Value; subject: string }
+ > {
+   _composer: ComposerEditor;
++  _nameInput = React.createRef<HTMLInputElement>();
++  _subjectInput = React.createRef<HTMLInputElement>();
++
++  focusName() {
++    this._nameInput.current.focus();
++    this._nameInput.current.select();
++  }
+ 
+   constructor(props) {
+     super(props);
+@@ -64,6 +72,7 @@ class TemplateEditor extends React.Component<
+   render() {
+     const { onEditTitle, template } = this.props;
+     const { readOnly, editorState, subject } = this.state;
++    const paperReed = AppEnv.config.get('core.paperReed.enabled');
+ 
+     return (
+       <div className={`template-wrap ${readOnly && 'empty'}`}>
+@@ -71,50 +80,65 @@ class TemplateEditor extends React.Component<
+           <div className="field name">
+             <label
+               htmlFor="template-title"
+-              className={AppEnv.config.get('core.paperReed.enabled') ? undefined : 'sr-only'}
++              className={paperReed ? undefined : 'sr-only'}
+             >
+-              {AppEnv.config.get('core.paperReed.enabled')
+-                ? '模板名称'
+-                : localized('Template Name')}
++              {paperReed ? '模板名称' : localized('Template Name')}
+             </label>
+             <input
+               type="text"
+               id="template-title"
+-              placeholder={
+-                AppEnv.config.get('core.paperReed.enabled') ? '模板名称' : localized('Name')
+-              }
++              ref={this._nameInput}
++              placeholder={paperReed ? '模板名称' : localized('Name')}
+               disabled={readOnly}
+               defaultValue={template ? template.name : ''}
+               onBlur={(e) => {
+-                const nextName = e.target.value;
+-                e.target.value = template ? template.name : '';
+-                onEditTitle(nextName);
++                if (!readOnly) e.currentTarget.value = onEditTitle(e.currentTarget.value);
+               }}
++              onKeyDown={paperReed ? (event) => {
++                if (event.nativeEvent.isComposing) return;
++                if (event.key === 'Enter') {
++                  event.preventDefault();
++                  this._subjectInput.current.focus();
++                } else if (event.key === 'Escape') {
++                  event.preventDefault();
++                  event.stopPropagation();
++                  event.currentTarget.value = template.name;
++                }
++              } : undefined}
+             />
+           </div>
+           <div className="field subject">
+             <label
+               htmlFor="template-subject"
+-              className={AppEnv.config.get('core.paperReed.enabled') ? undefined : 'sr-only'}
++              className={paperReed ? undefined : 'sr-only'}
+             >
+-              {AppEnv.config.get('core.paperReed.enabled') ? '邮件主题' : localized('Subject')}
++              {paperReed ? '邮件主题' : localized('Subject')}
+             </label>
+             <input
+               type="text"
+               id="template-subject"
+-              placeholder={
+-                AppEnv.config.get('core.paperReed.enabled')
+-                  ? '留空则保留原邮件主题'
+-                  : localized('Subject (optional)')
+-              }
++              ref={this._subjectInput}
++              placeholder={paperReed ? '选填' : localized('Subject (optional)')}
++              aria-describedby={paperReed ? 'pr-template-subject-hint' : undefined}
+               disabled={readOnly}
+               value={subject}
+               onChange={this._onSubjectChange}
+               onBlur={this._onSave}
+             />
++            {paperReed && (
++              <p className="pr-template-subject-hint" id="pr-template-subject-hint">
++                留空会保留草稿主题。回复和转发沿用会话主题。
++              </p>
++            )}
+           </div>
+         </div>
+-        <div className="section editor" onClick={this._onFocusEditor}>
++        {paperReed && <h2 id="pr-template-body-label">正文</h2>}
++        <div
++          className="section editor"
++          role={paperReed ? 'group' : undefined}
++          aria-labelledby={paperReed ? 'pr-template-body-label' : undefined}
++          onClick={this._onFocusEditor}
++        >
+           <ComposerEditor
+             ref={(c) => (this._composer = c)}
+             value={editorState}
+@@ -124,11 +148,8 @@ class TemplateEditor extends React.Component<
+             onBlur={this._onSave}
+           />
+         </div>
+-        <div className="section note">
+-          {AppEnv.config.get('core.paperReed.enabled') ? (
+-            '离开字段时保存。主题留空可保留草稿原主题；回复和转发会保留原会话主题。'
+-          ) : (
+-            <>
++        {!paperReed && (
++          <div className="section note">
+               {localized(
+                 'The subject is filled into your draft when you use the template. Leave it blank to keep the subject you already have.'
+               )}{' '}
+@@ -138,9 +159,8 @@ class TemplateEditor extends React.Component<
+                   {localized('Templates Guide')}
+                 </a>
+               )}
+-            </>
+-          )}
+-        </div>
++          </div>
++        )}
+       </div>
+     );
+   }
+@@ -148,11 +168,15 @@ class TemplateEditor extends React.Component<
+ 
+ export default class PreferencesTemplates extends React.Component<
+   Record<string, unknown>,
+-  { selected: TemplateItem; templates: TemplateItem[] }
++  { selected: TemplateItem; templates: TemplateItem[]; editorKey: number }
+ > {
+   static displayName = 'PreferencesTemplates';
+ 
+   unsubscribers: Array<() => void>;
++  _editor = React.createRef<TemplateEditor>();
++  _newButton = React.createRef<HTMLButtonElement>();
++  _list = React.createRef<HTMLElement>();
++  _selection = React.createRef<HTMLSelectElement>();
+ 
+   constructor(props) {
+     super(props);
+@@ -172,30 +196,26 @@ export default class PreferencesTemplates extends React.Component<
+   }
+ 
+   _getStateFromStores() {
+-    let lastSelName = null;
+-    let lastSelIndex = null;
+-    if (this.state) {
+-      lastSelName = this.state.selected && this.state.selected.name;
+-      lastSelIndex = this.state.templates.findIndex((t) => t.name === lastSelName);
+-    }
+-
++    const previousId = this.state?.selected?.id;
++    const previousIndex = this.state?.templates.findIndex((t) => t.id === previousId) ?? -1;
+     const templates = TemplateStore.items();
+     const selected =
+-      templates.find((t) => t.name === lastSelName) ||
+-      templates[lastSelIndex] ||
++      templates.find((t) => t.id === previousId) ||
++      templates[previousIndex] ||
+       templates[0] ||
+       null;
+ 
+     return {
+       templates,
+       selected,
++      editorKey: (this.state?.editorKey || 0) + (selected?.id === this.state?.selected?.id ? 0 : 1),
+     };
+   }
+ 
+   _onAdd = () => {
+     if (AppEnv.config.get('core.paperReed.enabled')) {
+       TemplateStore.saveNewTemplate('新模板', { subject: '', body: '<div></div>' }, (template) =>
+-        this.setState({ selected: template, templates: TemplateStore.items() })
++        this._onSelect(template, () => this._editor.current?.focusName())
+       );
+       return;
+     }
+@@ -205,79 +225,107 @@ export default class PreferencesTemplates extends React.Component<
+     });
+   };
+ 
++  _focusSelection = () => {
++    const picker = this._selection.current;
++    const selected = this._list.current?.querySelector<HTMLButtonElement>('button[aria-current]');
++    if (picker?.getClientRects().length) picker.focus();
++    else (selected || this._newButton.current)?.focus();
++  };
++
+   _onDelete = () => {
+-    Actions.deleteTemplate(this.state.selected.name);
++    const { selected } = this.state;
++    if (selected) Actions.deleteTemplate(selected.id, this._focusSelection);
+   };
+ 
+   _onEditTitle = (newName: string) => {
+-    Actions.renameTemplate(this.state.selected.name, newName);
++    const { selected } = this.state;
++    if (newName === selected.name) return selected.name;
++    if (AppEnv.config.get('core.paperReed.enabled')) {
++      return TemplateStore.renameTemplate(selected.id, newName.trim())?.name || selected.name;
++    }
++    Actions.renameTemplate(selected.id, newName);
++    return selected.name;
++  };
++
++  _onSelect = (item: TemplateItem, afterRender?: () => void) => {
++    this.setState(({ selected, editorKey }) => ({
++      selected: item,
++      editorKey: item.id === selected?.id ? editorKey : editorKey + 1,
++    }), afterRender);
+   };
+ 
+-  _onSelect = (item: TemplateItem) => {
+-    this.setState({ selected: item });
++  _openFolder = async () => {
++    const error = await shell.openPath(TemplateStore.directory());
++    if (error) AppEnv.showErrorDialog({ title: '无法打开模板文件夹', message: error });
+   };
+ 
+   render() {
+-    const { selected } = this.state;
++    const { selected, templates, editorKey } = this.state;
+ 
+     if (AppEnv.config.get('core.paperReed.enabled'))
+       return (
+         <div className="preferences-templates-container pr-templates">
+-          <div className="pr-template-toolbar">
+-            <span>{this.state.templates.length} 个模板</span>
+-            <button type="button" onClick={this._onAdd}>
+-              新建模板
+-            </button>
+-          </div>
+-          {this.state.templates.length ? (
+-            <div className="pr-template-layout">
+-              <nav aria-label="邮件模板">
+-                {this.state.templates.map((item) => (
+-                  <button
+-                    type="button"
+-                    key={item.id}
+-                    aria-current={item.id === selected?.id ? 'true' : undefined}
+-                    onClick={() => this._onSelect(item)}
+-                  >
+-                    <span>{item.name}</span>
+-                    <small>{item.subject || '保留原邮件主题'}</small>
+-                  </button>
+-                ))}
+-              </nav>
++          <div className={selected ? 'pr-template-layout' : 'pr-template-layout is-empty'}>
++            <aside className="pr-template-list">
++              <div className="pr-template-toolbar">
++                <button ref={this._newButton} className="pr-template-add" type="button" onClick={this._onAdd}>
++                  新建模板
++                </button>
++                {selected && (
++                  <div className="pr-template-select">
++                    <label className="sr-only" htmlFor="pr-template-selection">当前模板</label>
++                    <select
++                      id="pr-template-selection"
++                      ref={this._selection}
++                      value={selected.id}
++                      onChange={(event) => this._onSelect(templates.find((item) => item.id === event.target.value))}
++                    >
++                      {templates.map((item) => (
++                        <option key={item.id} value={item.id}>{TemplateStore.displayName(item)}</option>
++                      ))}
++                    </select>
++                  </div>
++                )}
++              </div>
++              {selected && (
++                <nav ref={this._list} aria-label="邮件模板">
++                  {templates.map((item) => (
++                    <button
++                      type="button"
++                      key={item.id}
++                      aria-current={item.id === selected.id ? 'true' : undefined}
++                      onClick={() => this._onSelect(item)}
++                    >
++                      <span>{TemplateStore.displayName(item)}</span>
++                      {item.subject && <small>{item.subject}</small>}
++                    </button>
++                  ))}
++                </nav>
++              )}
++            </aside>
++            {selected ? (
+               <div className="pr-template-detail">
+                 <TemplateEditor
++                  ref={this._editor}
+                   onEditTitle={this._onEditTitle}
+-                  key={selected?.name || 'empty'}
++                  key={editorKey}
+                   template={selected}
+                 />
+                 <footer>
+-                  <span>已使用此模板的草稿不会随模板删除。</span>
+-                  <button type="button" disabled={!selected} onClick={this._onDelete}>
++                  <span>离开字段时保存到本机。</span>
++                  <button className="pr-template-delete" type="button" onClick={this._onDelete}>
+                     删除模板…
+                   </button>
+                 </footer>
+               </div>
+-            </div>
+-          ) : (
+-            <div className="pr-settings-empty">
+-              <h2>从常用的一封信开始</h2>
+-              <p>新建模板，保存主题和正文。</p>
+-              <button type="button" onClick={this._onAdd}>
+-                创建第一个模板
+-              </button>
+-            </div>
+-          )}
++            ) : (
++              <p className="pr-template-empty">还没有模板。新建后可在写邮件时插入。</p>
++            )}
++          </div>
+           <details className="pr-settings-group">
+             <summary>模板文件</summary>
+-            <p>模板保存在本机，可作为 HTML 文件查看和备份。</p>
+-            <button
+-              type="button"
+-              onClick={() =>
+-                require('@electron/remote').shell.showItemInFolder(TemplateStore.directory())
+-              }
+-            >
+-              打开模板文件夹
+-            </button>
++            <p>模板是本机的 HTML 文件，可以查看和备份。</p>
++            <button type="button" onClick={this._openFolder}>打开模板文件夹</button>
+           </details>
+         </div>
+       );
+@@ -294,7 +342,7 @@ export default class PreferencesTemplates extends React.Component<
+                 onCreateItem={this._onAdd}
+                 onDeleteItem={this._onDelete}
+                 onItemEdited={this._onEditTitle}
+-                onSelectItem={this._onSelect}
++                onSelectItem={(item) => this._onSelect(item)}
+                 selected={this.state.selected}
+               />
+               <a
+@@ -314,7 +362,7 @@ export default class PreferencesTemplates extends React.Component<
+             </div>
+             <TemplateEditor
+               onEditTitle={this._onEditTitle}
+-              key={selected ? selected.name : 'empty'}
++              key={selected ? selected.id : 'empty'}
+               template={selected}
+             />
+           </Flexbox>
+diff --git a/app/internal_packages/composer-templates/lib/template-store.ts b/app/internal_packages/composer-templates/lib/template-store.ts
+index ab75cf6..e38175a 100644
+--- a/app/internal_packages/composer-templates/lib/template-store.ts
++++ b/app/internal_packages/composer-templates/lib/template-store.ts
+@@ -11,6 +11,7 @@ import {
+ import MailspringStore from 'mailspring-store';
+ import path from 'path';
+ import fs from 'fs';
++import { dialog, getCurrentWindow } from '@electron/remote';
+ 
+ import { parseTemplate, stringifyTemplate, ParsedTemplate } from './template-file';
+ 
+@@ -29,6 +30,7 @@ class TemplateStore extends MailspringStore {
+   private _items: TemplateItem[] = [];
+   private _templatesDir = path.join(AppEnv.getConfigDirPath(), 'templates');
+   private _watcher = null;
++  private _scanRevision = 0;
+ 
+   constructor() {
+     super();
+@@ -37,7 +39,7 @@ class TemplateStore extends MailspringStore {
+     this.listenTo(Actions.createTemplate, this._onCreateTemplate);
+     this.listenTo(Actions.showTemplates, this._onShowTemplates);
+     this.listenTo(Actions.deleteTemplate, this._onDeleteTemplate);
+-    this.listenTo(Actions.renameTemplate, this._onRenameTemplate);
++    this.listenTo(Actions.renameTemplate, this.renameTemplate);
+ 
+     // I know this is a bit of pain but don't do anything that
+     // could possibly slow down app launch
+@@ -85,11 +87,19 @@ class TemplateStore extends MailspringStore {
+     return this._items;
+   }
+ 
++  displayName(template: TemplateItem) {
++    return this._items.some((t) => t.name === template.name && t.id !== template.id)
++      ? template.id
++      : template.name;
++  }
++
+   async _populate() {
++    const revision = ++this._scanRevision;
+     let filenames = [];
+     try {
+       filenames = await fs.promises.readdir(this._templatesDir);
+     } catch (err) {
++      if (revision !== this._scanRevision) return;
+       AppEnv.showErrorDialog({
+         title: localized('Cannot scan templates directory'),
+         message: localized(
+@@ -102,7 +112,7 @@ class TemplateStore extends MailspringStore {
+ 
+     // Read each template so we know its subject line - they're small HTML files
+     // and we want to show / search subjects alongside template names.
+-    this._items = await Promise.all(
++    const items = await Promise.all(
+       filenames
+         .filter((filename) => filename[0] !== '.')
+         .map(async (filename) => {
+@@ -121,6 +131,9 @@ class TemplateStore extends MailspringStore {
+           };
+         })
+     );
++    // Earlier scans can finish after a newer scan has started.
++    if (revision !== this._scanRevision) return;
++    this._items = items;
+     this.trigger(this);
+   }
+ 
+@@ -190,7 +203,10 @@ class TemplateStore extends MailspringStore {
+   }
+ 
+   _displayError(message: string) {
+-    AppEnv.showErrorDialog({ title: localized('Template Creation Error'), message });
++    AppEnv.showErrorDialog({
++      title: AppEnv.config.get('core.paperReed.enabled') ? '邮件模板' : localized('Template Creation Error'),
++      message,
++    });
+   }
+ 
+   _displayDialog(title: string, message: string, buttons: string[]) {
+@@ -265,6 +281,8 @@ class TemplateStore extends MailspringStore {
+       } else {
+         template.subject = (subject || '').trim();
+       }
++      // Pick up files added while the watcher was stopped for the write.
++      this._populate();
+       this.trigger(this);
+       if (callback) {
+         callback(template);
+@@ -272,30 +290,46 @@ class TemplateStore extends MailspringStore {
+     });
+   }
+ 
+-  _onDeleteTemplate(name: string) {
+-    const template = this._items.find((t) => t.name === name);
++  _onDeleteTemplate(id: string, onDeleted?: () => void) {
++    const template = this._items.find((t) => t.id === id);
+     if (!template) {
+       return;
+     }
+ 
+-    if (
+-      this._displayDialog(
+-        localized('Delete Template?'),
+-        localized('The template and its file will be permanently deleted.'),
+-        [localized('Delete'), localized('Cancel')]
+-      )
+-    ) {
+-      fs.unlink(template.path, () => {
+-        this._populate();
+-      });
+-    }
++    const confirmed = AppEnv.config.get('core.paperReed.enabled')
++      ? dialog.showMessageBoxSync(getCurrentWindow(), {
++          type: 'warning',
++          message: `删除「${this.displayName(template)}」？`,
++          detail: '此操作会删除本机模板文件。已插入的内容仍保存在草稿中。',
++          buttons: ['取消', '删除模板'],
++          defaultId: 0,
++          cancelId: 0,
++        }) === 1
++      : this._displayDialog(
++          localized('Delete Template?'),
++          localized('The template and its file will be permanently deleted.'),
++          [localized('Delete'), localized('Cancel')]
++        );
++    if (!confirmed) return;
++
++    fs.unlink(template.path, (err) => {
++      if (err) {
++        this._displayError(err.message);
++        return;
++      }
++      this._items = this._items.filter((item) => item.id !== id);
++      this._populate();
++      this.trigger(this);
++      onDeleted?.();
++    });
+   }
+ 
+-  _onRenameTemplate(name: string, newName: string) {
+-    const template = this._items.find((t) => t.name === name);
++  renameTemplate(id: string, newName: string): TemplateItem | undefined {
++    const template = this._items.find((t) => t.id === id);
+     if (!template) {
+       return;
+     }
++    if (template.name === newName) return template;
+ 
+     if (newName.match(INVALID_TEMPLATE_NAME_REGEX)) {
+       this._displayError(
+@@ -310,9 +344,7 @@ class TemplateStore extends MailspringStore {
+       return;
+     }
+ 
+-    if (name === newName) return;
+     const newFilename = `${newName}.html`;
+-    const oldPath = path.join(this._templatesDir, `${name}.html`);
+     const newPath = path.join(this._templatesDir, newFilename);
+     if (fs.existsSync(newPath)) {
+       this._displayError(
+@@ -322,16 +354,18 @@ class TemplateStore extends MailspringStore {
+       );
+       return;
+     }
+-    fs.rename(oldPath, newPath, (err) => {
+-      if (err) {
+-        this._displayError(err.message);
+-        return;
+-      }
+-      template.name = newName;
+-      template.id = newFilename;
+-      template.path = newPath;
+-      this.trigger(this);
+-    });
++    try {
++      fs.renameSync(template.path, newPath);
++    } catch (error) {
++      this._displayError(error.message);
++      return;
++    }
++    template.name = newName;
++    template.id = newFilename;
++    template.path = newPath;
++    this._populate();
++    this.trigger(this);
++    return template;
+   }
+ 
+   async _onInsertTemplateId({
+diff --git a/app/internal_packages/paper-reed/styles/paper-reed.less b/app/internal_packages/paper-reed/styles/paper-reed.less
+index 38d34b7..b51e8c5 100644
+--- a/app/internal_packages/paper-reed/styles/paper-reed.less
++++ b/app/internal_packages/paper-reed/styles/paper-reed.less
+@@ -586,26 +586,35 @@
+ }
+ 
+ .preferences-wrap.pr-preferences .pr-settings-page {
+-  .pr-templates { max-width:none; margin:0; }
+-  .pr-template-toolbar { display:flex; align-items:center; justify-content:space-between; margin-bottom:24px; }
+-  .pr-template-toolbar > span { font-size:12px; color:#626b60; }
+-  .pr-template-layout { display:grid; grid-template-columns:190px minmax(0,1fr); gap:28px; margin-bottom:28px; }
+-  .pr-template-layout > nav { border-right:1px solid #dfe2d9; padding-right:16px; }
+-  .pr-template-layout > nav button { display:block; width:100%; border:0; text-align:left; margin-bottom:5px; padding:10px; overflow-wrap:anywhere; }
+-  .pr-template-layout > nav button[aria-current] { color:#303730; background:#e9eee5; }
+-  .pr-template-layout small { display:block; color:#626b60; font-size:10px; margin-top:4px; }
++  .pr-templates { max-width:none; margin:0; container:pr-mail-templates ~"/" inline-size; }
++  .pr-template-layout { display:grid; grid-template-columns:176px minmax(0,1fr); gap:24px; margin-bottom:20px; }
++  .pr-template-layout.is-empty { display:block; }
++  .pr-template-list { min-width:0; border-right:1px solid #dfe2d9; padding-right:14px; }
++  .pr-template-layout.is-empty .pr-template-list { border:0; }
++  .pr-template-toolbar { display:flex; flex-wrap:wrap; align-items:center; gap:8px 10px; }
++  .pr-template-toolbar .pr-template-add { background:#4b634f; color:#fffefa; border-color:#4b634f; }
++  .pr-template-toolbar .pr-template-add:hover { background:#3d5442; border-color:#3d5442; }
++  .pr-template-select { display:none; }
++  .pr-template-list nav { margin-top:12px; }
++  .pr-template-list nav button { display:block; width:100%; border:0; text-align:left; margin-bottom:4px; padding:7px 9px; overflow-wrap:anywhere; }
++  .pr-template-list nav button[aria-current] { color:#303730; background:#e9eee5; font-weight:500; }
++  .pr-template-list small { display:block; color:#626b60; font-size:11px; line-height:17px; margin-top:2px; font-weight:400; }
++  .pr-template-empty { margin:14px 0 0; color:#626b60; }
+   .pr-template-detail { min-width:0; }
+   .pr-templates .template-wrap { margin:0; width:auto; }
+-  .pr-templates .template-wrap .section.fields { display:block; }
+-  .pr-templates .template-wrap .section.fields .field { display:block; margin:0 0 20px; }
+-  .pr-templates .field label { display:block; font-size:11px; color:#626b60; margin-bottom:8px; }
+-  .pr-templates .template-wrap .section.editor { background:#fffefa; border:1px solid #dfe2d9; border-radius:5px; min-height:260px; }
++  .pr-templates .template-wrap .section.fields { display:block; margin-bottom:12px; }
++  .pr-templates .template-wrap .section.fields .field { display:block; margin:0 0 12px; }
++  .pr-templates .field label, .pr-template-detail h2 { display:block; font-size:12px; line-height:20px; font-weight:400; color:#626b60; margin:0 0 4px; }
++  .pr-template-subject-hint { color:#626b60; font-size:11px; line-height:18px; margin:5px 0 0; }
++  .pr-templates .template-wrap .section.editor { background:#fffefa; border:1px solid #dfe2d9; border-radius:5px; }
++  .pr-templates .template-wrap .section.editor:focus-within { border-color:#4b634f; }
+   .pr-templates .RichEditor-root { width:100%; min-width:0; }
+   .pr-templates .display-deferrable:not(.deferred) { opacity:1; transition:none; }
+-  .pr-templates .RichEditor-content > [contenteditable=true] { padding:20px; line-height:1.7; min-height:240px; }
+-  .pr-templates .section.note { font-size:11px; line-height:19px; color:#626b60; margin-top:12px; }
+-  .pr-template-detail footer { display:flex; gap:12px; align-items:center; border-top:1px solid #dfe2d9; padding-top:16px; margin-top:12px; }
+-  .pr-template-detail footer span { flex:1; color:#626b60; font-size:11px; }
++  .pr-templates .RichEditor-content > [contenteditable=true] { padding:12px 14px; line-height:1.7; min-height:168px; }
++  .pr-template-detail footer { display:flex; flex-wrap:wrap; justify-content:space-between; align-items:center; gap:6px 12px; border-top:1px solid #dfe2d9; padding-top:12px; margin-top:16px; }
++  .pr-template-detail footer span { color:#626b60; font-size:12px; }
++  .pr-template-detail .pr-template-delete { color:#9a433e; }
++  .pr-template-detail .pr-template-delete:hover { background:#f7eeea; }
+   .pr-agent { width:100%; max-width:780px; min-width:0; margin:0; }
+   .pr-agent p { font-size:12px; line-height:20px; color:#626b60; }
+   .pr-agent-service { display:flex; justify-content:space-between; align-items:center; gap:16px; }
+@@ -650,9 +659,6 @@
+   .pr-agent-audit li summary { font-size:11px; }
+   .pr-agent-audit pre { white-space:pre-wrap; overflow-wrap:anywhere; border:1px solid #dfe2d9; background:#fffefa; padding:12px; border-radius:5px; font-size:11px; }
+   @media(max-width:1100px) {
+-    .pr-template-layout { grid-template-columns:minmax(0,1fr); gap:20px; }
+-    .pr-template-layout > nav { display:flex; overflow-x:auto; border-right:0; border-bottom:1px solid #dfe2d9; padding:0 0 12px; }
+-    .pr-template-layout > nav button { min-width:140px; width:auto; }
+     .pr-agent-levels { grid-template-columns:minmax(0,1fr); }
+   }
+ }
+@@ -662,6 +668,18 @@
+   .pr-templates .template-wrap .RichEditor-root { border:0; padding:0; background:transparent; }
+ }
+ 
++@container pr-mail-templates (max-width: 600px) {
++  .preferences-wrap.pr-preferences .pr-settings-page {
++    .pr-template-layout { grid-template-columns:minmax(0,1fr); gap:18px; }
++    .pr-template-list { border:0; padding:0; }
++    .pr-template-list nav { display:none; }
++    .pr-template-select { display:block; flex:1 1 150px; min-width:0; }
++    .pr-template-select select { width:100%; min-height:34px; margin:0; }
++    .pr-templates .RichEditor-content > [contenteditable=true] { min-height:140px; }
++  }
++}
++
++
+ .preferences-wrap.pr-preferences .pr-settings-page .pr-cli-setup {
+   header { display:flex; align-items:baseline; justify-content:space-between; gap:16px; }
+   header h2 { margin:0; font-size:14px; font-weight:500; }
+diff --git a/app/internal_packages/preferences/lib/preferences-root.tsx b/app/internal_packages/preferences/lib/preferences-root.tsx
+index b837863..371da3f 100644
+--- a/app/internal_packages/preferences/lib/preferences-root.tsx
++++ b/app/internal_packages/preferences/lib/preferences-root.tsx
+@@ -76,7 +76,7 @@ class PreferencesRoot extends React.Component<{ tab: any; tabs: any[]; selection
+       AppEnv.config.get('core.paperReed.enabled') &&
+       {
+         Signatures: ['邮件签名', '为不同发件地址设置默认落款。'],
+-        Templates: ['邮件模板', '把常用表达留好，让下一封信从容开始。'],
++        Templates: ['邮件模板', '保存常用的主题和正文，写邮件时直接插入。'],
+         MCP: ['Agent 连接', '连接本机 Agent，明确它可以访问的邮件与操作。'],
+         Appearance: ['外观', '调整界面大小、邮件正文配色和菜单栏提示。'],
+         'Mail Rules': ['邮件规则', '为每个账号安排清楚、可控的自动处理。'],

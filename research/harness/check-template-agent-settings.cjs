@@ -11,6 +11,10 @@ module.exports = async ({
   evaluate,
   until,
 }) => {
+  if (process.env.PAPER_REED_TEMPLATE_AGENT_CHECK === "templates") {
+    return require("./check-template-settings.cjs")({ main, cdp, account, cli, draft, work, evaluate, until });
+  }
+
   const out = path.resolve(
     __dirname,
     "../template-agent-validation-2026-11-16",
@@ -20,7 +24,7 @@ module.exports = async ({
     action = (s) => main.locator(s).first().click();
   const before = process.env.PAPER_REED_TEMPLATE_AGENT_PHASE === "before";
   const shot = async (name) => {
-    if (!before && (await run('!!document.querySelector(".pr-templates")')))
+    if (!before && (await run('!!document.querySelector(".pr-template-detail .RichEditor-root")')))
       await until(
         () =>
           run(
@@ -114,18 +118,19 @@ module.exports = async ({
   }
   const count = (await items()).length;
   await run(
-    `window.prOriginalDialog=require('@electron/remote').dialog.showMessageBoxSync;window.prDialogResponse=1;window.prDialogCalls=0;require('@electron/remote').dialog.showMessageBoxSync=()=>{window.prDialogCalls++;return window.prDialogResponse;};true`,
+    `window.prOriginalDialog=require('@electron/remote').dialog.showMessageBoxSync;window.prDialogResponse=0;window.prDialogCalls=0;require('@electron/remote').dialog.showMessageBoxSync=()=>{window.prDialogCalls++;return window.prDialogResponse;};true`,
   );
   try {
     await action(".pr-template-detail footer button");
     await until(() => run("window.prDialogCalls===1"), "delete cancel");
     assert.equal((await items()).length, count);
-    await run("window.prDialogResponse=0;true");
+    await run("window.prDialogResponse=1;true");
     await action(".pr-template-detail footer button");
     await until(
       async () => (await items()).length === count - 1,
       "delete confirmed",
     );
+    await run("window.prDialogResponse=0;true");
     await action(".pr-settings-back");
     await until(
       () => run('!!document.querySelector(".btn-templates")'),
