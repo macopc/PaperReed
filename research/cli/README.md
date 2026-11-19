@@ -1,6 +1,6 @@
-# Paper Reed CLI · 实验版
+# Paper Reed CLI
 
-CLI 随实验桌面源码补丁提供，复用桌面内的运行环境与固定版本 MCP SDK，不需要另装 Node 或全局 npm 包。当前不是独立发布的安装包；先运行已应用 [补丁系列](../patches/README.md)（包括 0020）的实验桌面。
+CLI 随 [Paper Reed 桌面测试版](https://github.com/macopc/PaperReed/releases/tag/v0.0.2) 提供，与桌面共用邮箱和草稿。打开桌面端即可从设置安装 CLI，无需另装 Node 或全局 npm 包。源码构建对应 [补丁系列](../patches/README.md)。
 
 ## 从桌面接入
 

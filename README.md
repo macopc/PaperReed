@@ -1,93 +1,50 @@
-# Paper Reed
+<p align="center">
+  <img src="assets/brand/app-icon.png" width="76" alt="">
+</p>
 
-[English](README.en.md) · [贡献指南](CONTRIBUTING.md) · [路线图](ROADMAP.md)
+<h1 align="center">Paper Reed</h1>
 
-[![Repository checks](https://github.com/macopc/PaperReed/actions/workflows/checks.yml/badge.svg)](https://github.com/macopc/PaperReed/actions/workflows/checks.yml)
+<p align="center"><strong>安静一点的 Mac 邮件客户端。</strong></p>
 
-Paper Reed 是一个面向 macOS 的开源邮件客户端探索：重视阅读、写信与日常整理的品质，并让 Claude Code、Codex、OpenCode 等外部 Agent 方便地处理邮件。
+<p align="center">
+  一个开源收件箱，用来认真读信、写信，也能让你常用的 Agent 搭把手。
+</p>
 
-## 当前状态
+<p align="center">
+  <a href="https://github.com/macopc/PaperReed/releases/download/v0.0.2/Paper-Reed-0.0.2-macOS-arm64.zip"><strong>下载 0.0.2 · Apple Silicon</strong></a>
+  · <a href="https://github.com/macopc/PaperReed/releases/tag/v0.0.2">版本说明与校验值</a>
+  · <a href="README.en.md">English</a>
+</p>
 
-**[0.0.1 测试版已发布](https://github.com/macopc/PaperReed/releases/tag/v0.0.1)。** 当前实现基于固定版本的 Mailspring / Mailspring-Sync 补丁，保留研究与设计过程，面向 macOS Apple Silicon。
+![Paper Reed 收件箱实拍，展示统一收件箱、搜索框和用于区分账号的颜色圆环](research/agent-receipts-2026-11-18/inbox.png)
 
-- 产品：统一收件箱、即时搜索、快捷键、写信／回复、附件，以及置顶、稍后、标签与本机规则。
-- Agent：GUI 与 CLI 共用邮件、草稿和操作结果；提供本机 CLI 安装与连接诊断。内置 AI 后续考虑。
-- 验证：真实 Gmail 统一授权、重启和 CLI → GUI 草稿交接已有记录；其他服务商的覆盖以各项协议测试为准，不宣称全部真实邮箱已验证。
-- 测试包：简单应用图标与 `0.0.1` 版本已接入；安装包、验证材料和已知限制见 [0.0.1 测试记录](research/version-001-validation-2026-11-17/README.md)。该记录对应开发机的构建；公开下载包和校验值见版本发布页。
-- 开源：GPL-3.0-only。历史原型与文档保留当时状态，当前实现以最新验证记录为准。
+*桌面客户端实拍。截图来自功能验证构建，邮件为合成测试数据。*
 
-## 阅读入口
+## 日常读写
 
-| 内容 | 入口 |
-| --- | --- |
-| 首版交互基线（示例数据） | [design/direction.html](design/direction.html) |
-| 独立页面目录 | [design/PAGES.md](design/PAGES.md) |
-| 界面探索与迭代说明 | [design/INTERFACE.md](design/INTERFACE.md) |
-| UI/UX 评审记录 | [design/UX-REVIEW.md](design/UX-REVIEW.md) |
-| 实验界面接入与验证 | [research/ui-validation-2026-11-16/README.md](research/ui-validation-2026-11-16/README.md) |
-| 编辑状态规格 | [design/EDITOR-STATES.md](design/EDITOR-STATES.md) |
-| 编辑器打磨与副本辨识 | [研究记录与截图](research/editor-validation-2026-11-16/README.md) |
-| 收件人、签名与格式工具 | [控件设计与验证](research/controls-validation-2026-11-16/README.md) |
-| 设置导航与签名版式 | [实际窗口与验证](research/navigation-validation-2026-11-16/README.md) |
-| 通用、邮箱账号与快捷键设置 | [前后对照与验证](research/subpages-validation-2026-11-16/README.md) |
-| 外观、邮件规则与文件夹设置 | [前后对照与验证](research/organization-validation-2026-11-16/README.md) |
-| 首版邮件核心设计（本轮方案） | [design/MAIL-CORE.md](design/MAIL-CORE.md) |
-| 邮件领域术语 | [GLOSSARY.md](GLOSSARY.md) |
-| 首版技术选型与验证条件 | [design/TECH-CHOICE.md](design/TECH-CHOICE.md) |
-| 历史技术选型与架构候选 | [design/ARCHITECTURE.md](design/ARCHITECTURE.md) |
-| Agent 交接候选 | [design/AGENT-HANDOFF.md](design/AGENT-HANDOFF.md) |
-| 源码研究与验证边界 | [research/README.md](research/README.md) |
-| 视觉参考来源 | [design/REFERENCES.md](design/REFERENCES.md) |
+- **一个收件箱，多种邮箱。** 把工作和个人邮件放在一起，用颜色认出来自哪个账号。支持 Gmail、iCloud 和通用 IMAP／SMTP 配置。
+- **边输入，边找信。** 即时搜索支持中文片段。用键盘在会话之间移动，或按 `⌘K` 打开命令面板。
+- **按自己的方式整理。** 把重要会话置顶，将暂时不处理的邮件设为稍后，或用自定义标签和本机规则归类。
+- **在同一个地方读信和回信。** 阅读会话、起草回复和处理附件都在桌面端完成，草稿会保存在本机。
 
-## 查看原型
+## 让 Agent 起草，回到桌面审阅
 
-先克隆仓库：
+在 **设置 → Agent 连接** 开启本机连接并安装 `paper-reed`。为 Agent 选择可访问的邮箱和允许的操作，然后把接入说明贴给能执行本机命令的 Claude Code、Codex 或 OpenCode。
 
-```sh
-git clone https://github.com/macopc/PaperReed.git
-cd PaperReed
-```
+> 找到供应商对交期的最新回复，起草一封确认邮件，留在草稿箱给我检查。
 
-用浏览器直接打开 `design/direction.html`，无需构建或启动服务器。全部邮件及连接状态均为演示；刷新会恢复初始状态，不会安装 CLI、唤起 Agent 或发送邮件。
+Agent 可以搜索邮件、读取会话并创建草稿。CLI 和桌面共用草稿，打开同一份就能继续编辑。发送是单独操作，需要启用发送权限；也可以只授予阅读或「阅读与草稿」权限。[CLI 使用说明](research/cli/README.md) · [草稿交接与发送恢复实测](research/agent-receipts-2026-11-18/README.md)
 
-修改主原型后，重新生成独立页面：
+## 安装测试版
 
-```sh
-python3 design/build-previews.py
-```
+下载 ZIP，解压后把 `Paper Reed.app` 拖进「应用程序」。`0.0.2` 是面向 Apple Silicon Mac 的已签名、公证测试版，当前通过 GitHub Releases 手动更新。邮箱兼容性仍在验证，通用账号需要服务商开放 IMAP／SMTP。[安装包、版本说明与校验值](https://github.com/macopc/PaperReed/releases/tag/v0.0.2)
 
-`design/direction-v*.html` 与 `design/INTERFACE-v*.md` 是历史探索快照，不是当前规范。历史文案如有“已确认”“既定”等表述，以本文件的未定稿状态为准。
+## 在这里参与
 
-## 后续待确定
+Paper Reed 在本机运行，直接与邮箱服务商连接，无需部署 Paper Reed 服务端。桌面端基于固定版本的 Mailspring 和 Mailspring-Sync 构建，改动以补丁维护。[源码与补丁](research/patches/README.md) · [研究与验证记录](research/README.md)
 
-先完成首个测试包的有限试用与发行准备，根据真实问题修复体验。暂不扩展新的底座、服务端或自动更新系统。
+欢迎提交具体的邮件操作场景、界面问题或小型改进。报告问题时请附上版本、复现步骤与脱敏截图。[提交 Issue](https://github.com/macopc/PaperReed/issues/new/choose) · [贡献指南](CONTRIBUTING.md) · [路线图](ROADMAP.md)
 
-## 参与贡献
+想看设计过程，可以把仓库克隆到本地，用浏览器打开 [交互原型](design/direction.html)。原型使用示例数据，无需启动服务。[页面目录](design/PAGES.md) · [界面设计](design/INTERFACE.md)
 
-欢迎用中文或英文提交 [Issue](https://github.com/macopc/PaperReed/issues/new/choose) 或 Pull Request。目前最有帮助的是具体的界面问题、真实邮件工作流，以及带证据的技术路线比较。大型实现请先讨论，避免建立在尚未确认的方案上。
-
-本地基础检查需要 Python 3.10+ 和 Node.js 22+，无需安装 npm 依赖：
-
-```sh
-python3 scripts/check.py
-```
-
-检查涵盖生成页面一致性、JavaScript 语法、JSON 格式和本地文档链接；不运行浏览器交互或真实邮箱集成。详见 [贡献指南](CONTRIBUTING.md) 和 [路线图](ROADMAP.md)。
-
-## 许可证与来源
-
-Copyright (C) 2026 Paper Reed contributors. 本仓库原创内容采用 [GNU GPL v3.0 only](LICENSE)，不提供担保。上游源码、第三方素材与商标不因本仓库而改变其许可或归属，详见 [来源说明](THIRD_PARTY_NOTICES.md)。本项目与 Spark、Mailspring、Zero 及其维护方没有隶属或背书关系。
-
-邮件模板与 Agent 设置的实际窗口、CLI 权限验证和边界见 [本轮验证记录](research/template-agent-validation-2026-11-16/README.md)。
-
-CLI 安装、连接诊断和 Agent 交接见 [使用说明](research/cli/README.md) 与 [实际验证](research/cli-onboarding-validation-2026-11-16/README.md)。
-
-收件箱搜索、批量整理及共用 CLI 命令见 [实际窗口与验证](research/inbox-validation-2026-11-16/README.md)。
-
-置顶、稍后处理、自定义标签与 CLI 共用状态见 [实际窗口与验证](research/triage-validation-2026-11-16/README.md)。
-
-本机邮件规则、自动分类与预览应用见 [实际窗口与验证](research/rules-validation-2026-11-16/README.md)。
-
-附件、CLI 写信闭环与账号颜色贯通见 [实际窗口与验证](research/attachments-validation-2026-11-16/README.md)。
-
-实现质量审查及针对性修复见 [审查报告](research/quality-review-2026-11-16/README.md) 和 [修复验证](research/quality-fixes-validation-2026-11-16/README.md)。
+本仓库原创内容以 [GPL-3.0-only](LICENSE) 发布。上游代码与素材沿用各自许可。[第三方来源与许可](THIRD_PARTY_NOTICES.md)

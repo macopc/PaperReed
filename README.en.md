@@ -1,45 +1,50 @@
-# Paper Reed
+<p align="center">
+  <img src="assets/brand/app-icon.png" width="76" alt="">
+</p>
 
-[中文](README.md) · [Contributing](CONTRIBUTING.md) · [Roadmap](ROADMAP.md)
+<h1 align="center">Paper Reed</h1>
 
-Paper Reed is an open-source macOS email client exploration focused on thoughtful reading, writing, and organization, with convenient access for external agents such as Claude Code, Codex, and OpenCode.
+<p align="center"><strong>A quieter email client for Mac.</strong></p>
 
-**[Paper Reed 0.0.1 is available as a prerelease](https://github.com/macopc/PaperReed/releases/tag/v0.0.1).** The implementation uses ordered patches over pinned Mailspring / Mailspring-Sync sources on Apple Silicon macOS. Real Gmail authorization, restart and CLI-to-GUI draft handoff have recorded evidence. The [0.0.1 package verification](research/version-001-validation-2026-11-17/README.md) covers the local development build. The release page hosts the distribution archive and its checksum.
+<p align="center">
+  An open-source inbox for reading and writing mail, with a CLI for the agents you already use.
+</p>
 
-## What is here
+<p align="center">
+  <a href="https://github.com/macopc/PaperReed/releases/download/v0.0.2/Paper-Reed-0.0.2-macOS-arm64.zip"><strong>Download 0.0.2 for Apple Silicon</strong></a>
+  · <a href="https://github.com/macopc/PaperReed/releases/tag/v0.0.2">Release notes and checksum</a>
+  · <a href="README.md">中文</a>
+</p>
 
-- A self-contained, interactive HTML prototype with sample mail and simulated agent handoff.
-- Earlier visual directions and a source-grounded UI/UX review.
-- Research into Mailspring and Zero, with pinned source provenance and isolated feasibility checks.
-- Candidate architecture and CLI / agent interactions; built-in AI is a later priority.
-- A proposed [first-version mail core](design/MAIL-CORE.md) and [domain glossary](GLOSSARY.md), covering shared UI / CLI state, drafts, account boundaries and operation results. These documents are in Chinese.
-- A [technology recommendation](design/TECH-CHOICE.md) with source evidence and validation criteria: investigate a Mailspring product fork first; the native engine now builds and passes loopback protocol checks, with real Gmail authorization subsequently verified.
-- An experimental CLI and Electron UI using the same local mail core. The connected inbox, conversation/reply and composer are tested against local IMAP/SMTP fixtures, including conflicts and recovery. See the [UI integration record](research/ui-validation-2026-11-16/README.md). The historical record describes that stage; newer package and Gmail checks are linked above.
+![The Paper Reed desktop inbox, with a unified message list, search, and colored account rings](research/agent-receipts-2026-11-18/inbox.png)
 
-## Try the prototype
+*Desktop screenshot from a test build using synthetic mail.*
 
-```sh
-git clone https://github.com/macopc/PaperReed.git
-cd PaperReed
-```
+## Everyday mail
 
-Open `design/direction.html` directly in a browser. No build or server is needed. Nothing connects to a mailbox, sends mail, installs a CLI, or launches an agent. Refreshing resets the sample state. The prototype currently uses Chinese copy.
+- **One inbox for work and personal mail.** Account colors show where each message came from. Connect Gmail, iCloud, or an account with IMAP and SMTP.
+- **Find mail as you type.** Instant search can match fragments of Chinese text. Move between conversations with the keyboard or open the command palette with `⌘K`.
+- **Keep track of what matters.** Pin important threads, snooze the ones that can wait, and organize the rest with custom labels and local rules.
+- **Read and reply in the same place.** Stay in the desktop app to read threads, compose replies, and handle attachments. Drafts are saved locally.
 
-[Page directory](design/PAGES.md) · [UI exploration](design/INTERFACE.md) · [UX review](design/UX-REVIEW.md) · [Candidate architecture](design/ARCHITECTURE.md) · [Research](research/README.md)
+## Let an agent draft. Review on your Mac.
 
-## Develop and contribute
+Open **Settings → Agent Connection** (设置 → Agent 连接), enable the local connection, and install `paper-reed`. Choose which mailboxes and actions the agent can access, then paste the setup instructions into a local Claude Code, Codex, or OpenCode session that can run shell commands.
 
-Python 3.10+ and Node.js 22+ are sufficient for the repository checks; npm dependencies are not needed.
+> Find the supplier’s latest reply about the delivery date, draft a confirmation, and leave it in Drafts for me to review.
 
-```sh
-python3 design/build-previews.py
-python3 scripts/check.py
-```
+An agent can search mail, read the conversation, and leave a draft you can open and edit in the app. Sending is a separate action with its own permission. You can also limit access to reading or to reading and drafting. [CLI guide](research/cli/README.md) · [Draft handoff and send recovery tests](research/agent-receipts-2026-11-18/README.md)
 
-Edit `design/direction.html` and regenerate its standalone pages. Historical snapshots are not the current specification. Checks cover generated pages, JavaScript syntax, JSON and local documentation links; they do not test browser interaction or real email integration.
+## Install the preview
 
-Concrete design feedback, email workflow examples, and evidence-backed technology comparisons are welcome. Issues and pull requests may be in English or Chinese. Discuss substantial implementation before starting: the product design and architecture are still open. See [CONTRIBUTING.md](CONTRIBUTING.md) and [ROADMAP.md](ROADMAP.md).
+Download and unzip the archive, then drag `Paper Reed.app` into Applications. Version `0.0.2` is a signed, notarized preview for Apple Silicon Macs. Updates are installed manually from GitHub Releases. Provider compatibility is still being tested. Generic accounts require IMAP and SMTP access. [Download, release notes, and checksum](https://github.com/macopc/PaperReed/releases/tag/v0.0.2)
 
-## License
+## Get involved
 
-Copyright (C) 2026 Paper Reed contributors. Original repository content is licensed under [GNU GPL v3.0 only](LICENSE), without warranty. Upstream code, third-party materials and trademarks retain their own terms and ownership; see [THIRD_PARTY_NOTICES.md](THIRD_PARTY_NOTICES.md). This is an independent project, not affiliated with or endorsed by Spark, Mailspring, Zero, or their maintainers.
+Paper Reed runs on your Mac and connects directly to your mail provider. There’s no Paper Reed server to deploy. The desktop app is built from pinned Mailspring and Mailspring-Sync sources, with Paper Reed’s changes maintained as patches. [Source and patches](research/patches/README.md) · [Research and test records](research/README.md)
+
+Tell us where a real email workflow gets awkward, report a UI issue, or contribute a focused improvement. For bug reports, include your version, steps to reproduce, and screenshots with private information removed. [Open an issue](https://github.com/macopc/PaperReed/issues/new/choose) · [Contributing](CONTRIBUTING.md) · [Roadmap](ROADMAP.md)
+
+To explore the design, clone the repository and open the [interactive prototype](design/direction.html) in a browser. It uses sample mail and runs without a server. [Prototype pages](design/PAGES.md) · [Interface notes](design/INTERFACE.md)
+
+Original repository content is licensed under [GPL-3.0-only](LICENSE). Upstream code and assets retain their respective licenses. [Third-party notices](THIRD_PARTY_NOTICES.md)

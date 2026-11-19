@@ -1,6 +1,6 @@
 # 源码研究
 
-状态：可行性探索，不代表已最终选定产品底座或完成生产验证。
+当前可下载 [0.0.2 桌面测试版](https://github.com/macopc/PaperReed/releases/tag/v0.0.2)，由固定版本的 Mailspring 和 Mailspring-Sync 加上 [Paper Reed 补丁](patches/README.md) 构建。下文保留各阶段的研究、设计取舍和当时的验证边界。
 
 [真实 Gmail 日用闭环](daily-use-validation-2026-11-17/README.md) 完成统一授权、重启连接、同步中搜索阅读与 Codex 草稿回 GUI 审阅；0046 修复返回列表丢失焦点。本轮无真实发送，公开证据已脱敏。
 

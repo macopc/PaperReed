@@ -1,27 +1,17 @@
-# Roadmap / 路线图
+# 路线图 / Roadmap
 
-当前处于探索阶段。以下是推进条件，不是发布日期承诺，也不表示技术路线已经确定。
+Paper Reed 已发布 [0.0.2 测试版](https://github.com/macopc/PaperReed/releases/tag/v0.0.2)。近期的重点是让现有桌面客户端和 Agent CLI 在日常使用中更可靠。
 
-| 阶段 | 目标与完成条件 | 状态 |
-| --- | --- | --- |
-| 界面与工作流评审 | 当前界面暂作首版基线；后续用真实数据补充异常状态、可访问性与工作流验证 | 首版基线暂定 |
-| 邮件核心设计 | 明确数据归属、UI / CLI 共用操作、草稿与发送语义；保持最小边界 | [方案已起草，待评审](design/MAIL-CORE.md) |
-| 技术路线比较 | 比较同步、存储、UI、CLI 接入与维护成本；记录选型理由、许可约束和实验限制 | [首轮推荐已形成](design/TECH-CHOICE.md)，待真实闭环验证 |
-| 最小真实闭环 | 用真实账号验证收信、回复草稿、发送、归档与 UI / CLI 状态一致；用实验结果决定技术路线 | [真实 Gmail 授权、收信、CLI／GUI 草稿与 HTTPS 发信已验证](research/gmail-integration-validation-2026-11-17/README.md)；真实整理与第二服务商待验证 |
-| 界面接通邮件核心 | 以首版设计接通收件箱、会话／回复、写信，验证保存与冲突状态 | [实验接入与验证](research/ui-validation-2026-11-16/README.md)，尚待设计验收 |
-| 多账号与多服务商 | 保持账号、草稿、操作与授权隔离；验证两个真实服务商同时收发 | 范围为 Gmail／Google Workspace、iCloud 和普通 IMAP；Microsoft 专用 OAuth 渠道已取消；通用 IMAP 入口保留，不保证能连接要求 Microsoft OAuth 的邮箱。继续完善真实多服务商兼容性记录 |
-| 日用可靠性 | 验证离线恢复、凭据刷新、任务失败反馈、邮件渲染隔离、可访问性与性能 | [离线读写、草稿重启恢复与恢复联网后发送通过本机协议验证](research/offline-validation-2026-11-17/README.md)；其余可靠性范围待继续 |
-| macOS 分发 | 确定应用标识、系统支持范围、签名、公证、升级与安装流程 | [已生成内置 Google 项目配置、独立版本和源码标识的 macOS 预览包](research/distribution-validation-2026-11-17/README.md)；正式签名、公证和更新分发未完成 |
-| 内置 AI | 在稳定邮件操作与权限机制上增加可选摘要和写作辅助 | 后续考虑 |
+| 方向 | 当前进展与下一步 |
+| --- | --- |
+| 读信、写信与整理 | 统一收件箱、即时搜索、快捷键和本机整理已进入测试包。依据试用反馈继续打磨大邮箱、键盘流转和可访问性。[负载验证](research/mail-load-validation-2026-11-17/README.md) |
+| 多账号与服务商 | 已有 Gmail／Google Workspace、iCloud 与通用 IMAP／SMTP 的接入路径。继续积累不同服务商的真实收发与恢复记录。要求 Microsoft 专用 OAuth 的账号目前没有对应接入路径。[接入范围](research/provider-scope-validation-2026-11-17/README.md) · [真实 Gmail 验证](research/daily-use-validation-2026-11-17/README.md) |
+| 外部 Agent | CLI 与桌面共用草稿。下一轮从试用中的真实任务继续检查授权、交接与异常恢复。[8 项 Agent 用例与复验](research/agent-receipts-2026-11-18/README.md) |
+| macOS 分发 | Apple Silicon 已有签名、公证的 ZIP，通过 GitHub Releases 手动安装。继续记录旧版覆盖安装、钥匙串迁移和真实 Gmail 授权表现。[0.0.2 验证范围](https://github.com/macopc/PaperReed/releases/tag/v0.0.2) |
+| 内置 AI | 基础邮件体验和外部 Agent 接入优先，内置摘要与写作辅助后续考虑。 |
 
-优先级：基础邮件体验与外部 Agent 接入优先；内置 AI 后置。暂不扩展到移动端、自建邮件服务器、团队协作平台或插件市场。
+## English summary
 
-最新日用证据：[真实 Gmail 统一授权、迁移与重启连接，以及同步期间搜索阅读、Codex 草稿回 GUI 审阅已完成](research/daily-use-validation-2026-11-17/README.md)。修复返回列表的焦点丢失。共享授权下的真实 HTTPS 再次发送未执行，正式签名、公证及更新发行仍待推进。
+The [0.0.2 preview](https://github.com/macopc/PaperReed/releases/tag/v0.0.2) is available for Apple Silicon Macs. Near-term work focuses on everyday mail reliability, real-world provider compatibility, and the handoff between an external agent and the desktop app. Built-in AI comes later. Release timing depends on what we learn from the preview.
 
-发布前审查确认的 5 项问题已完成集中修复：[共享凭据、数据库响应与异常结束、邮件资源隔离、Agent 资源边界](research/release-fixes-2026-11-17/README.md)。下一步可恢复 Logo、0.0.1 与测试版包装；签名、公证和传递依赖风险仍需按发行范围处理。
-
-## How decisions become final
-
-Design review and technical evidence inform decisions; creating a repository, merging a prototype or passing checks does not approve the product design or select a stack. Record the rationale and unresolved risks in the relevant document when a decision is accepted.
-
-The current interface is the first-version baseline. Real Gmail authorization, reading and one approved HTTPS send have been verified; mixed-account mailbox actions pass local protocol tests. Sender identity, independent failures, offline draft recovery and explicit sending after reconnection now pass local protocol tests. Continue reliability work and build real-provider compatibility evidence as accounts become available; individual test accounts are not a prerequisite for implementing provider support. Dedicated Microsoft OAuth onboarding has been dropped; generic IMAP configuration remains available; macOS distribution remains open; built-in AI comes later. No release date is committed.
+Concrete workflow feedback and reproducible issues are welcome. [Contributing](CONTRIBUTING.md) · [Research and validation](research/README.md)
