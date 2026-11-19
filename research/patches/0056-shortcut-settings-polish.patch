@@ -1,0 +1,875 @@
+diff --git a/app/internal_packages/paper-reed/lib/command-panel.tsx b/app/internal_packages/paper-reed/lib/command-panel.tsx
+index 3e6b788..8a352dd 100644
+--- a/app/internal_packages/paper-reed/lib/command-panel.tsx
++++ b/app/internal_packages/paper-reed/lib/command-panel.tsx
+@@ -1,5 +1,6 @@
+ import React from 'react';
+-export type MailCommand = { id: string; title: string; run: () => void; disabled?: boolean };
++import { formatShortcut } from '../../../src/keymap-manager';
++export type MailCommand = { id: string; title: string; run: () => void; disabled?: boolean; shortcutId?: string };
+ export default class CommandPanel extends React.Component<{
+   commands: MailCommand[]; onClose: () => void;
+ }, { query: string; index: number }> {
+@@ -37,8 +38,7 @@ export default class CommandPanel extends React.Component<{
+       <div className="pr-command-results">
+         {commands.map((command) => <button key={command.id} disabled={command.disabled}
+           className={command === active ? 'active' : ''} onClick={() => execute(command)}>
+-          <span>{command.title}</span><kbd>{(AppEnv.keymaps.getBindingsForCommand(command.id) || [])
+-            .slice(0, 1).join('').replace(/mod|command/g, '⌘')}</kbd>
++          <span>{command.title}</span><kbd>{AppEnv.keymaps.getBindingsForCommand(command.shortcutId || command.id).slice(0, 1).map(formatShortcut)}</kbd>
+         </button>)}
+         {!commands.length && <p className="pr-command-empty" role="status">没有匹配的命令</p>}
+       </div>
+diff --git a/app/internal_packages/paper-reed/lib/workspace.tsx b/app/internal_packages/paper-reed/lib/workspace.tsx
+index 1265e60..16362b0 100644
+--- a/app/internal_packages/paper-reed/lib/workspace.tsx
++++ b/app/internal_packages/paper-reed/lib/workspace.tsx
+@@ -21,6 +21,7 @@ import {
+ } from '../../../src/services/mail-core/inbox';
+ import { desktopDraftRecoveryInfo, DraftRecoveryInfo } from '../../../src/services/mail-core';
+ import React from 'react';
++import { formatShortcut } from '../../../src/keymap-manager';
+ import MailSearch from './mail-search';
+ import CommandPanel, { MailCommand } from './command-panel';
+ import { agentHandoff, cliStatus } from '../../mcp-server/lib/paper-reed-cli';
+@@ -211,6 +212,9 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       globalHandlers[id] = (event: CustomEvent) => {
+         if (!(event.target as HTMLElement).closest('.pr-workspace')) handlers[id](event);
+       };
++    globalHandlers['paper-reed:agent'] = (event: CustomEvent) => {
++      if (event.target === document.body) handlers['paper-reed:agent'](event);
++    };
+     const globalBindings = AppEnv.commands.add(document.body, globalHandlers);
+     this.unlisten.push(() => { bindings.dispose(); globalBindings.dispose(); });
+     this.refresh();
+@@ -610,7 +614,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+         title, disabled: !list || this.state.busy || this.state.loading || !this.selectedTargets().length || !this.selectedTargets().every(t => actionAvailable(action, t.accountId)),
+         run: () => this.organize(action),
+       })),
+-      { id: 'paper-reed:settings', title: '打开设置', run: this.preferences },
++      { id: 'paper-reed:settings', title: '打开设置', shortcutId: 'application:open-preferences', run: this.preferences },
+       { id: 'paper-reed:agent', title: '交给 Agent', run: this.copyContext },
+     ];
+   };
+@@ -963,6 +967,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     );
+   }
+   render() {
++    const [commandShortcut] = AppEnv.keymaps.getBindingsForCommand('paper-reed:commands');
+     const { route, folder, selected, rows, loading, agent } = this.state;
+     const title =
+       route === 'compose' ? '写一封信' : this.state.query ? '搜索结果' : this.locationTitle();
+@@ -978,7 +983,9 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+         {this.state.palette && <CommandPanel commands={this.commands().filter(c => !['paper-reed:commands','core:focus-search','core:next-item','core:previous-item','core:select-item'].includes(c.id))} onClose={() => this.setState({ palette: false })} />}
+         <header className="pr-titlebar">
+           <span className="pr-brand"><img src={`file://${AppEnv.getLoadSettings().resourcePath}/static/paper-reed-mark.svg`} alt="" />Paper Reed</span>
+-          <button className="pr-command-trigger" onClick={() => this.setState({ palette: true })}>命令 <kbd>⌘K</kbd></button>
++          <button className="pr-command-trigger" onClick={() => this.setState({ palette: true })}>
++            命令 {commandShortcut && <kbd>{formatShortcut(commandShortcut)}</kbd>}
++          </button>
+           <span className="pr-build-label">{AppEnv.getVersion().split('-')[0]} · 测试版</span>
+         </header>
+         <div className="pr-layout">
+diff --git a/app/internal_packages/paper-reed/styles/paper-reed.less b/app/internal_packages/paper-reed/styles/paper-reed.less
+index 702ed97..dde321a 100644
+--- a/app/internal_packages/paper-reed/styles/paper-reed.less
++++ b/app/internal_packages/paper-reed/styles/paper-reed.less
+@@ -383,14 +383,50 @@
+   .pr-account-detail-heading span { color:#626b60; font-size:11px; }
+   .pr-settings-page .account-details input[type=color] { height:32px; width:36px; padding:2px; border:1px solid #dfe2d9; border-radius:4px; background:#fffefa; }
+   .pr-keymap-preset { display:flex; align-items:center; flex-wrap:wrap; gap:12px; }
+-  .pr-keymap-preset select { flex:1; margin:0; }
+-  #pr-shortcut-search { width:100%; margin:16px 0 6px; }
++  .pr-keymap-preset select { flex:1 1 140px; max-width:220px; margin:0; min-height:34px; }
++  .pr-keymaps .pr-shortcut-help { margin:8px 0 0; color:#626b60; }
++  .pr-shortcut-filter { position:relative; margin-top:16px; }
++  #pr-shortcut-search { width:100%; margin:0; padding-right:38px; }
++  .pr-shortcut-filter input::-webkit-search-cancel-button { display:none; }
++  .pr-settings-page .pr-shortcut-filter button {
++    position:absolute;
++    inset:3px 4px 3px auto;
++    width:28px;
++    padding:0;
++    border-color:transparent;
++    font-size:18px;
++    line-height:1;
++  }
+   .pr-settings-page .pr-keymaps .shortcut-section-title { font-size:12px; font-weight:500; color:#626b60; margin:24px 0 8px; border:0; }
+-  .pr-settings-page .pr-keymaps .shortcut { padding:10px 8px; min-height:40px; border-bottom:1px solid #eceee7; border-radius:3px; color:#303730; cursor:pointer; gap:20px; }
++  .pr-settings-page .pr-keymaps .shortcut { align-items:center; padding:10px 8px; min-height:40px; border-bottom:1px solid #eceee7; border-radius:3px; color:#303730; cursor:pointer; gap:20px; }
+   .pr-settings-page .pr-keymaps .shortcut:hover { background:#f2f1eb; }
+-  .pr-settings-page .pr-keymaps .shortcut .col-left { text-align:left; margin:0; }
+-  .pr-settings-page .pr-keymaps .shortcut .col-right { text-align:right; }
+-  .pr-settings-page .pr-keymaps .shortcut .values { font-size:12px; font-weight:400; padding:0; color:#4b634f; }
++  .pr-settings-page .pr-keymaps .shortcut .col-left { flex:0 1 auto; min-width:0; text-align:left; margin:0; }
++  .pr-settings-page .pr-keymaps .shortcut .col-right {
++    display:flex;
++    flex-wrap:wrap;
++    align-items:center;
++    justify-content:flex-end;
++    gap:4px 8px;
++    text-align:right;
++  }
++  .pr-settings-page .pr-keymaps .shortcut .values {
++    display:flex;
++    flex-wrap:wrap;
++    justify-content:flex-end;
++    gap:4px;
++    padding:0;
++    font-size:12px;
++    font-weight:400;
++    color:#4b634f;
++    background:transparent;
++    outline:none;
++    cursor:pointer;
++  }
++  .pr-settings-page .pr-keymaps .shortcut .values.unset { color:#626b60; }
++  .pr-keymaps .shortcut-value { padding:1px 5px; border:1px solid #dfe2d9; border-radius:4px; background:#fffefa; }
++  .pr-settings-page .pr-keymaps .shortcut .shortcut-value::after { content:none; }
++  .pr-shortcut-recording { color:#795e3a; font-size:12px; }
++  .pr-shortcut-recording.error { color:#9a433e; }
+   .pr-settings-page .pr-keymaps .shortcut.editing { background:#e9eee5; }
+   .pr-settings-empty { padding:32px 0; text-align:center; }
+   @media(max-width:1100px) {
+diff --git a/app/internal_packages/preferences/lib/tabs/keymaps/command-item.tsx b/app/internal_packages/preferences/lib/tabs/keymaps/command-item.tsx
+index ea9cdf3..8cc3e6e 100644
+--- a/app/internal_packages/preferences/lib/tabs/keymaps/command-item.tsx
++++ b/app/internal_packages/preferences/lib/tabs/keymaps/command-item.tsx
+@@ -4,8 +4,14 @@ import { Flexbox } from 'mailspring-component-kit';
+ import { localized } from 'mailspring-exports';
+ import fs from 'fs';
+ 
++import { canonicalShortcut, formatShortcut, formatShortcutStroke, isTextInputShortcut } from '../../../../../src/keymap-manager';
++import { paperReedKeybindings } from './displayed-keybindings';
+ import { keyAndModifiersForEvent } from './mousetrap-keybinding-helpers';
+ 
++const paperReedCommandLabels = new Map(paperReedKeybindings.flatMap((section) =>
++  section.items.map(([command, label]) => [command, label] as const)
++));
++
+ interface CommandKeybindingProps {
+   bindings: string[];
+   label: string;
+@@ -14,6 +20,7 @@ interface CommandKeybindingProps {
+ interface CommandKeybindingState {
+   editing: boolean;
+   editingBinding?: string;
++  editingError?: string;
+   modifiers?: string[];
+   keys?: string[];
+ }
+@@ -38,7 +45,7 @@ export default class CommandKeybinding extends React.Component<
+ 
+   componentDidUpdate() {
+     const { modifiers, keys, editing } = this.state;
+-    if (editing) {
++    if (editing && !AppEnv.config.get('core.paperReed.enabled')) {
+       const finished = (modifiers.length > 0 && keys.length > 0) || keys.length >= 2;
+       if (finished) {
+         (ReactDOM.findDOMNode(this) as HTMLElement).blur();
+@@ -48,61 +55,20 @@ export default class CommandKeybinding extends React.Component<
+ 
+   componentWillUnmount() {
+     this._mounted = false;
+-  }
+-
+-  _formatKeystrokes(original: string) {
+-    // macOS shows menu-bar glyphs (⌘⇧D); Windows and Linux spell shortcuts out
+-    // (Ctrl+Shift+D), and their users don't read ^ or ⌥ as modifier keys.
+-    const isMac = process.platform === 'darwin';
+-    const modifiers: [RegExp, string][] = isMac
+-      ? [
+-          [/\+(?!$)/gi, ''],
+-          [/command/gi, '⌘'],
+-          [/meta/gi, '⌘'],
+-          [/alt/gi, '⌥'],
+-          [/shift/gi, '⇧'],
+-          [/ctrl/gi, '^'],
+-          [/mod/gi, '⌘'],
+-        ]
+-      : [
+-          [/alt/gi, 'Alt'],
+-          [/shift/gi, 'Shift'],
+-          [/ctrl/gi, 'Ctrl'],
+-          [/mod/gi, 'Ctrl'],
+-        ];
+-    let clean = original;
+-    for (const [regexp, char] of modifiers) {
+-      clean = clean.replace(regexp, char);
++    if (this.state.editing && AppEnv.config.get('core.paperReed.enabled')) {
++      AppEnv.keymaps.resumeAllKeymaps();
+     }
+-
+-    if (isMac) {
+-      // ⌘⇧c => ⌘⇧C
+-      if (clean !== original) {
+-        clean = clean.toUpperCase();
+-      }
+-      // backspace => Backspace
+-      if (original.length > 1 && clean === original) {
+-        clean = clean[0].toUpperCase() + clean.slice(1);
+-      }
+-      return clean;
+-    }
+-
+-    // ctrl+shift+d => Ctrl+Shift+D, alt+backspace => Alt+Backspace
+-    return clean
+-      .split('+')
+-      .map((part) => (part.length > 0 ? part[0].toUpperCase() + part.slice(1) : part))
+-      .join('+');
+   }
+ 
+   _renderKeystrokes = (keystrokes: string, idx: number) => {
+     const elements = [];
+     const splitKeystrokes = keystrokes.split(' ');
+     splitKeystrokes.forEach((keystroke, kidx) => {
+-      elements.push(<span key={kidx}>{this._formatKeystrokes(keystroke)}</span>);
++      elements.push(<span key={kidx}>{formatShortcutStroke(keystroke)}</span>);
+       if (kidx < splitKeystrokes.length - 1) {
+         elements.push(
+           <span className="then" key={`then${kidx}`}>
+-            {` ${localized('then')} `}
++            {AppEnv.config.get('core.paperReed.enabled') ? ' → ' : ` ${localized('then')} `}
+           </span>
+         );
+       }
+@@ -115,10 +81,51 @@ export default class CommandKeybinding extends React.Component<
+   };
+ 
+   _onEdit = () => {
+-    this.setState({ editing: true, editingBinding: null, keys: [], modifiers: [] });
++    if (this.state.editing) return;
++    this.setState({ editing: true, editingBinding: null, editingError: null, keys: [], modifiers: [] });
+     AppEnv.keymaps.suspendAllKeymaps();
+   };
+ 
++  _cancelEdit = () => {
++    AppEnv.keymaps.resumeAllKeymaps();
++    this.setState({ editing: false, editingBinding: null, editingError: null });
++  };
++
++  _confirmPaperReedBinding = () => {
++    const { command } = this.props;
++    const binding = this.state.editingBinding;
++    const isComposer = /^(composer|contenteditable):/.test(command);
++    if (isComposer && !binding.split(' ').every(isTextInputShortcut)) {
++      this.setState({
++        editingError: '写邮件时请用 ⌘ 或 Ctrl 组合键，避开编辑键',
++        editingBinding: null,
++        keys: [],
++        modifiers: [],
++      });
++      return;
++    }
++    const key = canonicalShortcut(binding);
++    const conflicts = Object.entries(AppEnv.keymaps.getBindingsForAllCommands()).filter(
++      ([id, bindings]) =>
++        id !== command && bindings.some((value) => {
++          const existing = canonicalShortcut(value);
++          return existing === key || existing.startsWith(key + ' ') || key.startsWith(existing + ' ');
++        })
++    );
++    if (conflicts.length) {
++      const [id] = conflicts.find(([command]) => paperReedCommandLabels.has(command)) || conflicts[0];
++      const label = paperReedCommandLabels.get(id);
++      this.setState({
++        editingError: label ? `与「${label}」冲突，请换一个按键` : '这个按键已占用，请换一个按键',
++        editingBinding: null,
++        keys: [],
++        modifiers: [],
++      });
++      return;
++    }
++    this._onFinishedEditing();
++  };
++
+   _onFinishedEditing = () => {
+     if (this.state.editingBinding) {
+       const keymapPath = AppEnv.keymaps.getUserKeymapPath();
+@@ -137,6 +144,7 @@ export default class CommandKeybinding extends React.Component<
+ 
+       try {
+         fs.writeFileSync(keymapPath, JSON.stringify(keymaps, null, 2));
++        if (AppEnv.config.get('core.paperReed.enabled')) AppEnv.keymaps.userKeymap.load();
+       } catch (err) {
+         AppEnv.showErrorDialog(
+           localized(`Mailspring was unable to modify your keymaps at %@.`, keymapPath) +
+@@ -147,6 +155,10 @@ export default class CommandKeybinding extends React.Component<
+     }
+ 
+     AppEnv.keymaps.resumeAllKeymaps();
++    if (AppEnv.config.get('core.paperReed.enabled')) {
++      this.setState({ editing: false, editingBinding: null });
++      return;
++    }
+ 
+     setTimeout(() => {
+       if (!this._mounted) return;
+@@ -155,20 +167,32 @@ export default class CommandKeybinding extends React.Component<
+   };
+ 
+   _onKey = (event: React.KeyboardEvent<HTMLElement>) => {
+-    if (AppEnv.config.get('core.paperReed.enabled')) {
++    const paperReed = AppEnv.config.get('core.paperReed.enabled');
++    if (paperReed) {
+       if (event.type === 'keypress') return;
++      if (event.repeat && this.state.editing) {
++        event.preventDefault();
++        event.stopPropagation();
++        return;
++      }
+       if (!this.state.editing && (event.key === 'Enter' || event.key === ' ')) {
+         event.preventDefault();
+         event.stopPropagation();
+-        this._onEdit();
++        if (!event.repeat) this._onEdit();
++        return;
++      }
++      if (this.state.editing && (this.state.editingBinding || this.state.editingError) &&
++        event.key === 'Enter' &&
++        !event.metaKey && !event.ctrlKey && !event.altKey && !event.shiftKey) {
++        event.preventDefault();
++        event.stopPropagation();
++        if (this.state.editingBinding) this._confirmPaperReedBinding();
+         return;
+       }
+       if (this.state.editing && (event.key === 'Escape' || event.key === 'Tab')) {
+         if (event.key === 'Escape') event.preventDefault();
+         event.stopPropagation();
+-        this.setState({ editingBinding: null, editing: false }, () =>
+-          AppEnv.keymaps.resumeAllKeymaps()
+-        );
++        this._cancelEdit();
+         return;
+       }
+     }
+@@ -185,6 +209,10 @@ export default class CommandKeybinding extends React.Component<
+     }
+ 
+     let { keys, modifiers } = this.state;
++    if (paperReed && (modifiers.length || keys.length >= 2 || eventMods.length)) {
++      keys = [];
++      modifiers = [];
++    }
+     keys = keys.concat([eventKey]);
+     modifiers = [...new Set(modifiers.concat(eventMods))];
+ 
+@@ -198,16 +226,17 @@ export default class CommandKeybinding extends React.Component<
+       }
+     }
+ 
+-    this.setState({ keys, modifiers, editingBinding });
++    this.setState({ keys, modifiers, editingBinding, editingError: null });
+   };
+ 
+   render() {
+-    const { editing, editingBinding } = this.state;
++    const { editing, editingBinding, editingError } = this.state;
+     const bindings = editingBinding ? [editingBinding] : this.props.bindings;
++    const paperReed = AppEnv.config.get('core.paperReed.enabled');
+ 
+-    let value: React.ReactChild | React.ReactChild[] = AppEnv.config.get('core.paperReed.enabled')
+-      ? '未设置'
+-      : 'None';
++    const unset = paperReed ? '未设置' : 'None';
++    const displayed = bindings.map(formatShortcut);
++    let value: React.ReactChild | React.ReactChild[] = unset;
+     if (bindings.length > 0) {
+       // Templates may list mod+a and ctrl+a for one command; they are the same key
+       // on Windows and Linux, so dedupe by what the user would actually press.
+@@ -223,22 +252,34 @@ export default class CommandKeybinding extends React.Component<
+     return (
+       <Flexbox
+         className={classnames}
+-        tabIndex={AppEnv.config.get('core.paperReed.enabled') ? 0 : -1}
+-        role={AppEnv.config.get('core.paperReed.enabled') ? 'button' : undefined}
++        tabIndex={paperReed ? 0 : -1}
++        role={paperReed ? 'button' : undefined}
+         aria-label={
+-          AppEnv.config.get('core.paperReed.enabled')
+-            ? `${this.props.label}：${editing ? '正在录入，Esc 取消' : '编辑快捷键'}`
++          paperReed
++            ? `${this.props.label}：${editing ? '正在录入' : displayed.join('，') || unset}`
+             : undefined
+         }
+-        onClick={AppEnv.config.get('core.paperReed.enabled') ? this._onEdit : undefined}
++        onClick={paperReed ? this._onEdit : undefined}
+         onKeyDown={this._onKey}
+         onKeyPress={this._onKey}
+-        onFocus={AppEnv.config.get('core.paperReed.enabled') ? undefined : this._onEdit}
+-        onBlur={this._onFinishedEditing}
++        onFocus={paperReed ? undefined : this._onEdit}
++        onBlur={() => {
++          if (this.state.editing) {
++            if (paperReed) this._cancelEdit();
++            else this._onFinishedEditing();
++          }
++        }}
+       >
+         <div className="col-left shortcut-name">{this.props.label}</div>
+         <div className="col-right">
+-          <div className="values">{value}</div>
++          {paperReed && editing && (
++            <span className={editingError ? 'pr-shortcut-recording error' : 'pr-shortcut-recording'} role="status">
++              {editingError || (editingBinding ? 'Enter 保存 · Esc 取消' : '请按快捷键 · Esc 取消')}
++            </span>
++          )}
++          {(!paperReed || !editing || editingBinding) && (
++            <div className={bindings.length ? 'values' : 'values unset'}>{value}</div>
++          )}
+         </div>
+       </Flexbox>
+     );
+diff --git a/app/internal_packages/preferences/lib/tabs/keymaps/displayed-keybindings.ts b/app/internal_packages/preferences/lib/tabs/keymaps/displayed-keybindings.ts
+index 8dd3fa3..f026c65 100644
+--- a/app/internal_packages/preferences/lib/tabs/keymaps/displayed-keybindings.ts
++++ b/app/internal_packages/preferences/lib/tabs/keymaps/displayed-keybindings.ts
+@@ -94,3 +94,67 @@ export default [
+     ],
+   },
+ ];
++
++// The Paper Reed workspace and composer expose their own subset of commands.
++export const paperReedKeybindings = [
++  {
++    title: '应用',
++    items: [
++      ['paper-reed:commands', '打开命令面板'],
++      ['paper-reed:search-mail', '搜索邮件'],
++      ['application:new-message', '新建写信窗口'],
++      ['application:open-preferences', '打开设置'],
++      ['paper-reed:agent', '交给 Agent'],
++    ],
++  },
++  {
++    title: '整理邮件',
++    items: [
++      ['core:select-item', '选择邮件'],
++      ['multiselect-list:deselect-all', '取消选择'],
++      ['core:archive-item', '归档'],
++      ['core:delete-item', '移到废纸篓'],
++      ['core:mark-as-read', '标为已读'],
++      ['core:mark-as-unread', '标为未读'],
++    ],
++  },
++  {
++    title: '阅读邮件',
++    items: [
++      ['core:reply', '回复'],
++      ['core:reply-all', '回复全部'],
++      ['core:forward', '转发'],
++      ['core:find-in-thread', '查找邮件或会话正文'],
++    ],
++  },
++  {
++    title: '写邮件',
++    items: [
++      ['composer:send-message', '发送邮件'],
++      ['composer:focus-to', '聚焦收件人'],
++      ['composer:show-and-focus-cc', '显示并聚焦抄送'],
++      ['composer:show-and-focus-bcc', '显示并聚焦密送'],
++      ['composer:select-attachment', '添加附件'],
++      ['contenteditable:insert-link', '插入链接／命令面板'],
++      ['contenteditable:quote', '插入引文'],
++      ['contenteditable:numbered-list', '插入有序列表'],
++      ['contenteditable:bulleted-list', '插入无序列表'],
++      ['contenteditable:indent', '增加缩进'],
++      ['contenteditable:outdent', '减少缩进'],
++      ['contenteditable:underline', '下划线'],
++      ['contenteditable:bold', '加粗'],
++      ['contenteditable:italic', '斜体'],
++    ],
++  },
++  {
++    title: '邮件导航',
++    items: [
++      ['core:previous-item', '上一封邮件'],
++      ['core:next-item', '下一封邮件'],
++      ['navigation:go-to-inbox', '前往收件箱'],
++      ['navigation:go-to-starred', '前往置顶'],
++      ['navigation:go-to-drafts', '前往草稿'],
++      ['navigation:go-to-sent', '前往已发送'],
++    ],
++  },
++];
+diff --git a/app/internal_packages/preferences/lib/tabs/keymaps/mousetrap-keybinding-helpers.js b/app/internal_packages/preferences/lib/tabs/keymaps/mousetrap-keybinding-helpers.js
+index 04b7fc1..1c52e90 100644
+--- a/app/internal_packages/preferences/lib/tabs/keymaps/mousetrap-keybinding-helpers.js
++++ b/app/internal_packages/preferences/lib/tabs/keymaps/mousetrap-keybinding-helpers.js
+@@ -203,9 +203,11 @@ function eventModifiers(e) {
+ function keyAndModifiersForEvent(e) {
+   var eventKey = characterFromEvent(e);
+   var eventMods = eventModifiers(e);
+-  if (_REVERSE_SHIFT_MAP[eventKey] && eventMods.indexOf('shift') !== -1) {
++  // Mousetrap matches modified chords on keydown using the unshifted keycode.
++  // A lone shifted symbol is matched on keypress instead (for example Gmail's #).
++  if (_REVERSE_SHIFT_MAP[eventKey] && eventMods.length === 1 && eventMods[0] === 'shift') {
+     eventKey = _REVERSE_SHIFT_MAP[eventKey];
+-    eventMods = eventMods.filter(k => k !== 'shift');
++    eventMods = [];
+   }
+   return [eventKey, eventMods];
+ }
+diff --git a/app/internal_packages/preferences/lib/tabs/preferences-keymaps.tsx b/app/internal_packages/preferences/lib/tabs/preferences-keymaps.tsx
+index 128255e..bd26991 100644
+--- a/app/internal_packages/preferences/lib/tabs/preferences-keymaps.tsx
++++ b/app/internal_packages/preferences/lib/tabs/preferences-keymaps.tsx
+@@ -3,19 +3,21 @@ import path from 'path';
+ import fs from 'fs';
+ 
+ import { Flexbox } from 'mailspring-component-kit';
++import { formatShortcut, isTextInputShortcut } from '../../../../src/keymap-manager';
+ import { localized } from 'mailspring-exports';
+ 
+-import displayedKeybindings from './keymaps/displayed-keybindings';
++import displayedKeybindings, { paperReedKeybindings } from './keymaps/displayed-keybindings';
+ import CommandItem from './keymaps/command-item';
+ import { Disposable } from 'event-kit';
+ 
+ export default class PreferencesKeymaps extends React.Component<
+   { config: any },
+-  { templates: string[]; bindings: { [command: string]: [] }; search: string }
++  { templates: string[]; bindings: { [command: string]: string[] }; search: string }
+ > {
+   static displayName = 'PreferencesKeymaps';
+ 
+   _disposable?: Disposable;
++  shortcutSearch = React.createRef<HTMLInputElement>();
+ 
+   constructor(props) {
+     super(props);
+@@ -29,7 +31,12 @@ export default class PreferencesKeymaps extends React.Component<
+ 
+   componentDidMount() {
+     this._disposable = AppEnv.keymaps.onDidReloadKeymap(() => {
+-      this.setState({ bindings: this._getStateFromKeymaps() });
++      const focusedRow = document.activeElement?.closest('.pr-keymaps .shortcut');
++      this.setState({ bindings: this._getStateFromKeymaps() }, () => {
++        if (focusedRow && !focusedRow.isConnected && document.activeElement === document.body) {
++          this.shortcutSearch.current?.focus();
++        }
++      });
+     });
+   }
+ 
+@@ -38,10 +45,15 @@ export default class PreferencesKeymaps extends React.Component<
+   }
+ 
+   _getStateFromKeymaps() {
+-    const bindings: { [command: string]: [] } = {};
+-    for (const section of displayedKeybindings) {
++    const bindings: { [command: string]: string[] } = {};
++    const paperReed = AppEnv.config.get('core.paperReed.enabled');
++    const sections = paperReed ? paperReedKeybindings : displayedKeybindings;
++    for (const section of sections) {
+       for (const [command] of section.items) {
+-        bindings[command] = AppEnv.keymaps.getBindingsForCommand(command) || [];
++        const keys = AppEnv.keymaps.getBindingsForCommand(command);
++        bindings[command] = paperReed && /^(composer|contenteditable):/.test(command)
++          ? keys.filter((key) => key.split(' ').every(isTextInputShortcut))
++          : keys;
+       }
+     }
+     return bindings;
+@@ -70,16 +82,27 @@ export default class PreferencesKeymaps extends React.Component<
+   }
+ 
+   _onDeleteUserKeymap() {
+-    const chosen = require('@electron/remote').dialog.showMessageBoxSync({
+-      type: 'info',
+-      message: localized('Are you sure?'),
+-      detail: localized('Delete your custom key bindings and reset to the template defaults?'),
+-      buttons: [localized('Cancel'), localized('Reset')],
+-    });
++    const { dialog, getCurrentWindow } = require('@electron/remote');
++    const chosen = AppEnv.config.get('core.paperReed.enabled')
++      ? dialog.showMessageBoxSync(getCurrentWindow(), {
++          type: 'warning',
++          message: '恢复快捷键默认设置？',
++          detail: '这会清除自定义快捷键，恢复当前方案的默认按键。',
++          buttons: ['取消', '恢复默认'],
++          defaultId: 0,
++          cancelId: 0,
++        })
++      : dialog.showMessageBoxSync({
++          type: 'info',
++          message: localized('Are you sure?'),
++          detail: localized('Delete your custom key bindings and reset to the template defaults?'),
++          buttons: [localized('Cancel'), localized('Reset')],
++        });
+ 
+     if (chosen === 1) {
+       const keymapsFile = AppEnv.keymaps.getUserKeymapPath();
+       fs.writeFileSync(keymapsFile, '{}');
++      if (AppEnv.config.get('core.paperReed.enabled')) AppEnv.keymaps.userKeymap.load();
+     }
+   }
+ 
+@@ -104,14 +127,16 @@ export default class PreferencesKeymaps extends React.Component<
+   render() {
+     if (AppEnv.config.get('core.paperReed.enabled')) {
+       const query = this.state.search.trim().toLocaleLowerCase();
+-      const sections = displayedKeybindings
++      const sections = paperReedKeybindings
+         .map((section) => ({
+           ...section,
+-          items: section.items.filter(([command, label]) =>
+-            `${label} ${command} ${(this.state.bindings[command] || []).join(' ')}`
+-              .toLocaleLowerCase()
+-              .includes(query)
+-          ),
++          items: section.items.filter(([command, label]) => {
++            if (!query) return true;
++            const bindings = this.state.bindings[command] || [];
++            return [
++              label, command, command.replace(/[:-]/g, ' '), ...bindings, ...bindings.map(formatShortcut),
++            ].some((text) => text.toLocaleLowerCase().includes(query));
++          }),
+         }))
+         .filter((section) => section.items.length);
+       return (
+@@ -133,32 +158,42 @@ export default class PreferencesKeymaps extends React.Component<
+               恢复默认…
+             </button>
+           </div>
+-          <p>选择熟悉的方案。点击一行或按 Enter 开始录入，Esc 取消。</p>
+-          <label className="sr-only" htmlFor="pr-shortcut-search">
+-            搜索操作或按键
+-          </label>
+-          <input
+-            type="search"
+-            id="pr-shortcut-search"
+-            placeholder="搜索操作或按键…"
+-            value={this.state.search}
+-            onChange={(e) => this.setState({ search: e.target.value })}
+-          />
++          <div className="pr-shortcut-filter">
++            <label className="sr-only" htmlFor="pr-shortcut-search">搜索操作或按键</label>
++            <input
++              ref={this.shortcutSearch}
++              type="search"
++              id="pr-shortcut-search"
++              placeholder="搜索操作或按键…"
++              value={this.state.search}
++              onChange={(e) => this.setState({ search: e.target.value })}
++            />
++            {this.state.search && (
++              <button
++                type="button"
++                aria-label="清除搜索"
++                onClick={() => {
++                  this.setState({ search: '' });
++                  this.shortcutSearch.current?.focus();
++                }}
++              >
++                ×
++              </button>
++            )}
++          </div>
++          <p className="pr-shortcut-help">点击命令或按 Enter 修改快捷键。</p>
+           {sections.length ? (
+             sections.map(this._renderBindingsSection)
+           ) : (
+             <div className="pr-settings-empty" role="status">
+               <p>没有匹配的快捷键</p>
+-              <button type="button" onClick={() => this.setState({ search: '' })}>
+-                清除搜索
+-              </button>
+             </div>
+           )}
+           <details className="pr-settings-group">
+             <summary>高级自定义</summary>
+             <p>直接编辑快捷键配置文件。</p>
+             <button type="button" onClick={this._onShowUserKeymaps}>
+-              打开配置文件
++              {process.platform === 'darwin' ? '在 Finder 中显示配置文件' : '显示配置文件所在位置'}
+             </button>
+           </details>
+         </div>
+diff --git a/app/spec/keymap-manager-spec.ts b/app/spec/keymap-manager-spec.ts
+index 0746b27..129884c 100644
+--- a/app/spec/keymap-manager-spec.ts
++++ b/app/spec/keymap-manager-spec.ts
+@@ -15,6 +15,7 @@ describe('KeymapManager', function () {
+     // stopCallback: a bare mousetrap.bind would steal the app's global bindings.
+     trap = new mousetrap(document.body);
+     spyOn(mousetrap, 'bind').andCallFake((keys, callback) => trap.bind(keys, callback));
++    spyOn(mousetrap, 'reset').andCallFake(() => trap.reset());
+     manager = new KeymapManager({ configDirPath: resourcePath, resourcePath });
+   });
+ 
+diff --git a/app/src/keymap-manager.ts b/app/src/keymap-manager.ts
+index 5bd1731..cf116f7 100644
+--- a/app/src/keymap-manager.ts
++++ b/app/src/keymap-manager.ts
+@@ -22,11 +22,67 @@ interface KeymapLoadOptions {
+   layer?: KeymapLayer;
+ }
+ 
+-// Mousetrap understands mod, but keeps mod+u and ctrl+u as separate callbacks.
+-// Our stopCallback skips the second after the first stops propagation, so merge
+-// platform aliases before registering callbacks and collecting their commands.
+-const normalizePlatformKeystrokes = (keystrokes: string) =>
+-  keystrokes.replace(/\bmod\b/g, process.platform === 'darwin' ? 'command' : 'ctrl');
++// Match Mousetrap's modifier aliases so registration and conflict checks see the same key.
++const strokeParts = (stroke: string) => {
++  const aliases = {
++    meta: 'command',
++    mod: process.platform === 'darwin' ? 'command' : 'ctrl',
++    option: 'alt',
++    return: 'enter',
++    escape: 'esc',
++  };
++  const keys = stroke === '+' ? ['plus'] : stroke.replace(/\+{2}/g, '+plus').split('+');
++  return keys.map((key) => aliases[key] || key);
++};
++
++export const canonicalShortcut = (binding: string) =>
++  binding.split(' ').map((stroke) => {
++    const parts = strokeParts(stroke);
++    const key = parts.pop();
++    return [...parts.sort(), key].join('+');
++  }).join(' ');
++
++export function formatShortcutStroke(stroke: string) {
++  const modifiers = strokeParts(stroke);
++  const key = modifiers.pop();
++  const mac = process.platform === 'darwin';
++  const labels = mac
++    ? { command: '⌘', ctrl: '⌃', alt: '⌥', shift: '⇧' }
++    : { ctrl: 'Ctrl', alt: 'Alt', shift: 'Shift', command: 'Meta' };
++  const parts = Object.keys(labels).filter((name) => modifiers.includes(name)).map((name) => labels[name]);
++  parts.push(key === 'plus' ? '+' : key.charAt(0).toUpperCase() + key.slice(1));
++  return parts.join(mac ? '' : '+');
++}
++
++export const formatShortcut = (binding: string) =>
++  binding.split(' ').map(formatShortcutStroke).join(' → ');
++
++// Cocoa's Control editing bindings and the macOS Copy/Paste Style shortcuts.
++const macEditorKeysByModifiers: Record<string, string[]> = {
++  ctrl: [
++    'a', 'b', 'd', 'e', 'f', 'h', 'k', 'l', 'n', 'o', 'p', 't', 'v', 'y',
++    "'", '/', 'enter', 'tab',
++  ],
++  'ctrl+shift': ['a', 'b', 'e', 'f', 'n', 'p', 'v', "'", 'tab'],
++  'alt+ctrl': ['b', 'f'],
++  'alt+ctrl+shift': ['b', 'f'],
++  'alt+command': ['c', 'v'],
++  'alt+command+shift': ['v'],
++};
++
++export const isTextInputShortcut = (stroke: string) => {
++  const modifiers = strokeParts(stroke);
++  const key = modifiers.pop();
++  const hasPrimary = modifiers.includes('command') || modifiers.includes('ctrl');
++  const movesOrDeletesText = [
++    'left', 'right', 'up', 'down', 'home', 'end', 'pageup', 'pagedown', 'backspace', 'del',
++  ].includes(key);
++  const editsText = modifiers.length === 1 && ['a', 'x', 'c', 'v', 'z', 'y'].includes(key);
++  const shiftedEdit = modifiers.length === 2 && modifiers.includes('shift') && ['z', 'v'].includes(key);
++  const macEdit = process.platform === 'darwin' &&
++    macEditorKeysByModifiers[modifiers.sort().join('+')]?.includes(key);
++  return hasPrimary && !movesOrDeletesText && !editsText && !shiftedEdit && !macEdit;
++};
+ 
+ /*
+ By default, Mousetrap stops all hotkeys within text inputs. Override this to
+@@ -38,16 +94,6 @@ mousetrap.prototype.stopCallback = (e: KeyboardEvent, element: HTMLElement, comb
+     return true;
+   }
+ 
+-  // Slate handles undo/redo itself in slate-react's `after` plugin but doesn't stop
+-  // propagation. Because of this, we need to make sure we do not fire core:undo or core:redo.
+-  const target = e.target as HTMLElement;
+-  const withinSlateEditor =
+-    target.isContentEditable &&
+-    (target.hasAttribute('data-slate-editor') || target.closest('[data-slate-editor]'));
+-  if (withinSlateEditor && /(mod|command|ctrl)\+(z|y)/.test(combo)) {
+-    return true;
+-  }
+-
+   const withinWebview = element.tagName === 'WEBVIEW';
+   if (withinWebview) {
+     return true;
+@@ -65,12 +111,9 @@ mousetrap.prototype.stopCallback = (e: KeyboardEvent, element: HTMLElement, comb
+     element.tagName === 'TEXTAREA' ||
+     element.isContentEditable ||
+     !!element.closest('.composer-outer-wrap');
+-  if (withinTextInput) {
+-    const isPlainKey = !/(mod|command|ctrl)/.test(combo);
+-    const isReservedTextEditingShortcut = /(mod|command|ctrl)\+(a|x|c|v|left|right)/.test(combo);
+-    if (isPlainKey || isReservedTextEditingShortcut) {
+-      return true;
+-    }
++  // Leave selection, clipboard and history shortcuts to the focused editor.
++  if (withinTextInput && !isTextInputShortcut(combo)) {
++    return true;
+   }
+ 
+   // Stop mousetrap from firing global commands when focus is within a tree widget
+@@ -81,7 +124,7 @@ mousetrap.prototype.stopCallback = (e: KeyboardEvent, element: HTMLElement, comb
+     !!element.closest('[role="tree"]') ||
+     !!element.closest('[data-usesarrowkeys]:has(:focus-visible)');
+   if (withinTree) {
+-    const isPlainKey = !/(mod|command|ctrl)/.test(combo);
++    const isPlainKey = !/(mod|command|meta|ctrl)/.test(combo);
+     const isArrowKey = /(left|right|up|down)/.test(combo);
+     return isPlainKey && isArrowKey;
+   }
+@@ -124,11 +167,7 @@ class KeymapFile {
+         keystrokesArray = [keystrokesArray];
+       }
+       // An empty list is a command with no keys, which overrides the layers below it.
+-      this._bindings[command] = [];
+-      for (const keystrokes of keystrokesArray) {
+-        this._manager.ensureKeystrokesRegistered(keystrokes);
+-        this._bindings[command].push(keystrokes);
+-      }
++      this._bindings[command] = keystrokesArray;
+     });
+     this._manager.keymapCacheInvalidated();
+   };
+@@ -160,8 +199,8 @@ export default class KeymapManager {
+   userKeymap?: KeymapFile;
+   _unobserveTemplate?: Disposable;
+   _removeTemplate?: Disposable;
+-  _bindingsCache: any;
+-  _commandsCache: any;
++  _bindingsCache: Record<string, string[]>;
++  _commandsCache: Record<string, string[]>;
+   _altKeyDown = false;
+   _altKeyTimer: NodeJS.Timeout = null;
+ 
+@@ -268,8 +307,7 @@ export default class KeymapManager {
+     });
+   }
+ 
+-  ensureKeystrokesRegistered(keystrokes: string) {
+-    const platformKeystrokes = normalizePlatformKeystrokes(keystrokes);
++  ensureKeystrokesRegistered(platformKeystrokes: string) {
+     if (this._registered[platformKeystrokes]) {
+       return;
+     }
+@@ -319,7 +357,7 @@ export default class KeymapManager {
+     this._commandsCache = {};
+     for (const command of Object.keys(this._bindingsCache)) {
+       for (const keystrokes of this._bindingsCache[command]) {
+-        const platformKeystrokes = normalizePlatformKeystrokes(keystrokes);
++        const platformKeystrokes = canonicalShortcut(keystrokes);
+         if (!this._commandsCache[platformKeystrokes]) {
+           this._commandsCache[platformKeystrokes] = [];
+         }
+@@ -329,6 +367,12 @@ export default class KeymapManager {
+       }
+     }
+ 
++    // Removed sequences can still swallow their first key until Mousetrap forgets them.
++    if (Object.keys(this._registered).some((binding) => !this._commandsCache[binding])) {
++      mousetrap.reset();
++      this._registered = {};
++    }
++    Object.keys(this._commandsCache).forEach((binding) => this.ensureKeystrokesRegistered(binding));
+     this._emitter.emit('on-did-reload-keymap');
+   }
+ 
