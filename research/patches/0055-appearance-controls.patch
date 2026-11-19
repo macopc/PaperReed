@@ -1,0 +1,191 @@
+diff --git a/app/internal_packages/paper-reed/styles/paper-reed.less b/app/internal_packages/paper-reed/styles/paper-reed.less
+index ae69e33..702ed97 100644
+--- a/app/internal_packages/paper-reed/styles/paper-reed.less
++++ b/app/internal_packages/paper-reed/styles/paper-reed.less
+@@ -437,17 +437,21 @@
+ .preferences-wrap.pr-preferences .pr-settings-page {
+   .pr-appearance, .pr-folders { width:100%; min-width:0; max-width:780px; margin:0; }
+   .pr-appearance .pr-settings-group p, .pr-folders p, .pr-rules p { color:#626b60; font-size:12px; line-height:20px; }
+-  .pr-style-sample { border:1px solid #dfe2d9; border-radius:6px; padding:24px; background:#fffefa; }
+-  .pr-style-paper { font:24px/32px 'Iowan Old Style',serif; }
+-  .pr-style-paper > span { display:block; font:11px/20px -apple-system,sans-serif; color:#626b60; margin-top:4px; }
+-  .pr-style-letter { display:flex; gap:12px; align-items:center; margin-top:24px; padding-top:20px; border-top:1px solid #dfe2d9; }
+-  .pr-style-mark { width:32px; height:32px; border:2px solid #7d8976; border-radius:50%; display:flex; align-items:center; justify-content:center; color:#4b634f; }
+-  .pr-style-letter strong { font-weight:500; font-size:13px; } .pr-style-letter p { margin:4px 0 0; }
+-  .pr-scale-control { display:grid; grid-template-columns:1fr auto; gap:12px 20px; align-items:center; }
+-  .pr-scale-control input[type=range] { width:100%; min-width:0; accent-color:#4b634f; padding:0; border:0; background:transparent; }
+-  .pr-scale-control output { text-align:right; color:#626b60; font-variant-numeric:tabular-nums; }
++  .pr-scale-control { display:grid; grid-template-columns:minmax(0,1fr) auto auto; gap:8px 12px; align-items:center; }
++  .pr-scale-control input[type=range] { width:100%; min-width:0; accent-color:#4b634f; padding:0; border:0; background:transparent; margin:0; }
++  .pr-scale-control output { min-width:5ch; text-align:right; color:#626b60; font-variant-numeric:tabular-nums; }
++  .pr-scale-control button { white-space:nowrap; }
++  .pr-scale-control button:disabled { color:#687267; border-color:#e3e5dc; opacity:1; cursor:default; background:transparent; }
++  .pr-appearance .pr-settings-group > p { margin:8px 0 0; }
++  .pr-reading-sample { margin-top:12px; padding:12px 16px; border:1px solid #dfe2d9; border-radius:5px; color:#303730; background:#fffefa; }
++  .pr-reading-sample.dark { border-color:#000; color:#fff; background:#000; }
++  .pr-reading-sample strong { display:block; font-size:11px; font-weight:500; }
++  .pr-reading-sample span { display:block; margin-top:4px; }
+   .pr-setting-row { display:flex; justify-content:space-between; align-items:center; gap:20px; }
+   .pr-setting-row select { max-width:65%; margin:0; }
++  .pr-appearance { container-type:inline-size; }
++  .pr-appearance .pr-setting-row { flex-wrap:wrap; gap:6px 20px; }
++  .pr-appearance .pr-setting-row select { flex-shrink:0; width:206px; max-width:100%; min-height:34px; }
+   .pr-folder-intro { margin:0 0 24px; }
+   .pr-folder-mappings { margin-top:20px; }
+   .pr-folders .role-section { display:grid; grid-template-columns:130px minmax(0,1fr); gap:24px; align-items:center; padding:12px 0; border-bottom:1px solid #eceee7; }
+@@ -747,3 +751,13 @@
+ .pr-command-results button.active, .pr-command-results button:not(:disabled):hover { background:#e9eee5; }
+ .pr-command-results button:disabled { opacity:.4; }
+ .pr-command-panel footer { margin-top:16px; color:#747a70; font-size:11px; }
++
++@container (max-width: 280px) {
++  .preferences-wrap.pr-preferences .pr-settings-page .pr-appearance .pr-scale-control {
++    grid-template-columns:minmax(0,1fr) auto;
++  }
++  .preferences-wrap.pr-preferences .pr-settings-page .pr-appearance .pr-scale-control button {
++    grid-column:~"1 / -1";
++    justify-self:end;
++  }
++}
+diff --git a/app/internal_packages/preferences/lib/preferences-root.tsx b/app/internal_packages/preferences/lib/preferences-root.tsx
+index ae83eaa..6c40628 100644
+--- a/app/internal_packages/preferences/lib/preferences-root.tsx
++++ b/app/internal_packages/preferences/lib/preferences-root.tsx
+@@ -77,7 +77,7 @@ class PreferencesRoot extends React.Component<{ tab: any; tabs: any[]; selection
+       {
+         Templates: ['邮件模板', '把常用表达留好，让下一封信从容开始。'],
+         MCP: ['Agent 连接', '连接本机 Agent，明确它可以访问的邮件与操作。'],
+-        Appearance: ['外观', '调整界面大小与邮件正文的显示方式。'],
++        Appearance: ['外观', '调整界面大小、邮件正文配色和菜单栏提示。'],
+         'Mail Rules': ['邮件规则', '为每个账号安排清楚、可控的自动处理。'],
+         Folders: ['文件夹', '确认常用邮件用途对应的实际文件夹。'],
+         General: ['通用', '让阅读、写信与提醒符合你的习惯。'],
+diff --git a/app/internal_packages/preferences/lib/tabs/preferences-appearance.tsx b/app/internal_packages/preferences/lib/tabs/preferences-appearance.tsx
+index fba43b8..232057d 100644
+--- a/app/internal_packages/preferences/lib/tabs/preferences-appearance.tsx
++++ b/app/internal_packages/preferences/lib/tabs/preferences-appearance.tsx
+@@ -13,6 +13,7 @@ class AppearanceScaleSlider extends React.Component<
+   static displayName = 'AppearanceScaleSlider';
+ 
+   kp = `core.workspace.interfaceZoom`;
++  slider = React.createRef<HTMLInputElement>();
+ 
+   constructor(props) {
+     super(props);
+@@ -26,27 +27,33 @@ class AppearanceScaleSlider extends React.Component<
+   }
+ 
+   render() {
+-    if (AppEnv.config.get('core.paperReed.enabled'))
++    if (AppEnv.config.get('core.paperReed.enabled')) {
++      const percent = Math.round(Number(this.state.value) * 100);
+       return (
+         <div className="pr-scale-control">
+-          <label htmlFor="interface-zoom-slider">界面缩放</label>
+-          <output htmlFor="interface-zoom-slider">
+-            {Math.round(Number(this.state.value) * 100)}%
+-          </output>
++          <label className="sr-only" htmlFor="interface-zoom-slider">界面大小</label>
+           <input
++            ref={this.slider}
+             id="interface-zoom-slider"
+             type="range"
+             min={0.8}
+             max={1.4}
+             step={0.05}
+             value={this.state.value}
++            aria-valuetext={`${percent}%`}
++            aria-describedby="pr-scale-description"
+             onChange={(e) => this.props.config.set(this.kp, Number(e.target.value))}
+           />
+-          <button type="button" onClick={() => this.props.config.set(this.kp, 1)}>
++          <output htmlFor="interface-zoom-slider">{percent}%</output>
++          <button type="button" disabled={percent === 100} onClick={() => {
++            this.slider.current.focus();
++            this.props.config.set(this.kp, 1);
++          }}>
+             恢复 100%
+           </button>
+         </div>
+       );
++    }
+     return (
+       <div id={this.props.id} className="appearance-scale-slider">
+         <div className="ruler">
+@@ -364,34 +371,14 @@ class PreferencesAppearance extends React.Component<{ config: ConfigLike; config
+   };
+ 
+   render() {
+-    if (AppEnv.config.get('core.paperReed.enabled'))
++    if (AppEnv.config.get('core.paperReed.enabled')) {
++      const mode = this.props.config.get('core.reading.emailRenderMode') === 'dark' ? 'dark' : 'light';
+       return (
+         <div className="container-appearance pr-appearance">
+-          <section className="pr-settings-group">
+-            <h2>当前样式</h2>
+-            <div
+-              className="pr-style-sample"
+-              aria-label="Paper Reed 当前固定样式，纸白背景与苇绿强调色"
+-            >
+-              <div className="pr-style-paper">
+-                Paper Reed<span>纸白 · 苇绿</span>
+-              </div>
+-              <div className="pr-style-letter">
+-                <span className="pr-style-mark" aria-hidden="true">
+-                  P
+-                </span>
+-                <div>
+-                  <strong>留一点空间给思考</strong>
+-                  <p>让邮件回到清晰、从容的节奏。</p>
+-                </div>
+-              </div>
+-            </div>
+-            <p>当前采用固定配色与布局。</p>
+-          </section>
+           <section className="pr-settings-group">
+             <h2>界面大小</h2>
+             <AppearanceScaleSlider id="change-scale" config={this.props.config} />
+-            <p>调整文字与控件的大小，不改变发出邮件的字号。</p>
++            <p id="pr-scale-description">缩放会立即应用到窗口。发出邮件的字号保持原样。</p>
+           </section>
+           <section className="pr-settings-group">
+             <h2>邮件正文</h2>
+@@ -399,7 +386,7 @@ class PreferencesAppearance extends React.Component<{ config: ConfigLike; config
+               <span>阅读时的背景</span>
+               <select
+                 id="pr-message-appearance"
+-                value={this.props.config.get('core.reading.emailRenderMode')}
++                value={mode}
+                 onChange={(e) =>
+                   this.props.config.set('core.reading.emailRenderMode', e.target.value)
+                 }
+@@ -408,7 +395,11 @@ class PreferencesAppearance extends React.Component<{ config: ConfigLike; config
+                 <option value="dark">深色</option>
+               </select>
+             </label>
+-            <p>仅影响收到邮件的阅读区域，保留正文中的图片与格式。</p>
++            <div className={`pr-reading-sample ${mode}`}>
++              <strong>正文预览</strong>
++              <span>你好，这是邮件阅读区的示例文字。</span>
++            </div>
++            <p>配色只应用于收到邮件的正文，图片仍按原色显示。</p>
+           </section>
+           <section className="pr-settings-group">
+             <h2>菜单栏图标</h2>
+@@ -422,7 +413,7 @@ class PreferencesAppearance extends React.Component<{ config: ConfigLike; config
+                 }
+               >
+                 <option value="blue">蓝色表示未读</option>
+-                <option value="red">红色表示新邮件，蓝色表示未读</option>
++                <option value="red">新邮件红色，未读蓝色</option>
+                 <option value="none">不显示未读状态</option>
+               </select>
+             </label>
+@@ -430,6 +421,7 @@ class PreferencesAppearance extends React.Component<{ config: ConfigLike; config
+           </section>
+         </div>
+       );
++    }
+     return (
+       <div className="container-appearance">
+         <section>
