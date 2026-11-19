@@ -4,10 +4,10 @@
 
 <h1 align="center">Paper Reed</h1>
 
-<p align="center"><strong>A quieter email client for Mac.</strong></p>
+<p align="center"><strong>The open-source Mac email client for AI agents.</strong></p>
 
 <p align="center">
-  An open-source inbox for reading and writing mail, with a CLI for the agents you already use.
+  Give Claude Code, Codex, or OpenCode a local CLI to find mail, organize your inbox, and draft replies. Open the same draft in Paper Reed to review it.
 </p>
 
 <p align="center">
@@ -16,24 +16,27 @@
   · <a href="README.md">中文</a>
 </p>
 
-![The Paper Reed desktop inbox, with a unified message list, search, and colored account rings](research/agent-receipts-2026-11-18/inbox.png)
+![A saved supplier reply drafted by Codex, open in the Paper Reed desktop editor](research/agent-receipts-2026-11-18/reply-review.png)
 
-*Desktop screenshot from a test build using synthetic mail.*
+*Codex drafted this reply for review in Paper Reed. The screenshots on this page show running development builds with synthetic mail.*
 
-## Everyday mail
+## Start with a task
 
-- **One inbox for work and personal mail.** Account colors show where each message came from. Connect Gmail, iCloud, or an account with IMAP and SMTP.
-- **Find mail as you type.** Instant search can match fragments of Chinese text. Move between conversations with the keyboard or open the command palette with `⌘K`.
-- **Keep track of what matters.** Pin important threads, snooze the ones that can wait, and organize the rest with custom labels and local rules.
-- **Read and reply in the same place.** Stay in the desktop app to read threads, compose replies, and handle attachments. Drafts are saved locally.
+> Reply to the supplier who updated the delivery date for PO-418 in my work inbox. Tell them the new date works and ask them to confirm when they’ll ship. Leave the draft for me to review.
 
-## Let an agent draft. Review on your Mac.
+In the test, Codex used `paper-reed` to find the thread and save a reply draft with the original message quoted. The CLI returned a save receipt, and the same draft opened in the desktop app. [Eight agent workflows and test results](research/agent-receipts-2026-11-18/README.md)
 
-Open **Settings → Agent Connection** (设置 → Agent 连接), enable the local connection, and install `paper-reed`. Choose which mailboxes and actions the agent can access, then paste the setup instructions into a local Claude Code, Codex, or OpenCode session that can run shell commands.
+## Connect your agent
 
-> Find the supplier’s latest reply about the delivery date, draft a confirmation, and leave it in Drafts for me to review.
+Open **Settings → Agent Connection** (设置 → Agent 连接), enable the local connection, and install `paper-reed`. Choose which mailboxes and actions to grant, then copy the setup instructions into an agent session that can run local shell commands. Keep Paper Reed open while the agent works.
 
-An agent can search mail, read the conversation, and leave a draft you can open and edit in the app. Sending is a separate action with its own permission. You can also limit access to reading or to reading and drafting. [CLI guide](research/cli/README.md) · [Draft handoff and send recovery tests](research/agent-receipts-2026-11-18/README.md)
+Access can be limited to reading, drafting, or organizing. Sending requires enabling send permission. [CLI guide](research/cli/README.md)
+
+| What your agent can access | Your inbox on Mac |
+| --- | --- |
+| ![Agent Connection settings with the CLI installed and reading and drafting enabled](research/cli-onboarding-validation-2026-11-16/installed.png) | ![Paper Reed’s unified inbox with search and colored account rings](research/agent-receipts-2026-11-18/inbox.png) |
+
+Connect Gmail, iCloud, or a generic IMAP/SMTP account. Search across your unified inbox as you type, open the command palette with `⌘K`, and organize threads with pins, snooze, labels, and local rules.
 
 ## Install the preview
 

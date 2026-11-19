@@ -4,10 +4,10 @@
 
 <h1 align="center">Paper Reed</h1>
 
-<p align="center"><strong>安静一点的 Mac 邮件客户端。</strong></p>
+<p align="center"><strong>为 AI Agent 打造的开源 Mac 邮件客户端。</strong></p>
 
 <p align="center">
-  一个开源收件箱，用来认真读信、写信，也能让你常用的 Agent 搭把手。
+  让 Claude Code、Codex 或 OpenCode 通过本机 CLI 搜信、读信、整理收件箱和起草回复。回到 Paper Reed，打开同一份草稿审阅。
 </p>
 
 <p align="center">
@@ -16,24 +16,27 @@
   · <a href="README.en.md">English</a>
 </p>
 
-![Paper Reed 收件箱实拍，展示统一收件箱、搜索框和用于区分账号的颜色圆环](research/agent-receipts-2026-11-18/inbox.png)
+![Paper Reed 桌面编辑器里，由 Codex 起草并且已经保存的供应商回复](research/agent-receipts-2026-11-18/reply-review.png)
 
-*桌面客户端实拍。截图来自功能验证构建，邮件为合成测试数据。*
+*Codex 创建的回复草稿，在 Paper Reed 中打开审阅。以下截图均来自实际运行的开发构建，使用合成邮件。*
 
-## 日常读写
+## 从一条任务开始
 
-- **一个收件箱，多种邮箱。** 把工作和个人邮件放在一起，用颜色认出来自哪个账号。支持 Gmail、iCloud 和通用 IMAP／SMTP 配置。
-- **边输入，边找信。** 即时搜索支持中文片段。用键盘在会话之间移动，或按 `⌘K` 打开命令面板。
-- **按自己的方式整理。** 把重要会话置顶，将暂时不处理的邮件设为稍后，或用自定义标签和本机规则归类。
-- **在同一个地方读信和回信。** 阅读会话、起草回复和处理附件都在桌面端完成，草稿会保存在本机。
+> 回复工作邮箱中更新 PO-418 交期的供应商，说新交期可以，请他们确认发货时间。写好给我看。
 
-## 让 Agent 起草，回到桌面审阅
+实测中，Codex 用 `paper-reed` 找到对应会话，保存了保留原信引用的回复草稿。CLI 返回保存回执，桌面打开的是同一份草稿。[8 个 Agent 工作流与实测记录](research/agent-receipts-2026-11-18/README.md)
 
-在 **设置 → Agent 连接** 开启本机连接并安装 `paper-reed`。为 Agent 选择可访问的邮箱和允许的操作，然后把接入说明贴给能执行本机命令的 Claude Code、Codex 或 OpenCode。
+## 接入你的 Agent
 
-> 找到供应商对交期的最新回复，起草一封确认邮件，留在草稿箱给我检查。
+在 **设置 → Agent 连接** 开启本机连接并安装 `paper-reed`。选择邮箱范围和操作权限，点击「复制接入说明」，把内容贴给能执行本机命令的 Agent。使用时保持 Paper Reed 运行。
 
-Agent 可以搜索邮件、读取会话并创建草稿。CLI 和桌面共用草稿，打开同一份就能继续编辑。发送是单独操作，需要启用发送权限；也可以只授予阅读或「阅读与草稿」权限。[CLI 使用说明](research/cli/README.md) · [草稿交接与发送恢复实测](research/agent-receipts-2026-11-18/README.md)
+可以只授权阅读，也可以允许建稿或整理。发送需要单独开启发送权限。[CLI 使用说明](research/cli/README.md)
+
+| 给 Agent 的权限 | 你在 Mac 上看到的收件箱 |
+| --- | --- |
+| ![Agent 连接页面，展示 CLI 已安装以及阅读与草稿权限](research/cli-onboarding-validation-2026-11-16/installed.png) | ![Paper Reed 统一收件箱，展示搜索和账号颜色](research/agent-receipts-2026-11-18/inbox.png) |
+
+桌面端支持 Gmail、iCloud 和通用 IMAP／SMTP。在统一收件箱里即时搜索，按 `⌘K` 打开命令面板，或用置顶、稍后、标签和本机规则整理邮件。
 
 ## 安装测试版
 
