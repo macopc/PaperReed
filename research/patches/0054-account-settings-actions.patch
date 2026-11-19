@@ -1,0 +1,266 @@
+diff --git a/app/internal_packages/paper-reed/styles/paper-reed.less b/app/internal_packages/paper-reed/styles/paper-reed.less
+index 0870c63..ae69e33 100644
+--- a/app/internal_packages/paper-reed/styles/paper-reed.less
++++ b/app/internal_packages/paper-reed/styles/paper-reed.less
+@@ -412,7 +412,17 @@
+ .preferences-wrap.pr-preferences {
+   .pr-account-list-wrap { align-self:start; min-width:0; }
+   .pr-account-list-wrap .account-list > .buttons-wrapper { display:none; }
+-  .pr-account-list-actions { display:flex; flex-wrap:wrap; gap:8px; margin-top:16px; }
++  .pr-settings-page button.pr-account-add { margin-bottom:12px; color:#fffefa; background:#4b634f; border-color:#4b634f; }
++  .pr-settings-page button.pr-account-add:hover { background:#3d5442; border-color:#3d5442; }
++  .pr-account-remove-section { margin-top:20px; padding-top:16px; border-top:1px solid #dfe2d9; }
++  .pr-settings-page button.pr-account-remove { color:#9a433e; }
++  .pr-settings-page button.pr-account-remove:hover { background:#f7eeea; }
++  .pr-account-notice { margin:0 0 16px; padding:12px; border-left:2px solid #9a433e; background:#f7eeea; color:#873c37; }
++  .pr-account-notice.offline { border-color:#9a7448; background:#f2eee5; color:#795e3a; }
++  .pr-settings-page .pr-account-notice p { margin:0 0 8px; color:inherit; }
++  .pr-account-notice-actions { display:flex; flex-wrap:wrap; gap:8px; }
++  .pr-settings-page .account-list .pr-settings-account .account-status.error { color:#873c37; }
++  .pr-settings-page .account-list .pr-settings-account .account-status.offline { color:#795e3a; }
+   .pr-settings-page .account-details .nylas-editable-list .items-wrapper { border:1px solid #dfe2d9; background:#fffefa; border-radius:4px 4px 0 0; }
+   .pr-settings-page .account-details .pr-aliases-empty .items-wrapper { height:56px; }
+   .pr-aliases-empty .items-wrapper:not(:has(input))::after { content:'尚未添加别名'; position:absolute; padding:16px 10px; color:#626b60; font-size:11px; pointer-events:none; }
+diff --git a/app/internal_packages/preferences/lib/tabs/preferences-account-details.tsx b/app/internal_packages/preferences/lib/tabs/preferences-account-details.tsx
+index 3e90136..e0233c6 100644
+--- a/app/internal_packages/preferences/lib/tabs/preferences-account-details.tsx
++++ b/app/internal_packages/preferences/lib/tabs/preferences-account-details.tsx
+@@ -2,12 +2,14 @@
+ import fs from 'fs';
+ import React, { Component } from 'react';
+ import { shell, ipcRenderer } from 'electron';
++import { dialog, getCurrentWindow } from '@electron/remote';
+ import { EditableList } from 'mailspring-component-kit';
+ import {
+   localized,
+   RegExpUtils,
+   KeyManager,
+   Account,
++  AccountStore,
+   AccountAutoaddress,
+ } from 'mailspring-exports';
+ import { developerToolsAvailable } from '../../../../src/developer-tools';
+@@ -65,6 +67,7 @@ class PreferencesAccountDetails extends Component<
+   {
+     account: Account;
+     isOffline: boolean;
++    onRemoveAccount: (account: Account) => void;
+     onAccountUpdated: (account: Account, newAccount: Account) => void;
+   },
+   {
+@@ -187,6 +190,22 @@ class PreferencesAccountDetails extends Component<
+     });
+   };
+ 
++  _onRemoveAccount = () => {
++    const { account } = this.state;
++    const lastAccount = AccountStore.accounts().length === 1;
++    const response = dialog.showMessageBoxSync(getCurrentWindow(), {
++      type: 'warning',
++      message: `移除 ${account.emailAddress}？`,
++      detail: lastAccount
++        ? '这是最后一个账号。Paper Reed 将清除本机邮件数据并重新打开账号设置流程。服务商上的邮件会保留。'
++        : 'Paper Reed 将停止同步并清除此账号的本机数据。服务商上的邮件会保留。',
++      buttons: ['取消', '移除账号'],
++      defaultId: 0,
++      cancelId: 0,
++    });
++    if (response === 1) this.props.onRemoveAccount(account);
++  };
++
+   _onManageContacts = () => {
+     ipcRenderer.send('command', 'application:show-contacts', {});
+   };
+@@ -259,6 +278,18 @@ class PreferencesAccountDetails extends Component<
+     actions: { text: string; action: () => void }[],
+     { offline }: { offline?: boolean } = {}
+   ) {
++    if (AppEnv.config.get('core.paperReed.enabled')) {
++      return (
++        <section className={`pr-account-notice${offline ? ' offline' : ''}`} aria-label="连接状态">
++          <p>{message}</p>
++          <div className="pr-account-notice-actions">
++            {actions.map(({ text, action }) => (
++              <button type="button" key={text} onClick={action}>{text}</button>
++            ))}
++          </div>
++        </section>
++      );
++    }
+     return (
+       <div className={`account-error-detail${offline ? ' offline' : ''}`}>
+         <div className="message">{message}</div>
+@@ -296,21 +327,24 @@ class PreferencesAccountDetails extends Component<
+ 
+   _renderSyncErrorDetails() {
+     const { account } = this.state;
++    const paperReed = AppEnv.config.get('core.paperReed.enabled');
+ 
+     switch (account.syncState) {
+       case Account.SYNC_STATE_AUTH_FAILED:
+-        return this._renderErrorDetail(this._authFailureMessage(account), [
+-          { text: localized('Reconnect'), action: this._onReconnect },
+-          { text: localized('Error Details...'), action: this._onShowErrorDetails },
++        return this._renderErrorDetail(paperReed && !account.hasCertificateSyncError()
++          ? `无法验证 ${account.emailAddress} 的登录信息。请重新连接。`
++          : this._authFailureMessage(account), [
++          { text: paperReed ? '重新连接…' : localized('Reconnect'), action: this._onReconnect },
++          { text: paperReed ? '查看错误详情…' : localized('Error Details...'), action: this._onShowErrorDetails },
+         ]);
+       case Account.SYNC_STATE_ERROR:
+         return this._renderErrorDetail(
+-          localized(
++          paperReed ? '此账号同步失败。可以重新连接，或查看错误详情。' : localized(
+             `Mailspring encountered errors syncing this account. Crash reports have been sent to the Mailspring team and we'll work to fix these errors in the next release.`
+           ),
+           [
+-            { text: localized('Reconnect'), action: this._onReconnect },
+-            { text: localized('Error Details...'), action: this._onShowErrorDetails },
++            { text: paperReed ? '重新连接…' : localized('Reconnect'), action: this._onReconnect },
++            { text: paperReed ? '查看错误详情…' : localized('Error Details...'), action: this._onShowErrorDetails },
+           ]
+         );
+       default:
+@@ -318,16 +352,16 @@ class PreferencesAccountDetails extends Component<
+           return null;
+         }
+         return this._renderErrorDetail(
+-          localized(
++          paperReed ? '此账号暂时离线。Paper Reed 会继续尝试连接。' : localized(
+             `Mailspring can't connect to %@ and will keep retrying. This usually means your computer is offline. If your internet connection is working, your mail provider may be having trouble.`,
+             account.settings.imap_host || account.emailAddress
+           ),
+           [
+             {
+-              text: localized('Try now'),
++              text: paperReed ? '立即重试' : localized('Try now'),
+               action: () => AppEnv.mailsyncBridge.sendSyncMailNow(),
+             },
+-            { text: localized('Error Details...'), action: this._onShowErrorDetails },
++            { text: paperReed ? '查看错误详情…' : localized('Error Details...'), action: this._onShowErrorDetails },
+           ],
+           { offline: true }
+         );
+@@ -336,6 +370,7 @@ class PreferencesAccountDetails extends Component<
+ 
+   render() {
+     const { account } = this.state;
++    const paperReed = AppEnv.config.get('core.paperReed.enabled');
+     const aliasPlaceholder = this._makeAlias(`alias@${account.emailAddress.split('@')[1]}`);
+     const aliases = account.aliases;
+     const defaultAlias = account.defaultAlias || 'None';
+@@ -447,34 +482,31 @@ class PreferencesAccountDetails extends Component<
+             : localized('Account Settings')}
+         </h6>
+         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 6 }}>
+-          <div className="btn" onClick={this._onManageContacts}>
+-            {AppEnv.config.get('core.paperReed.enabled')
+-              ? '管理联系人'
+-              : localized('Manage Contacts')}
+-          </div>
+-          <div className="btn" onClick={this._onReconnect}>
++          <button type="button" className="btn" onClick={this._onManageContacts}>
++            {paperReed ? '管理联系人' : localized('Manage Contacts')}
++          </button>
++          <button type="button" className="btn" onClick={this._onReconnect}>
+             {account.provider === 'gmail'
+-              ? AppEnv.config.get('core.paperReed.enabled')
+-                ? '重新授权…'
+-                : localized('Re-authenticate...')
+-              : AppEnv.config.get('core.paperReed.enabled')
+-                ? '更新连接设置…'
+-                : localized('Update Connection Settings...')}
+-          </div>
++              ? paperReed ? '重新授权…' : localized('Re-authenticate...')
++              : paperReed ? '更新连接设置…' : localized('Update Connection Settings...')}
++          </button>
+           {account.provider === 'office365' && (
+-            <div className="btn" onClick={this._onAddSharedMailbox}>
++            <button type="button" className="btn" onClick={this._onAddSharedMailbox}>
+               {localized('Add Shared Mailbox...')}
+-            </div>
++            </button>
+           )}
+         </div>
+-        <h6>
+-          {AppEnv.config.get('core.paperReed.enabled') ? '本机数据' : localized('Local Data')}
+-        </h6>
+-        <div className="btn" onClick={this._onResetCache}>
+-          {AppEnv.config.get('core.paperReed.enabled')
+-            ? '重建邮件缓存…'
+-            : localized('Rebuild Cache...')}
+-        </div>
++        <h6>{paperReed ? '本机数据' : localized('Local Data')}</h6>
++        <button type="button" className="btn" onClick={this._onResetCache}>
++          {paperReed ? '重建邮件缓存…' : localized('Rebuild Cache...')}
++        </button>
++        {paperReed && (
++          <div className="pr-account-remove-section">
++            <button type="button" className="pr-account-remove" onClick={this._onRemoveAccount}>
++              移除账号…
++            </button>
++          </div>
++        )}
+       </div>
+     );
+   }
+diff --git a/app/internal_packages/preferences/lib/tabs/preferences-account-list.tsx b/app/internal_packages/preferences/lib/tabs/preferences-account-list.tsx
+index 66bedfc..9990ca5 100644
+--- a/app/internal_packages/preferences/lib/tabs/preferences-account-list.tsx
++++ b/app/internal_packages/preferences/lib/tabs/preferences-account-list.tsx
+@@ -30,16 +30,17 @@ class PreferencesAccountList extends Component<PreferencesAccountListProps> {
+   }
+ 
+   _renderAccountStatus(account: Account) {
++    const paperReed = AppEnv.config.get('core.paperReed.enabled');
+     if (account.syncState === Account.SYNC_STATE_AUTH_FAILED) {
+-      return <div className="account-status error">{localized('Cannot authenticate')}</div>;
++      return <div className="account-status error">{paperReed ? '登录失效' : localized('Cannot authenticate')}</div>;
+     }
+     if (account.hasSyncStateError()) {
+-      return <div className="account-status error">{localized('Sync error')}</div>;
++      return <div className="account-status error">{paperReed ? '同步失败' : localized('Sync error')}</div>;
+     }
+     if (this.props.offlineAccountIds.includes(account.id)) {
+       return (
+         <div className="account-status offline">
+-          {localized('Offline')} - {localized('Retrying...')}
++          {paperReed ? '离线 · 正在重试' : `${localized('Offline')} - ${localized('Retrying...')}`}
+         </div>
+       );
+     }
+@@ -133,19 +134,10 @@ class PreferencesAccountList extends Component<PreferencesAccountListProps> {
+     if (AppEnv.config.get('core.paperReed.enabled'))
+       return (
+         <div className="pr-account-list-wrap">
++          <button type="button" className="pr-account-add" onClick={this.props.onAddAccount}>
++            添加账号
++          </button>
+           {list}
+-          <div className="pr-account-list-actions">
+-            <button type="button" onClick={this.props.onAddAccount}>
+-              添加账号
+-            </button>
+-            <button
+-              type="button"
+-              disabled={!this.props.selected}
+-              onClick={() => this.props.onRemoveAccount(this.props.selected)}
+-            >
+-              移除账号
+-            </button>
+-          </div>
+         </div>
+       );
+     return list;
+diff --git a/app/internal_packages/preferences/lib/tabs/preferences-accounts.tsx b/app/internal_packages/preferences/lib/tabs/preferences-accounts.tsx
+index b035fc1..3a770ff 100644
+--- a/app/internal_packages/preferences/lib/tabs/preferences-accounts.tsx
++++ b/app/internal_packages/preferences/lib/tabs/preferences-accounts.tsx
+@@ -96,6 +96,7 @@ class PreferencesAccounts extends React.Component<
+               account={this.state.selected}
+               isOffline={this.state.offlineAccountIds.includes(this.state.selected.id)}
+               onAccountUpdated={this._onAccountUpdated}
++              onRemoveAccount={this._onRemoveAccount}
+             />
+           )}
+         </div>

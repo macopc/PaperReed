@@ -34,6 +34,26 @@ module.exports = async ({main, cdp, account, evaluate, until}) => {
   await until(()=>run(`require('mailspring-exports').AccountStore.accountForId(${JSON.stringify(account.id)}).color === '#997d67'`),'account color saved');
   assert.equal(await run('getComputedStyle(document.querySelector(".pr-account-monogram")).borderTopColor'),'rgb(153, 125, 103)');
   await shot('account-identity');
+  assert(await run(`document.querySelector('.pr-account-add').compareDocumentPosition(
+    document.querySelector('.account-list')) & Node.DOCUMENT_POSITION_FOLLOWING`));
+  const reconnect=main.getByRole('button',{name:'更新连接设置…'});
+  await reconnect.focus();
+  assert(await run('document.activeElement.textContent.trim()==="更新连接设置…"'));
+  await run(`window.prOriginalDialog=require('@electron/remote').dialog.showMessageBoxSync;
+    require('@electron/remote').dialog.showMessageBoxSync=(_, options)=>{window.prRemoveDialog=options;return options.cancelId;};true`);
+  try {
+    const remove=main.getByRole('button',{name:'移除账号…'});
+    await remove.focus();
+    await main.keyboard.press('Enter');
+    assert(await run(`window.prRemoveDialog.message.includes(${JSON.stringify(account.emailAddress)}) &&
+      window.prRemoveDialog.defaultId===window.prRemoveDialog.cancelId &&
+      window.prRemoveDialog.buttons[window.prRemoveDialog.defaultId]==="取消" &&
+      window.prRemoveDialog.detail.includes("这是最后一个账号")`));
+    assert(await run(`!!require('mailspring-exports').AccountStore.accountForId(${JSON.stringify(account.id)})`));
+    await shot('account-actions');
+  } finally {
+    await run(`require('@electron/remote').dialog.showMessageBoxSync=window.prOriginalDialog;true`);
+  }
   await action('[data-settings-tab="Shortcuts"]');
   await until(()=>run('!!document.querySelector("#pr-shortcut-search")'),'shortcut search');
   const search = '#pr-shortcut-search';
@@ -68,7 +88,19 @@ module.exports = async ({main, cdp, account, evaluate, until}) => {
   }
   await action('[data-settings-tab="Accounts"]');
   assert.equal(await main.locator('#account-label').inputValue(),'工作 · Paper Reed');
-  const result={generalKeyboardToggle:true,generalFocusRetained:true,readingSelectSaved:true,accountLabelSaved:true,accountColorSaved:true,accountColorPreview:true,shortcutPresetSaved:true,shortcutSearch:true,shortcutEmptyState:true,shortcutKeyboardCancel:true,shortcutKeyboardSaved:true,compactLayouts:true,expectedSMTPSubmissions:0};
+  await action('[data-settings-tab="General"]');
+  await run(`require('mailspring-exports').Actions.updateAccount(${JSON.stringify(account.id)}, { syncState: 'invalid' });true`);
+  await action('[data-settings-tab="Accounts"]');
+  const notice=main.getByRole('region',{name:'连接状态'});
+  await notice.getByRole('button',{name:'重新连接…'}).focus();
+  await main.keyboard.press('Tab');
+  assert(await run('document.activeElement.textContent.trim()==="查看错误详情…"'));
+  await notice.scrollIntoViewIfNeeded();
+  await shot('compact-auth-error');
+  await main.getByRole('button',{name:'移除账号…'}).focus();
+  await shot('compact-account-actions');
+  const result={accountAddBeforeList:true, accountActionsFocusable:true, accountRemoveConfirmCancels:true,
+    lastAccountConsequenceShown:true, connectionErrorKeyboardActions:true, generalKeyboardToggle:true,generalFocusRetained:true,readingSelectSaved:true,accountLabelSaved:true,accountColorSaved:true,accountColorPreview:true,shortcutPresetSaved:true,shortcutSearch:true,shortcutEmptyState:true,shortcutKeyboardCancel:true,shortcutKeyboardSaved:true,compactLayouts:true,expectedSMTPSubmissions:0};
   fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(result,null,2)+'\n');
   console.log('PASS settings subpages',JSON.stringify(result));
 };
