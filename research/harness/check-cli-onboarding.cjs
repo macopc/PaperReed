@@ -77,6 +77,11 @@ module.exports = async ({
   };
   await action('input[name=agent-access][value=read-only]');
   await shot('before-install');
+  const checkButton = main.locator('[data-cli-action=doctor]');
+  const buttonBox = await checkButton.boundingBox();
+  await main.mouse.move(buttonBox.x + buttonBox.width / 2, buttonBox.y + buttonBox.height / 2);
+  assert.equal(await run(`getComputedStyle(document.querySelector('[data-cli-action=doctor]')).backgroundColor`),
+    'rgba(0, 0, 0, 0)', 'Disabled actions do not change fill on hover');
   // Preserve an unrelated command rather than overwriting it.
   fs.mkdirSync(path.dirname(p.command), { recursive: true });
   fs.writeFileSync(p.command, 'unrelated command');
@@ -169,7 +174,17 @@ module.exports = async ({
   await action('.pr-agent-account-heading input');
   const none = await installed(['doctor']);
   assert.equal(none.authorizedAccounts, 0);
+  await action('[data-cli-action=doctor]');
+  await waitIdle();
+  assert(await main.locator('[data-cli-action=copy]').isDisabled());
+  assert(await main.locator('[data-cli-action=doctor].primary').count());
+  assert((await main.locator('.pr-cli-feedback').innerText()).includes('授权至少一个邮箱'));
+  await main.locator('.pr-cli-setup').scrollIntoViewIfNeeded();
+  await shot('no-eligible-mailbox');
   await action('.pr-agent-account-heading input');
+  await action('[data-cli-action=doctor]');
+  await waitIdle();
+  assert(await main.locator('[data-cli-action=copy]').isEnabled());
   await main.locator('.pr-cli-setup').scrollIntoViewIfNeeded();
   await shot('installed');
   await action('.pr-cli-help summary');
@@ -270,6 +285,10 @@ module.exports = async ({
   await action('[data-settings-tab="Templates"]');
   await action('[data-settings-tab="MCP"]');
   await shot('compact');
+  await action('.pr-cli-help summary');
+  await shot('compact-terminal-help');
+  assert(await run(`(()=>{const e=document.querySelector('.pr-cli-terminal');return e.scrollWidth<=e.clientWidth+1;})()`));
+  await action('.pr-cli-help summary');
   assert(
     await run(
       `(()=>{const e=document.querySelector('.pr-settings-page');return e.scrollWidth<=e.clientWidth+1;})()`

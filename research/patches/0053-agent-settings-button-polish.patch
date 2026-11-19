@@ -1,0 +1,126 @@
+diff --git a/app/internal_packages/mcp-server/lib/preferences-paper-reed-cli.tsx b/app/internal_packages/mcp-server/lib/preferences-paper-reed-cli.tsx
+index c4c8ac4..88af2ad 100644
+--- a/app/internal_packages/mcp-server/lib/preferences-paper-reed-cli.tsx
++++ b/app/internal_packages/mcp-server/lib/preferences-paper-reed-cli.tsx
+@@ -14,9 +14,9 @@ import {
+ 
+ export default class PreferencesPaperReedCLI extends React.Component<
+   Record<string, never>,
+-  { busy: boolean; message: string; failed: boolean; confirmRemove: boolean; checked: boolean }
++  { busy: boolean; message: string; failed: boolean; confirmRemove: boolean; authorizedAccounts: number | null }
+ > {
+-  state = { busy: false, message: '', failed: false, confirmRemove: false, checked: false };
++  state = { busy: false, message: '', failed: false, confirmRemove: false, authorizedAccounts: null };
+   mounted = false;
+   connection = cliConnection();
+   componentDidMount() {
+@@ -32,7 +32,7 @@ export default class PreferencesPaperReedCLI extends React.Component<
+       this.setState({
+         message: '连接信息已变化，请更新 CLI 连接后重新检查。',
+         failed: false,
+-        checked: false,
++        authorizedAccounts: null,
+       });
+     }
+   }
+@@ -48,12 +48,13 @@ export default class PreferencesPaperReedCLI extends React.Component<
+   render() {
+     const state = cliStatus(),
+       paths = cliPaths();
+-    const { busy, message, failed, confirmRemove } = this.state;
++    const { busy, message, failed, confirmRemove, authorizedAccounts } = this.state;
++    const verified = authorizedAccounts > 0;
+     return (
+       <section className="pr-settings-group pr-cli-setup" aria-label="CLI 安装与接入">
+         <header>
+           <h2>连接你的 Agent</h2>
+-          <span>
++          <span className={`pr-cli-state ${state.blocked ? 'blocked' : state.ready ? 'ready' : state.installed ? 'stale' : ''}`}>
+             {state.blocked
+               ? '安装受阻'
+               : state.ready
+@@ -70,12 +71,12 @@ export default class PreferencesPaperReedCLI extends React.Component<
+           <button
+             type="button"
+             data-cli-action="install"
+-            className={!state.ready ? 'primary' : undefined}
++            className={!state.ready && !state.blocked ? 'primary' : undefined}
+             disabled={busy || state.blocked}
+             onClick={() =>
+               this.perform(async () => {
+                 await installCLI();
+-                if (this.mounted) this.setState({ checked: false });
++                if (this.mounted) this.setState({ authorizedAccounts: null });
+                 return 'CLI 已安装，连接已保存。下一步：检查连接。';
+               })
+             }
+@@ -85,15 +86,17 @@ export default class PreferencesPaperReedCLI extends React.Component<
+           <button
+             type="button"
+             data-cli-action="doctor"
+-            className={state.ready && !this.state.checked ? 'primary' : undefined}
++            className={state.ready && !verified ? 'primary' : undefined}
+             disabled={busy || !state.ready}
+             onClick={() =>
+               this.perform(async () => {
+                 const result = await checkCLI();
+-                if (this.mounted) this.setState({ checked: true });
++                if (this.mounted) this.setState({ authorizedAccounts: result.authorizedAccounts });
+                 return result.authorizedAccounts
+                   ? `连接正常 · ${result.authorizedAccounts} 个邮箱可访问。可复制接入说明给 Agent。`
+-                  : '连接正常，但没有可访问的邮箱。请在下方调整邮箱范围。';
++                  : AccountStore.accountIds().length
++                    ? '连接正常。请在下方授权至少一个邮箱，再检查连接。'
++                    : '连接正常。请先在「邮箱账号」添加账号，再检查连接。';
+               })
+             }
+           >
+@@ -102,8 +105,8 @@ export default class PreferencesPaperReedCLI extends React.Component<
+           <button
+             type="button"
+             data-cli-action="copy"
+-            className={state.ready && this.state.checked ? 'primary' : undefined}
+-            disabled={busy || !state.ready}
++            className={state.ready && verified ? 'primary' : undefined}
++            disabled={busy || !state.ready || authorizedAccounts === 0}
+             onClick={() =>
+               this.perform(() => {
+                 clipboard.writeText(
+diff --git a/app/internal_packages/paper-reed/styles/paper-reed.less b/app/internal_packages/paper-reed/styles/paper-reed.less
+index 3df7e8b..0870c63 100644
+--- a/app/internal_packages/paper-reed/styles/paper-reed.less
++++ b/app/internal_packages/paper-reed/styles/paper-reed.less
+@@ -562,13 +562,27 @@
+ 
+ .preferences-wrap.pr-preferences .pr-settings-page .pr-cli-setup {
+   header { display:flex; align-items:baseline; justify-content:space-between; gap:16px; }
+-  header h2 { margin:0; font-size:14px; font-weight:500; } header span { font-size:11px; color:#626b60; flex-shrink:0; }
+-  .pr-cli-actions { display:flex; flex-wrap:wrap; gap:8px; margin:18px 0 8px; }
++  header h2 { margin:0; font-size:14px; font-weight:500; }
++  .pr-cli-state { display:inline-flex; align-items:center; gap:6px; font-size:11px; color:#626b60; flex-shrink:0; }
++  .pr-cli-state::before { content:''; width:5px; height:5px; border-radius:50%; background:currentColor; }
++  .pr-cli-state.ready { color:#4b634f; }
++  .pr-cli-state.stale { color:#795e3a; }
++  .pr-cli-state.blocked { color:#9a433e; }
++
++  .pr-cli-actions { display:flex; flex-wrap:wrap; gap:8px; margin:14px 0 8px; }
++  button:disabled { opacity:.5; cursor:default; }
++  button:disabled:hover { background:transparent; }
+   .pr-cli-actions button.primary { background:#4b634f; color:#fffefa; border-color:#4b634f; }
+-  .pr-cli-feedback { min-height:20px; font-size:11px; } .pr-cli-feedback.error { color:#9a433e; }
+-  .pr-cli-help { margin-top:14px; } .pr-cli-help p { margin:12px 0; }
+-  .pr-cli-terminal { display:flex; align-items:center; gap:12px; padding:12px; background:#f2f1eb; border-radius:5px; }
+-  .pr-cli-terminal code { flex:1; min-width:0; } .pr-cli-remove button + button { margin-left:8px; }
++  .pr-cli-actions button.primary:not(:disabled):hover { background:#3d5442; border-color:#3d5442; }
++
++  .pr-cli-feedback { min-height:20px; font-size:11px; }
++  .pr-cli-feedback.error { color:#9a433e; }
++  .pr-cli-help { margin-top:14px; }
++  .pr-cli-help p { margin:12px 0; }
++  .pr-cli-terminal { display:flex; flex-wrap:wrap; align-items:center; gap:8px 12px; padding:12px; background:#f2f1eb; border-radius:5px; }
++  .pr-cli-terminal code { flex:1 1 220px; min-width:0; }
++  .pr-cli-terminal button:not(:disabled):not(:hover) { background:#fffefa; }
++  .pr-cli-remove button + button { margin-left:8px; }
+ }
+ 
+ .paper-reed-enabled .pr-workspace {
