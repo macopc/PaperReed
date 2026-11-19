@@ -21,6 +21,9 @@ try:
         server.append('INBOX',message(1))
     if os.environ.get('PAPER_REED_ORGANIZATION_CHECK'):
         server.create_mailbox('Paper Reed Review')
+    if os.environ.get('PAPER_REED_ORGANIZATION_CHECK') == 'folders':
+        server.create_mailbox('All Mail', special_use='\\All')
+        server.create_mailbox('[Mailspring]/Snoozed')
     server.start()
     (work/'account.json').write_text(json.dumps(account_json(**server.account_kwargs())))
     run=subprocess.Popen(['node',str(Path(__file__).with_suffix('.cjs')),str(upstream),str(work),'controls' if a.controls else 'workspace' if a.workspace else 'audit' if a.audit else 'recover' if a.recover else 'conflict' if a.conflict else 'close-save' if a.close_save else 'handoff'],start_new_session=True)

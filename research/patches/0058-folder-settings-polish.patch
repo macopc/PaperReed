@@ -1,0 +1,534 @@
+diff --git a/app/internal_packages/category-mapper/lib/category-selection.tsx b/app/internal_packages/category-mapper/lib/category-selection.tsx
+index 7376649..e71fee5 100644
+--- a/app/internal_packages/category-mapper/lib/category-selection.tsx
++++ b/app/internal_packages/category-mapper/lib/category-selection.tsx
+@@ -7,8 +7,23 @@ import {
+ } from 'mailspring-component-kit';
+ import { localized, Label, Utils, imapUtf7 } from 'mailspring-exports';
+ 
++export const ROLE_NAMES = {
++  inbox: '收件箱',
++  sent: '已发送',
++  drafts: '草稿',
++  spam: '垃圾邮件',
++  archive: '归档',
++  trash: '废纸篓',
++};
++
++export const SELECTABLE_ROLES = Object.keys(ROLE_NAMES);
++
+ interface CategorySelectionProps {
++  id?: string;
+   label?: string;
++  role?: string;
++  selectedPath?: string;
++  busy?: boolean;
+   all: CategoryItem[];
+   current: CategoryItem;
+   onSelect: (item: CategoryItem) => void;
+@@ -22,6 +37,7 @@ type CategoryItem = {
+   backgroundColor?: string;
+   empty?: boolean;
+   path?: string;
++  role?: string;
+   name?: string;
+ };
+ 
+@@ -89,27 +105,45 @@ export default class CategorySelection extends React.Component<
+   };
+ 
+   render() {
+-    if (AppEnv.config.get('core.paperReed.enabled'))
++    if (AppEnv.config.get('core.paperReed.enabled')) {
++      const choices = this.props.all.filter(({ role }) => !role || SELECTABLE_ROLES.includes(role));
+       return (
+         <select
++          id={this.props.id}
+           aria-label={this.props.label || '选择文件夹'}
+-          value={this.props.current?.path || ''}
+-          onChange={(e) =>
+-            this.props.onSelect(this.props.all.find((item) => item.path === e.target.value))
+-          }
++          value={this.props.selectedPath ?? this.props.current?.path ?? ''}
++          aria-disabled={this.props.busy || undefined}
++          title={imapUtf7.decode(this.props.selectedPath ?? this.props.current?.path ?? '')}
++          onMouseDown={(e) => {
++            if (this.props.busy) e.preventDefault();
++          }}
++          onKeyDown={(e) => {
++            if (!this.props.busy || e.metaKey || e.ctrlKey) return;
++            if (e.key.length === 1 || /^(Arrow|Page)/.test(e.key) || ['Home', 'End', 'Enter', 'F4'].includes(e.key)) {
++              e.preventDefault();
++            }
++          }}
++          onChange={(e) => {
++            if (this.props.busy) return;
++            const item = choices.find((entry) => entry.path === e.target.value);
++            if (item) this.props.onSelect(item);
++          }}
+         >
+           <option value="" disabled>
+             尚未指定
+           </option>
+-          {[...this.props.all]
++          {choices
+             .sort((a, b) => imapUtf7.decode(a.path).localeCompare(imapUtf7.decode(b.path)))
+             .map((item) => (
+               <option key={item.path} value={item.path}>
+                 {imapUtf7.decode(item.path)}
++                {item.role !== this.props.role && ROLE_NAMES[item.role] &&
++                  ` · 已用于${ROLE_NAMES[item.role]}`}
+               </option>
+             ))}
+         </select>
+       );
++    }
+     const placeholder = localized('Choose folder');
+ 
+     const headerComponents = [
+diff --git a/app/internal_packages/category-mapper/lib/preferences-category-mapper.tsx b/app/internal_packages/category-mapper/lib/preferences-category-mapper.tsx
+index 17f2018..1607ac6 100644
+--- a/app/internal_packages/category-mapper/lib/preferences-category-mapper.tsx
++++ b/app/internal_packages/category-mapper/lib/preferences-category-mapper.tsx
+@@ -1,26 +1,21 @@
+ import React from 'react';
++import { dialog, getCurrentWindow } from '@electron/remote';
+ import {
+   localized,
+   Account,
+   AccountStore,
+   CategoryStore,
+   Category,
++  Folder,
++  Label,
++  DatabaseStore,
+   Actions,
+   ChangeRoleMappingTask,
++  TaskQueue,
++  imapUtf7,
+ } from 'mailspring-exports';
+ 
+-import CategorySelection from './category-selection';
+-
+-const ROLE_NAMES = {
+-  inbox: '收件箱',
+-  sent: '已发送',
+-  drafts: '草稿',
+-  spam: '垃圾邮件',
+-  archive: '归档',
+-  trash: '废纸篓',
+-};
+-
+-const SELECTABLE_ROLES = ['inbox', 'sent', 'drafts', 'spam', 'archive', 'trash'];
++import CategorySelection, { ROLE_NAMES, SELECTABLE_ROLES } from './category-selection';
+ 
+ // Gmail's system labels have fixed roles, which the sync engine sets again on every pass on any
+ // server advertising X-GM-EXT-1, so a role chosen here would not last. The hosts cover a Google
+@@ -31,6 +26,19 @@ function rolesAreFixedByServer(account: Account) {
+   return account.provider === 'gmail' || GMAIL_IMAP_HOSTS.includes(account.settings.imap_host);
+ }
+ 
++type SyncProcess = ReturnType<typeof AppEnv.mailsyncBridge.clients>[string];
++type MappingStatus = 'saved' | 'failed' | 'missing-folder' | 'disconnected';
++type PendingMapping = { role: string; status: 'saving'; path: string; taskId: string; client: SyncProcess };
++type MappingFeedback = PendingMapping | { role: string; status: MappingStatus };
++
++const mappingFeedbackText = {
++  saving: (role: string) => `正在保存${role}用途…`,
++  saved: (role: string) => `${role}用途已保存`,
++  failed: (role: string) => `未能保存${role}用途。请重试。`,
++  'missing-folder': () => '找不到目标文件夹，请重新选择。',
++  disconnected: () => '同步连接不可用。请在邮箱账号中检查连接后重试。',
++};
++
+ interface State {
+   assignments: {
+     [accountId: string]: {
+@@ -41,6 +49,8 @@ interface State {
+     [accountId: string]: Category[];
+   };
+   containerFolderDefault: string;
++  containerFolderSaved: boolean;
++  mappingFeedback: Record<string, MappingFeedback>;
+ }
+ 
+ export default class PreferencesCategoryMapper extends React.Component<
+@@ -51,29 +61,102 @@ export default class PreferencesCategoryMapper extends React.Component<
+ 
+   constructor(props) {
+     super(props);
+-    this.state = this._getStateFromStores();
++    this.state = {
++      ...this._getStateFromStores(),
++      containerFolderSaved: false,
++      mappingFeedback: {},
++    };
+   }
+ 
+   componentDidMount() {
+-    this._unlisten = CategoryStore.listen(() => {
+-      this.setState((state) => ({
+-        ...this._getStateFromStores(),
+-        containerFolderDefault: state.containerFolderDefault,
+-      }));
+-    });
++    const offCategories = CategoryStore.listen(this._onStoreChange);
++    const offAccounts = AccountStore.listen(() => this.forceUpdate());
++    const offQueue = TaskQueue.listen(this._onTasksChange);
++    const offExit = Actions.mailsyncProcessExited.listen(this._onProcessExit);
++    this._unlisten = () => {
++      offCategories();
++      offAccounts();
++      offQueue();
++      offExit();
++    };
+   }
+ 
+   componentWillUnmount() {
+-    if (this._unlisten) {
+-      this._unlisten();
+-    }
++    this._unlisten?.();
++    this._unlisten = undefined;
+   }
+ 
+-  _getStateFromStores() {
++  _onStoreChange = () => {
++    const { assignments, all } = this._getStateFromStores();
++    this.setState({ assignments, all });
++  };
++
++  _onTasksChange = () => {
++    const tasks = TaskQueue.allTasks();
++    for (const [accountId, pending] of Object.entries(this.state.mappingFeedback)) {
++      if (pending.status !== 'saving') continue;
++      const task = tasks.find(({ id }) => id === pending.taskId);
++      if (!task?.hasRunLocally()) continue;
++
++      if (task.error || task.status === ChangeRoleMappingTask.Status.Cancelled) {
++        const key = (task.error as unknown as { key?: string })?.key;
++        this._setMappingFeedback(accountId, {
++          role: pending.role,
++          status: key === 'no-matching-folder' ? 'missing-folder' : 'failed',
++        });
++      } else {
++        this._readMappingResult(accountId, pending, 'failed');
++      }
++    }
++  };
++
++  _onProcessExit = (client: SyncProcess) => {
++    const { id } = client.account;
++    const pending = this.state.mappingFeedback[id];
++    if (pending?.status === 'saving' && pending.client === client) {
++      this._readMappingResult(id, pending, 'disconnected');
++    }
++  };
++
++  // Completion can arrive before CategoryStore updates. An exiting worker may also
++  // have committed the change without publishing its delta.
++  _readMappingResult = async (accountId: string, pending: PendingMapping, fallback: MappingStatus) => {
++    const scope = { accountId };
++    try {
++      const [folders, labels] = await Promise.all([
++        DatabaseStore.findAll<Folder>(Folder, scope),
++        DatabaseStore.findAll<Label>(Label, scope),
++      ]);
++      if (!this._unlisten) return;
++      const updated = this._getStateFromStores([...folders, ...labels]);
++      const saved = updated.assignments[accountId]?.[pending.role]?.path === pending.path;
++      this.setState((state) => {
++        if (state.mappingFeedback[accountId] !== pending) return null;
++        return {
++          assignments: { ...state.assignments, [accountId]: updated.assignments[accountId] },
++          all: { ...state.all, [accountId]: updated.all[accountId] },
++          mappingFeedback: {
++            ...state.mappingFeedback,
++            [accountId]: { role: pending.role, status: saved ? 'saved' : fallback },
++          },
++        };
++      });
++    } catch {
++      if (this._unlisten && this.state.mappingFeedback[accountId] === pending) {
++        this._setMappingFeedback(accountId, { role: pending.role, status: fallback });
++      }
++    }
++  };
++
++  _setMappingFeedback = (accountId: string, feedback: MappingFeedback) => {
++    this.setState((state) => ({ mappingFeedback: { ...state.mappingFeedback, [accountId]: feedback } }));
++  };
++
++  _getStateFromStores(categories: Category[] = CategoryStore.categories()) {
+     const assignments = {};
+     const all = {};
+ 
+-    for (const cat of CategoryStore.categories()) {
++    for (const cat of categories) {
+       all[cat.accountId] = all[cat.accountId] || [];
+       all[cat.accountId].push(cat);
+       if (SELECTABLE_ROLES.includes(cat.role)) {
+@@ -97,32 +180,91 @@ export default class PreferencesCategoryMapper extends React.Component<
+     );
+   };
+ 
++  _onPaperReedSelection = (account: Account, role: string, path: string, previousRole: string) => {
++    if (this.state.mappingFeedback[account.id]?.status === 'saving') return;
++    if (this.state.assignments[account.id]?.[role]?.path === path) return;
++    if (previousRole && previousRole !== role && ROLE_NAMES[previousRole]) {
++      const folder = imapUtf7.decode(path);
++      const response = dialog.showMessageBoxSync(getCurrentWindow(), {
++        type: 'warning',
++        message: `将「${folder}」用作${ROLE_NAMES[role]}？`,
++        detail: `确认后，${ROLE_NAMES[previousRole]}将变为「尚未指定」。`,
++        buttons: ['取消', '更改用途'],
++        defaultId: 0,
++        cancelId: 0,
++      });
++      if (response !== 1) return;
++    }
++
++    const client = AppEnv.mailsyncBridge.clients()[account.id];
++    if (!client?.spawned) {
++      this._setMappingFeedback(account.id, { role, status: 'disconnected' });
++      return;
++    }
++
++    const task = new ChangeRoleMappingTask({ accountId: account.id, role, path });
++    this._setMappingFeedback(account.id, { role, path, status: 'saving', taskId: task.id, client });
++    Actions.queueTask(task);
++  };
++
+   _updateContainerFolderDefault = () => {
+-    Actions.updateContainerFolderDefault(this.state.containerFolderDefault);
++    const { containerFolderDefault } = this.state;
++    if (containerFolderDefault === AccountStore.containerFolderDefaultGetter()) return;
++    Actions.updateContainerFolderDefault(containerFolderDefault);
++    this.setState({ containerFolderSaved: true });
+   };
+ 
+-  _renderRoleSection = (account: Account, role: string) => {
++  _renderRoleSection = (account: Account, role: string, readOnly = false) => {
+     if (!account) return false;
+ 
+-    const assignments = this.state.assignments[account.id];
+-    if (!assignments) {
+-      // Account may not have completed an initial sync yet
+-      return false;
+-    }
++    const paperReed = AppEnv.config.get('core.paperReed.enabled');
++    const assignments = this.state.assignments[account.id] || {};
++    if (!this.state.all[account.id]?.length) return false;
++    const feedback = this.state.mappingFeedback[account.id];
++    const saving = feedback?.status === 'saving';
++    const current = readOnly && role === 'archive'
++      ? CategoryStore.getArchiveCategory(account) || assignments[role]
++      : assignments[role];
++    const selectId = `pr-folder-${account.id}-${role}`;
+     return (
+       <div className="role-section" key={`${account.id}-${role}`}>
+-        <div className="col-left">
+-          {AppEnv.config.get('core.paperReed.enabled')
+-            ? ROLE_NAMES[role]
+-            : Category.LocalizedStringForRole[role]}
+-        </div>
++        {paperReed && !readOnly ? (
++          <label
++            className="col-left"
++            htmlFor={selectId}
++            onMouseDown={saving ? (event) => event.preventDefault() : undefined}
++            onClick={saving ? (event) => event.preventDefault() : undefined}
++          >
++            {ROLE_NAMES[role]}
++          </label>
++        ) : (
++          <div className="col-left">
++            {paperReed ? ROLE_NAMES[role] : Category.LocalizedStringForRole[role]}
++          </div>
++        )}
+         <div className="col-right">
+-          <CategorySelection
+-            label={`${ROLE_NAMES[role]}文件夹`}
+-            all={this.state.all[account.id]}
+-            current={assignments[role]}
+-            onSelect={(category) => this._onCategorySelection(account, role, category)}
+-          />
++          {readOnly ? (
++            <span className="pr-folder-path">
++              {current ? imapUtf7.decode(current.path) : '所有邮件'}
++              {role === 'archive' && current?.role !== 'archive' && (
++                <small>归档会移除「收件箱」标签，邮件仍可在「所有邮件」中找到。</small>
++              )}
++            </span>
++          ) : (
++            <CategorySelection
++              id={paperReed ? selectId : undefined}
++              label={`${ROLE_NAMES[role]}文件夹`}
++              role={role}
++              all={this.state.all[account.id]}
++              current={current}
++              busy={saving}
++              selectedPath={saving && feedback.role === role ? feedback.path : undefined}
++              onSelect={(category) => {
++                if (paperReed) this._onPaperReedSelection(account, role, category.path, category.role);
++                else this._onCategorySelection(account, role, category);
++              }}
++            />
++          )}
+         </div>
+       </div>
+     );
+@@ -135,40 +277,68 @@ export default class PreferencesCategoryMapper extends React.Component<
+     if (AppEnv.config.get('core.paperReed.enabled'))
+       return (
+         <div className="category-mapper-container pr-folders">
+-          <p className="pr-folder-intro">草稿、已发送与删除等操作会使用下方指定的位置。</p>
+           {accounts.length === 0 && (
+             <div className="pr-settings-empty">
+               <h2>还没有邮箱账号</h2>
+               <p>添加账号后，即可确认文件夹用途。</p>
+             </div>
+           )}
+-          {accounts.map((account) => (
+-            <section className="pr-settings-group" key={account.id}>
+-              <h2>{account.label || account.emailAddress}</h2>
+-              {account.label !== account.emailAddress && <p>{account.emailAddress}</p>}
+-              {rolesAreFixedByServer(account) ? (
+-                <p>此账号由 Gmail 管理系统标签，无需手动指定。</p>
+-              ) : this.state.assignments[account.id] ? (
+-                <div className="pr-folder-mappings">
+-                  {SELECTABLE_ROLES.map((role) => this._renderRoleSection(account, role))}
++          {accounts.map((account) => {
++            const fixed = rolesAreFixedByServer(account);
++            const assignments = this.state.assignments[account.id] || {};
++            const feedback = this.state.mappingFeedback[account.id];
++            const feedbackText = feedback && mappingFeedbackText[feedback.status](ROLE_NAMES[feedback.role]);
++            const titleId = `pr-folder-account-${account.id}`;
++            return (
++              <section className="pr-settings-group pr-folder-account" key={account.id} aria-labelledby={titleId}>
++                <div className="pr-folder-account-head">
++                  <div>
++                    <h2 id={titleId}>{account.label || account.emailAddress}</h2>
++                    {account.label && account.label !== account.emailAddress && <p>{account.emailAddress}</p>}
++                  </div>
++                  <span className="pr-folder-feedback" role="status" data-state={feedback?.status}>
++                    {feedbackText}
++                  </span>
+                 </div>
+-              ) : (
+-                <p role="status">正在等待文件夹同步…</p>
+-              )}
+-            </section>
+-          ))}
++                {fixed && <p className="pr-folder-managed">Gmail 管理这些文件夹的用途。</p>}
++                {this.state.all[account.id]?.length ? (
++                  <div className="pr-folder-mappings">
++                    {SELECTABLE_ROLES
++                      .filter((role) => !fixed || role === 'archive' || assignments[role])
++                      .map((role) => this._renderRoleSection(account, role, fixed))}
++                  </div>
++                ) : (
++                  <p role="status">等待文件夹同步…</p>
++                )}
++              </section>
++            );
++          })}
+           <details className="pr-settings-group">
+             <summary>新账号的默认父文件夹</summary>
+-            <p>用于之后添加的账号，不移动现有邮件。留空使用邮箱服务商的默认位置。</p>
+-            <label htmlFor="pr-container-folder">文件夹路径</label>
+-            <input
+-              id="pr-container-folder"
+-              type="text"
+-              placeholder="例如 Mail/Personal"
+-              value={this.state.containerFolderDefault}
+-              onChange={(e) => this.setState({ containerFolderDefault: e.target.value })}
+-              onBlur={this._updateContainerFolderDefault}
+-            />
++            <p>仅用于之后添加的账号。留空使用服务商的默认位置，按 Enter 或离开输入框保存。</p>
++            <form
++              className="pr-folder-path-form"
++              onSubmit={(event) => {
++                event.preventDefault();
++                this._updateContainerFolderDefault();
++              }}
++            >
++              <label htmlFor="pr-container-folder">文件夹路径</label>
++              <span role="status" className="pr-folder-path-receipt">
++                {this.state.containerFolderSaved ? '已保存' : ''}
++              </span>
++              <input
++                id="pr-container-folder"
++                type="text"
++                placeholder="例如 Mail/Personal"
++                value={this.state.containerFolderDefault}
++                onChange={(e) => this.setState({
++                  containerFolderDefault: e.target.value,
++                  containerFolderSaved: false,
++                })}
++                onBlur={this._updateContainerFolderDefault}
++              />
++            </form>
+           </details>
+         </div>
+       );
+diff --git a/app/internal_packages/paper-reed/styles/paper-reed.less b/app/internal_packages/paper-reed/styles/paper-reed.less
+index aab999c..880ed87 100644
+--- a/app/internal_packages/paper-reed/styles/paper-reed.less
++++ b/app/internal_packages/paper-reed/styles/paper-reed.less
+@@ -488,14 +488,40 @@
+   .pr-appearance { container-type:inline-size; }
+   .pr-appearance .pr-setting-row { flex-wrap:wrap; gap:6px 20px; }
+   .pr-appearance .pr-setting-row select { flex-shrink:0; width:206px; max-width:100%; min-height:34px; }
+-  .pr-folder-intro { margin:0 0 24px; }
+-  .pr-folder-mappings { margin-top:20px; }
+-  .pr-folders .role-section { display:grid; grid-template-columns:130px minmax(0,1fr); gap:24px; align-items:center; padding:12px 0; border-bottom:1px solid #eceee7; }
++  .pr-folders { max-width:640px; }
++  .pr-folder-account-head {
++    display:flex;
++    align-items:baseline;
++    justify-content:space-between;
++    flex-wrap:wrap;
++    gap:4px 12px;
++  }
++  .pr-folder-account-head h2 { margin:0; font-size:14px; font-weight:500; line-height:22px; }
++  .pr-folder-account-head p, .pr-folder-managed { margin:4px 0 0; overflow-wrap:anywhere; }
++  .pr-folder-feedback { color:#626b60; font-size:12px; }
++  .pr-folder-feedback[data-state='saved'], .pr-folder-path-receipt { color:#4b634f; }
++  .pr-folder-feedback[data-state='failed'],
++  .pr-folder-feedback[data-state='missing-folder'],
++  .pr-folder-feedback[data-state='disconnected'] { color:#9a433e; }
++  .pr-folder-mappings { margin-top:8px; }
++  .pr-folders .role-section {
++    display:flex;
++    flex-wrap:wrap;
++    align-items:center;
++    gap:4px 12px;
++    padding:6px 0;
++    border-bottom:1px solid #eceee7;
++  }
+   .pr-folders .role-section:last-child { border-bottom:0; }
+-  .pr-folders .col-left { text-align:left; margin:0; color:#303730; font-size:13px; }
+-  .pr-folders .col-right { min-width:0; margin:0; }
+-  .pr-folders .col-right select { width:100%; margin:0; }
+-  #pr-container-folder { display:block; width:100%; margin-top:8px; }
++  .pr-folders .col-left { flex:0 0 96px; text-align:left; margin:0; color:#303730; font-size:13px; }
++  .pr-folders .col-right { flex:1 1 160px; min-width:0; margin:0; }
++  .pr-folders .col-right select { width:100%; min-height:34px; margin:0; }
++  .pr-folders select[aria-disabled='true'] { color:#626b60; background-color:#f2f1eb; cursor:default; }
++  .pr-folder-path { display:block; font-size:12px; overflow-wrap:anywhere; }
++  .pr-folder-path small { display:block; margin-top:2px; color:#626b60; font-size:12px; }
++  .pr-folder-path-form { display:grid; grid-template-columns:minmax(0, 1fr) auto; align-items:center; gap:6px 10px; }
++  .pr-folder-path-form label, .pr-folder-path-receipt { font-size:12px; }
++  #pr-container-folder { grid-column:~"1 / -1"; width:100%; min-width:0; margin:0; }
+   .pr-rules { max-width:none; margin:0; }
+   .pr-rule-toolbar { display:flex; align-items:center; flex-wrap:wrap; gap:12px; }
+   .pr-rule-toolbar select { flex:1; min-width:0; } .pr-rule-toolbar .sr-only { position:absolute; }
+@@ -529,7 +555,6 @@
+     .pr-rule-sidebar { border-right:0; border-bottom:1px solid #dfe2d9; padding:0 0 16px; }
+     .pr-rule-sidebar nav { display:flex; gap:8px; overflow-x:auto; }
+     .pr-rule-sidebar nav button { min-width:140px; width:auto; }
+-    .pr-folder-mappings .role-section { grid-template-columns:90px minmax(0,1fr); gap:12px; }
+   }
+ }
+ 
