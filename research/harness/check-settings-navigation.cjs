@@ -1,6 +1,10 @@
 const assert = require('node:assert/strict');
 module.exports = async ({ main, cdp, run, action, shot, until, cli, account, draft }) => {
   const selected = () => run('require("mailspring-exports").SignatureStore.selectedSignature()');
+  await action('.pr-template-html');
+  const customHtml = '<div>Keep this custom signature until I confirm.</div>';
+  await main.locator('#signature-body').fill(customHtml);
+  await until(async () => (await selected()).body === customHtml, 'custom HTML saved before switching');
   const original = await selected();
   // Only the native dialog response is substituted; the real editor checks and store writes run.
   await run(`window.prOriginalDialog=require('@electron/remote').dialog.showMessageBoxSync;

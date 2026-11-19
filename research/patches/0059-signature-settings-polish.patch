@@ -1,0 +1,693 @@
+diff --git a/app/internal_packages/composer-signature/lib/preferences-signatures.tsx b/app/internal_packages/composer-signature/lib/preferences-signatures.tsx
+index 7de0d6f..c171ec4 100644
+--- a/app/internal_packages/composer-signature/lib/preferences-signatures.tsx
++++ b/app/internal_packages/composer-signature/lib/preferences-signatures.tsx
+@@ -1,4 +1,5 @@
+ import React from 'react';
++import { dialog, getCurrentWindow } from '@electron/remote';
+ import {
+   localized,
+   AccountStore,
+@@ -21,10 +22,30 @@ import SignatureTemplatePicker from './signature-template-picker';
+ import SignaturePhotoPicker from './signature-photo-picker';
+ import Templates from './templates';
+ 
++const BASIC_SIGNATURE_FIELDS = ['name', 'title', 'phone', 'email'];
++const SIGNATURE_FIELD_NAMES = {
++  name: '姓名',
++  title: '职位',
++  phone: '电话',
++  email: '邮箱',
++  fax: '传真',
++  address: '地址',
++  websiteURL: '网站',
++  facebookURL: 'Facebook 链接',
++  linkedinURL: 'LinkedIn 链接',
++  mediumURL: 'Medium 用户名',
++  githubURL: 'GitHub 用户名',
++  youtubeURL: 'YouTube 链接',
++  twitterHandle: 'X 用户名',
++  instagramURL: 'Instagram 链接',
++  tintColor: '主题颜色',
++};
++
+ interface SignatureEditorProps {
+   signature: ISignature;
+   defaults: IDefaultSignatures;
+   accountsAndAliases: IAliasSet;
++  titleInput?: React.Ref<HTMLInputElement>;
+ }
+ 
+ interface SignatureEditorState {}
+@@ -98,14 +119,23 @@ class SignatureEditor extends React.Component<SignatureEditorProps, SignatureEdi
+         (t) => sig.body === RenderSignatureData({ ...sig.data, templateName: t.name })
+       );
+       if (!htmlMatchesATemplate) {
+-        const idx = require('@electron/remote').dialog.showMessageBoxSync({
+-          type: 'warning',
+-          buttons: [localized('Cancel'), localized('Continue')],
+-          message: localized('Revert custom HTML?'),
+-          detail: localized(
+-            "Switching back to a signature template will overwrite the custom HTML you've entered."
+-          ),
+-        });
++        const idx = AppEnv.config.get('core.paperReed.enabled')
++          ? dialog.showMessageBoxSync(getCurrentWindow(), {
++              type: 'warning',
++              buttons: ['取消', '切换版式'],
++              defaultId: 0,
++              cancelId: 0,
++              message: '改用签名版式？',
++              detail: '切换版式会覆盖当前签名的自定义 HTML。',
++            })
++          : dialog.showMessageBoxSync({
++              type: 'warning',
++              buttons: [localized('Cancel'), localized('Continue')],
++              message: localized('Revert custom HTML?'),
++              detail: localized(
++                "Switching back to a signature template will overwrite the custom HTML you've entered."
++              ),
++            });
+         if (idx === 0) {
+           return;
+         }
+@@ -126,8 +156,24 @@ class SignatureEditor extends React.Component<SignatureEditorProps, SignatureEdi
+     Actions.upsertSignature(sig, sig.id);
+   };
+ 
++  _renderFields(fields: typeof DataShape, data: Record<string, string>, paperReed: boolean) {
++    return fields.map((item) => (
++      <div className="field" key={item.key}>
++        <label htmlFor={item.key}>{paperReed ? SIGNATURE_FIELD_NAMES[item.key] : item.label}</label>
++        <input
++          type="text"
++          onChange={this._onDataFieldChange}
++          placeholder={paperReed && item.key === 'tintColor' ? '#419bf9' : item.placeholder}
++          id={item.key}
++          value={data[item.key] || ''}
++        />
++      </div>
++    ));
++  }
++
+   render() {
+-    const { accountsAndAliases, defaults } = this.props;
++    const { accountsAndAliases, defaults, titleInput } = this.props;
++    const paperReed = AppEnv.config.get('core.paperReed.enabled');
+ 
+     let signature = this.props.signature;
+     let empty = false;
+@@ -146,17 +192,18 @@ class SignatureEditor extends React.Component<SignatureEditorProps, SignatureEdi
+     return (
+       <div className={`signature-wrap ${empty && 'empty'}`}>
+         <div className="section basic-info">
+-          <label htmlFor="signature-title" className="sr-only">
+-            {AppEnv.config.get('core.paperReed.enabled') ? '签名名称' : localized('Signature Name')}
++          <label htmlFor="signature-title" className={paperReed ? 'pr-signature-title-label' : 'sr-only'}>
++            {paperReed ? '签名名称' : localized('Signature Name')}
+           </label>
+           <input
+             type="text"
+             id="signature-title"
+-            placeholder={AppEnv.config.get('core.paperReed.enabled') ? '签名名称' : localized('Name')}
++            ref={titleInput}
++            placeholder={paperReed ? '未命名签名' : localized('Name')}
+             value={signature.title || ''}
+             onChange={this._onTitleChange}
+           />
+-          <div style={{ flex: 1 }} />
++          {!paperReed && <div style={{ flex: 1 }} />}
+           <SignatureAccountDefaultPicker
+             signature={signature}
+             accountsAndAliases={accountsAndAliases}
+@@ -165,10 +212,19 @@ class SignatureEditor extends React.Component<SignatureEditorProps, SignatureEdi
+         </div>
+ 
+         <div className="section preview">
+-          <div className="label">{AppEnv.config.get('core.paperReed.enabled') ? '实际效果' : localized('Preview')}</div>
++          <div className="label">{paperReed ? '签名预览' : localized('Preview')}</div>
+           <div className="preview" dangerouslySetInnerHTML={{ __html: signature.body }} />
+         </div>
+ 
++        {paperReed && resolvedData.templateName && (
++          <>
++            <div className="section-header">签名信息</div>
++            <div className="section information">
++              {this._renderFields(DataShape.filter(({ key }) => BASIC_SIGNATURE_FIELDS.includes(key)), data, true)}
++            </div>
++          </>
++        )}
++
+         <div className="section">
+           <SignatureTemplatePicker resolvedData={resolvedData} onChange={this._onDataFieldChange} />
+         </div>
+@@ -176,10 +232,10 @@ class SignatureEditor extends React.Component<SignatureEditorProps, SignatureEdi
+         {!resolvedData.templateName
+           ? [
+               <div key="header" className="section-header">
+-                {AppEnv.config.get('core.paperReed.enabled') ? '签名 HTML' : localized('Raw Source')}
++                {paperReed ? '签名 HTML' : localized('Raw Source')}
+               </div>,
+               <label key="body-label" htmlFor="signature-body" className="sr-only">
+-                {localized('Signature HTML')}
++                {paperReed ? '签名 HTML' : localized('Signature HTML')}
+               </label>,
+               <textarea
+                 id="signature-body"
+@@ -191,36 +247,41 @@ class SignatureEditor extends React.Component<SignatureEditorProps, SignatureEdi
+                 defaultValue={signature.body || ''}
+               />,
+               <div key="body-note" className="section-note">
+-                {localized(
+-                  'Moving from another mail app? Select your existing signature in an email and copy-paste it into the box above.'
+-                )}
++                {paperReed
++                  ? '可从邮件中复制已有签名并粘贴到这里。'
++                  : localized(
++                    'Moving from another mail app? Select your existing signature in an email and copy-paste it into the box above.'
++                  )}
+               </div>,
+             ]
+-          : [
+-              <div key="header" className="section-header">
+-                {AppEnv.config.get('core.paperReed.enabled') ? '签名信息' : localized('Information')}
+-              </div>,
+-              <div key="section" className="section information">
+-                {DataShape.map((item) => (
+-                  <div className="field" key={item.key}>
+-                    <label htmlFor={item.key}>{AppEnv.config.get('core.paperReed.enabled') ? ({name:'姓名',title:'职位',phone:'电话',email:'邮箱',fax:'传真',address:'地址',websiteURL:'网站',tintColor:'颜色'}[item.key] || item.label) : item.label}</label>
+-                    <input
+-                      type="text"
+-                      onChange={this._onDataFieldChange}
+-                      placeholder={item.placeholder}
+-                      id={item.key}
+-                      value={data[item.key] || ''}
+-                    />
+-                  </div>
+-                ))}
+-                <SignaturePhotoPicker
+-                  id={signature.id}
+-                  data={data}
+-                  resolvedURL={resolvedData.photoURL}
+-                  onChange={this._onDataFieldChange}
+-                />
+-              </div>,
+-            ]}
++          : paperReed ? (
++              <details className="pr-settings-group pr-signature-more">
++                <summary>更多签名信息</summary>
++                <div className="section information">
++                  {this._renderFields(DataShape.filter(({ key }) => !BASIC_SIGNATURE_FIELDS.includes(key)), data, true)}
++                  <SignaturePhotoPicker
++                    id={signature.id}
++                    data={data}
++                    resolvedURL={resolvedData.photoURL}
++                    onChange={this._onDataFieldChange}
++                  />
++                </div>
++              </details>
++            ) : (
++              <>
++                <div className="section-header">{localized('Information')}</div>
++                <div className="section information">
++                  {this._renderFields(DataShape, data, false)}
++                  <SignaturePhotoPicker
++                    id={signature.id}
++                    data={data}
++                    resolvedURL={resolvedData.photoURL}
++                    onChange={this._onDataFieldChange}
++                  />
++                </div>
++              </>
++            )}
++
+       </div>
+     );
+   }
+@@ -241,6 +302,11 @@ export default class PreferencesSignatures extends React.Component<
+   static displayName = 'PreferencesSignatures';
+ 
+   unsubscribers = [];
++  _newButton = React.createRef<HTMLButtonElement>();
++  _titleInput = React.createRef<HTMLInputElement>();
++  _deleteButton = React.createRef<HTMLButtonElement>();
++  _cancelButton = React.createRef<HTMLButtonElement>();
++  _signatureList = React.createRef<HTMLElement>();
+ 
+   constructor(props) {
+     super(props);
+@@ -269,26 +335,33 @@ export default class PreferencesSignatures extends React.Component<
+   }
+ 
+   _onAddSignature = () => {
++    const paperReed = AppEnv.config.get('core.paperReed.enabled');
+     const activeIds = FocusedPerspectiveStore.current().accountIds || AccountStore.accountIds();
+     const activeAccount = AccountStore.accountForId(activeIds[0]);
+     const id = Utils.generateTempId();
+ 
+     let data = {};
+     let body = null;
+-    if (this.state.selectedSignature) {
++    if (this.state.selectedSignature && !paperReed) {
+       data = { ...this.state.selectedSignature.data };
+       body = this.state.selectedSignature.body;
+     } else {
+       data = {
+         templateName: Templates[0].name,
+-        name: activeAccount.name,
+-        email: activeAccount.emailAddress,
++        name: activeAccount?.name,
++        email: activeAccount?.emailAddress,
+       };
+       body = RenderSignatureData(data);
+     }
+ 
+-    Actions.upsertSignature({ id, title: AppEnv.config.get('core.paperReed.enabled') ? '新签名' : localized('Untitled'), body, data }, id);
++    Actions.upsertSignature({ id, title: paperReed ? '新签名' : localized('Untitled'), body, data }, id);
+     Actions.selectSignature(id);
++    if (paperReed) {
++      this.setState({ deleting: false }, () => {
++        this._titleInput.current.focus();
++        this._titleInput.current.select();
++      });
++    }
+   };
+ 
+   _onDeleteSignature = (signature: ISignature) => {
+@@ -330,16 +403,114 @@ export default class PreferencesSignatures extends React.Component<
+     );
+   }
+ 
++  _cancelDeletion = () => {
++    this.setState({ deleting: false }, () => this._deleteButton.current.focus());
++  };
++
++  _confirmDeletion = () => {
++    this._onDeleteSignature(this.state.selectedSignature);
++    this.setState({ deleting: false }, () => {
++      const next = this._signatureList.current?.querySelector<HTMLButtonElement>('button[aria-current]');
++      (next || this._newButton.current).focus();
++    });
++  };
++
++  _renderPaperReed() {
++    const { signatures, selectedSignature, defaults, accountsAndAliases, deleting } = this.state;
++    const allSignatures = Object.values(signatures);
++    const signatureName = selectedSignature?.title || '未命名签名';
++    const isDefault = selectedSignature && Object.values(defaults).includes(selectedSignature.id);
++
++    return (
++      <div
++        className="preferences-signatures-container pr-signature-settings"
++        onKeyDown={(event) => {
++          if (deleting && event.key === 'Escape') {
++            event.preventDefault();
++            event.stopPropagation();
++            this._cancelDeletion();
++          }
++        }}
++      >
++        <div className={selectedSignature ? 'pr-signature-layout' : 'pr-signature-layout is-empty'}>
++          <aside className="pr-signature-list">
++            <header>
++              <button className="pr-signature-add" ref={this._newButton} type="button" onClick={this._onAddSignature}>
++                新建签名
++              </button>
++            </header>
++            {allSignatures.length > 0 && (
++              <nav aria-label="已保存的签名" ref={this._signatureList}>
++                {allSignatures.map((signature) => (
++                  <button
++                    type="button"
++                    key={signature.id}
++                    aria-current={signature.id === selectedSignature?.id ? 'true' : undefined}
++                    onClick={() => this._onSelectSignature(signature)}
++                  >
++                    {signature.title || '未命名签名'}
++                  </button>
++                ))}
++              </nav>
++            )}
++          </aside>
++
++          {selectedSignature ? (
++            <div className="pr-signature-detail">
++              <SignatureEditor
++                key={selectedSignature.id}
++                signature={selectedSignature}
++                defaults={defaults}
++                accountsAndAliases={accountsAndAliases}
++                titleInput={this._titleInput}
++              />
++              <footer>
++                {deleting ? (
++                  <>
++                    <div className="pr-signature-delete-note" id="pr-signature-delete-note">
++                      <strong>删除「{signatureName}」？</strong>
++                      {isDefault && <span>设为默认的发件地址会停止插入此签名。</span>}
++                      <span>已写入草稿的签名会保留。</span>
++                    </div>
++                    <div className="pr-signature-delete-actions">
++                      <button
++                        type="button"
++                        ref={this._cancelButton}
++                        aria-describedby="pr-signature-delete-note"
++                        onClick={this._cancelDeletion}
++                      >
++                        取消
++                      </button>
++                      <button type="button" className="pr-signature-remove" onClick={this._confirmDeletion}>
++                        确认删除
++                      </button>
++                    </div>
++                  </>
++                ) : (
++                  <>
++                    <span>更改自动保存到本机</span>
++                    <button
++                      type="button"
++                      className="pr-signature-remove"
++                      ref={this._deleteButton}
++                      onClick={() => this.setState({ deleting: true }, () => this._cancelButton.current.focus())}
++                    >
++                      删除签名…
++                    </button>
++                  </>
++                )}
++              </footer>
++            </div>
++          ) : (
++            <p className="pr-signature-empty">还没有签名。新建后可选择哪些发件地址自动插入它。</p>
++          )}
++        </div>
++      </div>
++    );
++  }
++
+   render() {
+-    if (AppEnv.config.get('core.paperReed.enabled')) return <div className="preferences-signatures-container pr-signature-settings">
+-      <header><div><h1>邮件签名</h1><p>为不同往来准备合适的落款。</p></div><button type="button" onClick={this._onAddSignature}>新建签名</button></header>
+-      <div className="pr-signature-layout"><nav aria-label="已保存的签名">{Object.values(this.state.signatures).map(sig =>
+-        <button type="button" key={sig.id} aria-current={sig.id === this.state.selectedSignature?.id ? 'true' : undefined} onClick={() => this._onSelectSignature(sig)}>{sig.title || '未命名签名'}</button>
+-      )}</nav><div className="pr-signature-detail">{this.state.selectedSignature ? <>
+-        <SignatureEditor signature={this.state.selectedSignature} defaults={this.state.defaults} accountsAndAliases={this.state.accountsAndAliases} />
+-        <footer>{this.state.deleting ? <><span>删除这个签名？已写入草稿的内容会保留。</span><button type="button" onClick={() => this.setState({deleting:false})}>取消</button><button type="button" onClick={() => { this._onDeleteSignature(this.state.selectedSignature); this.setState({deleting:false}); }}>确认删除</button></> : <><span>更改自动保存到本机</span><button type="button" onClick={() => this.setState({deleting:true})}>删除签名</button></>}</footer>
+-      </> : <div className="pr-signature-empty"><h2>从一句落款开始</h2><p>新建签名后，可为邮箱设置默认落款。</p></div>}</div></div>
+-    </div>;
++    if (AppEnv.config.get('core.paperReed.enabled')) return this._renderPaperReed();
+     return (
+       <div className="preferences-signatures-container">
+         <section>{this._renderSignatures()}</section>
+diff --git a/app/internal_packages/composer-signature/lib/signature-account-default-picker.tsx b/app/internal_packages/composer-signature/lib/signature-account-default-picker.tsx
+index 32a6bec..d6aefa8 100644
+--- a/app/internal_packages/composer-signature/lib/signature-account-default-picker.tsx
++++ b/app/internal_packages/composer-signature/lib/signature-account-default-picker.tsx
+@@ -1,5 +1,5 @@
+ import React from 'react';
+-import { localized, Actions, IAliasSet, ISignature, IDefaultSignatures } from 'mailspring-exports';
++import { localized, Actions, SignatureStore, IAliasSet, ISignature, IDefaultSignatures } from 'mailspring-exports';
+ import { MultiselectDropdown } from 'mailspring-component-kit';
+ 
+ interface SignatureAccountDefaultPickerProps {
+@@ -20,9 +20,33 @@ export default class SignatureAccountDefaultPicker extends React.Component<Signa
+       defaults[accountOrAlias.email] === signature.id;
+     const checked = accountsAndAliases.filter(isChecked);
+ 
+-    if (AppEnv.config.get('core.paperReed.enabled')) return <fieldset className="pr-signature-defaults"><legend>默认用于</legend>
+-      {accountsAndAliases.map(account => <label key={account.id}><input type="checkbox" checked={isChecked(account)} onChange={() => this._onToggleAccount(account)} />{account.email}</label>)}
+-    </fieldset>;
++    if (AppEnv.config.get('core.paperReed.enabled')) {
++      return (
++        <fieldset className="pr-signature-defaults">
++          <legend>默认用于</legend>
++          {accountsAndAliases.map((account) => {
++            const checked = isChecked(account);
++            const owner = !checked && SignatureStore.signatureForEmail(account.email);
++            const descriptionId = `pr-signature-owner-${account.id}`;
++            return (
++              <label key={account.id}>
++                <input
++                  type="checkbox"
++                  aria-label={account.email}
++                  aria-describedby={owner ? descriptionId : undefined}
++                  checked={checked}
++                  onChange={() => this._onToggleAccount(account)}
++                />
++                <span>
++                  {account.email}
++                  {owner && <small id={descriptionId}>当前使用「{owner.title || '未命名签名'}」</small>}
++                </span>
++              </label>
++            );
++          })}
++        </fieldset>
++      );
++    }
+     const noun = checked.length === 1 ? localized('Account') : localized('Accounts');
+ 
+     return (
+diff --git a/app/internal_packages/composer-signature/lib/signature-photo-picker.tsx b/app/internal_packages/composer-signature/lib/signature-photo-picker.tsx
+index e65c83c..5c9bd70 100644
+--- a/app/internal_packages/composer-signature/lib/signature-photo-picker.tsx
++++ b/app/internal_packages/composer-signature/lib/signature-photo-picker.tsx
+@@ -148,6 +148,8 @@ export default class SignaturePhotoPicker extends React.Component<
+   render() {
+     const { data, resolvedURL } = this.props;
+     const { isDropping, isUploading } = this.state;
++    const paperReed = AppEnv.config.get('core.paperReed.enabled');
++    const urlInputId = paperReed ? 'signature-photo-address' : 'photoURL';
+ 
+     let source = data.photoURL || '';
+     if (!['gravatar', 'company', ''].includes(source)) {
+@@ -169,7 +171,7 @@ export default class SignaturePhotoPicker extends React.Component<
+ 
+     return (
+       <div className="field photo-picker">
+-        <label htmlFor="photoURL">Picture</label>
++        <label htmlFor="photoURL">{paperReed ? '签名图片' : 'Picture'}</label>
+         <div style={{ display: 'flex' }}>
+           {isUploadEnabled && (
+             <div>
+@@ -198,16 +200,16 @@ export default class SignaturePhotoPicker extends React.Component<
+           <div className="photo-options">
+             <select
+               id="photoURL"
+-              tabIndex={-1}
++              tabIndex={paperReed ? undefined : -1}
+               value={source || ''}
+               onChange={this.props.onChange}
+               style={{ display: 'block' }}
+             >
+-              <option value="">{localized('None')}</option>
+-              <option value="gravatar">{localized('Gravatar Profile Photo')}</option>
+-              <option value="company">{localized('Company / Domain Logo')}</option>
++              <option value="">{paperReed ? '不使用图片' : localized('None')}</option>
++              <option value="gravatar">{paperReed ? 'Gravatar 头像' : localized('Gravatar Profile Photo')}</option>
++              <option value="company">{paperReed ? '公司域名标志' : localized('Company / Domain Logo')}</option>
+               <option disabled>──────────</option>
+-              <option value="custom">{localized('Custom Image…')}</option>
++              <option value="custom">{paperReed ? '自定义图片…' : localized('Custom Image…')}</option>
+             </select>
+             {source === 'custom' &&
+               (isMailspringURL ? (
+@@ -219,15 +221,20 @@ export default class SignaturePhotoPicker extends React.Component<
+                 </a>
+               ) : (
+                 <>
+-                  <label htmlFor="photoURL" className="sr-only">
+-                    {localized('Photo URL')}
++                  <label htmlFor={urlInputId} className="sr-only">
++                    {paperReed ? '图片地址' : localized('Photo URL')}
+                   </label>
+                   <input
+                     type="url"
+-                    id="photoURL"
+-                    placeholder="http://"
++                    id={urlInputId}
++                    placeholder="https://"
+                     value={data.photoURL === 'custom' ? '' : data.photoURL}
+-                    onChange={this.props.onChange}
++                    onChange={(event) => {
++                      const { value } = event.target;
++                      this.props.onChange({
++                        target: { id: 'photoURL', value: paperReed && !value ? 'custom' : value },
++                      });
++                    }}
+                   />
+                 </>
+               ))}
+diff --git a/app/internal_packages/composer-signature/lib/signature-template-picker.tsx b/app/internal_packages/composer-signature/lib/signature-template-picker.tsx
+index 04f5b3d..ceb56f4 100644
+--- a/app/internal_packages/composer-signature/lib/signature-template-picker.tsx
++++ b/app/internal_packages/composer-signature/lib/signature-template-picker.tsx
+@@ -38,17 +38,18 @@ export default class SignatureTemplatePicker extends React.Component<{
+ 
+   render() {
+     let { resolvedData } = this.props;
++    const paperReed = AppEnv.config.get('core.paperReed.enabled');
+ 
+     const { name, email, title } = resolvedData;
+     if (!name && !email && !title) {
+       resolvedData = {
+         ...resolvedData,
+-        name: localized('Your name'),
+-        email: 'you@domain.com',
+-        title: localized('Job Title'),
++        name: paperReed ? '姓名' : localized('Your name'),
++        email: paperReed ? 'name@example.com' : 'you@domain.com',
++        title: paperReed ? '职位' : localized('Job Title'),
+       };
+     }
+-    if (AppEnv.config.get('core.paperReed.enabled'))
++    if (paperReed)
+       return (
+         <div
+           className="pr-signature-templates"
+diff --git a/app/internal_packages/paper-reed/styles/paper-reed.less b/app/internal_packages/paper-reed/styles/paper-reed.less
+index 880ed87..38d34b7 100644
+--- a/app/internal_packages/paper-reed/styles/paper-reed.less
++++ b/app/internal_packages/paper-reed/styles/paper-reed.less
+@@ -265,38 +265,6 @@
+   .pr-color-custom input { width: 28px; height: 26px; padding: 0; background: none; border: 0; cursor: pointer; }
+ }
+ 
+-.preferences-signatures-container.pr-signature-settings { color: #303730; padding: 28px 24px; max-width: 900px;
+-  header { display:flex; justify-content:space-between; align-items:center; margin-bottom:28px; }
+-  h1 { font-size:24px; line-height:34px; margin:0; font-weight:500; }
+-  h2 { font-size:18px; font-weight:500; }
+-  p { color:#626b60; font-size:12px; margin:6px 0; }
+-  button { background:transparent; border:1px solid #dfe2d9; border-radius:5px; padding:7px 12px; color:#4b634f; font:inherit; cursor:pointer; box-shadow:none; }
+-  button:hover { background:#e9eee5; }
+-  button:focus-visible, input:focus-visible, textarea:focus-visible { outline:2px solid #4b634f; outline-offset:2px; }
+-  .pr-signature-layout { display:grid; grid-template-columns:160px minmax(0,1fr); gap:28px; }
+-  nav { border-right:1px solid #dfe2d9; padding-right:16px; }
+-  nav button { display:block; width:100%; text-align:left; border:0; margin-bottom:4px; overflow-wrap:anywhere; }
+-  nav button[aria-current] { background:#e9eee5; color:#303730; }
+-  .signature-wrap { margin:0; padding:0; }
+-  .signature-wrap .section.basic-info { display:block; }
+-  #signature-title { width:100%; max-width:none; font-size:18px; background:transparent; border:0; border-bottom:1px solid #dfe2d9; border-radius:0; padding:8px 0; box-shadow:none; }
+-  .pr-signature-defaults { border:0; padding:0; margin:18px 0; }
+-  .pr-signature-defaults legend { font-size:11px; color:#626b60; margin-bottom:6px; }
+-  .pr-signature-defaults label { display:flex; align-items:center; gap:8px; font-size:12px; margin:6px 0; }
+-  .pr-signature-defaults input { accent-color:#4b634f; }
+-  .signature-wrap .section.preview { background:#faf9f6; border:1px solid #dfe2d9; padding:20px; border-radius:6px; min-height:140px; overflow:auto; }
+-  .signature-wrap .section.preview .label { float:none; color:#626b60; padding:0; font-size:11px; margin-bottom:18px; }
+-  .signature-template-picker { background:#f2f1eb; height:66px; }
+-  .signature-template-picker .option { border-color:#dfe2d9; border-radius:3px; }
+-  .signature-template-picker .option.active { border-color:#4b634f; }
+-  .signature-wrap .section { border-color:#dfe2d9; }
+-  .signature-wrap textarea.raw-html { height:150px; border-radius:5px; padding:12px; font:12px/20px monospace; background:#faf9f6; }
+-  .signature-wrap .section-header { font-size:12px; color:#626b60; margin:20px 0 8px; }
+-  .signature-wrap .section-note { font-size:11px; line-height:18px; color:#626b60; }
+-  footer { margin-top:24px; padding-top:16px; border-top:1px solid #dfe2d9; display:flex; align-items:center; gap:10px; font-size:11px; color:#626b60; }
+-  footer span { flex:1; }
+-  .pr-signature-empty { padding:40px 0; }
+-}
+ .pr-emoji-picker { width:280px; padding:14px; color:#303730; background:#faf9f6; font:12px/20px -apple-system,BlinkMacSystemFont,sans-serif;
+   header { display:flex; align-items:center; justify-content:space-between; margin-bottom:12px; }
+   header strong { font-size:14px; font-weight:500; }
+@@ -323,23 +291,82 @@
+   .pr-preferences-nav button:focus-visible { outline:2px solid #4b634f; outline-offset:-2px; }
+   .pr-preferences-nav .pr-settings-back { color:#626b60; }
+   .preferences-content { flex:1; min-width:0; background:#faf9f6; }
+-  .preferences-signatures-container.pr-signature-settings { max-width:1000px; padding:32px 36px; }
+ }
+-.preferences-signatures-container.pr-signature-settings {
++.preferences-wrap.pr-preferences .pr-settings-page .pr-signature-settings {
++  max-width:none;
++  margin:0;
++  container: pr-signatures ~"/" inline-size;
++
++  .pr-signature-layout { display:grid; grid-template-columns:152px minmax(0,1fr); gap:24px; }
++  .pr-signature-layout.is-empty { display:block; }
++  .pr-signature-list { min-width:0; border-right:1px solid #dfe2d9; padding-right:14px; }
++  .is-empty .pr-signature-list { border:0; }
++  .pr-signature-add { background:#4b634f; color:#fffefa; border-color:#4b634f; }
++  .pr-signature-add:hover { background:#3d5442; border-color:#3d5442; }
++  .pr-signature-list nav { margin-top:12px; }
++  nav button { display:block; width:100%; text-align:left; border:0; margin-bottom:4px; overflow-wrap:anywhere; }
++  nav button[aria-current] { background:#e9eee5; color:#303730; font-weight:500; }
++
++  .signature-wrap { margin:0; padding:0; overflow:visible; }
++  .signature-wrap .section.basic-info { display:block; margin:0 0 16px; white-space:normal; }
++  .pr-signature-title-label { display:block; color:#626b60; font-size:12px; margin-bottom:2px; }
++  #signature-title { width:100%; max-width:none; font-size:17px; background:transparent; border:0; border-bottom:1px solid #dfe2d9; border-radius:0; padding:6px 0; box-shadow:none; }
++  .pr-signature-defaults { border:0; padding:0; margin:14px 0 0; min-width:0; }
++  .pr-signature-defaults legend { font-size:12px; color:#626b60; margin-bottom:4px; }
++  .pr-signature-defaults label { display:flex; align-items:flex-start; gap:8px; width:fit-content; max-width:100%; font-size:12px; margin:0; padding:4px 0; }
++  .pr-signature-defaults input { margin:4px 0 0; flex-shrink:0; }
++  .pr-signature-defaults span { min-width:0; overflow-wrap:anywhere; }
++  .pr-signature-defaults small { display:block; color:#626b60; font-size:11px; }
++
++  .signature-wrap .section.preview { background:#fffefa; border:1px solid #dfe2d9; padding:14px 16px 16px; border-radius:5px; min-height:112px; overflow:auto; }
++  .signature-wrap .section.preview .label { float:none; color:#626b60; padding:0; font-size:11px; margin:0 0 8px; }
++  .signature-wrap .section { border-color:#dfe2d9; }
++  .signature-wrap textarea.raw-html { height:150px; border-radius:5px; padding:12px; font:12px/20px monospace; background:#fffefa; color:#303730; box-shadow:none; }
++  .signature-wrap textarea.raw-html:focus { border-color:#dfe2d9; }
++  .signature-wrap textarea.raw-html:focus-visible { outline:2px solid #4b634f; outline-offset:2px; }
++  .signature-wrap .section-header { font-size:12px; color:#626b60; margin:16px 0 8px; }
++  .signature-wrap .section.information { display:grid; grid-template-columns:repeat(2,minmax(0,1fr)); gap:10px 12px; background:transparent; border:0; padding:0; }
++  .signature-wrap .section.information .field { width:auto; min-width:0; padding:0; }
++  .signature-wrap .section.information .field > label { display:block; color:#626b60; font-size:12px; margin:0 0 3px; }
++  .signature-wrap .section.information .field > input { width:100%; }
++  .signature-wrap .section.information .photo-picker { grid-column:~"1 / -1"; }
++  .signature-wrap .section.information .photo-options { gap:8px; min-width:0; }
++  .signature-wrap .section.information .photo-options input { width:100%; }
++  .pr-signature-more { margin-top:16px; }
++
++  .signature-wrap .section-note { font-size:11px; line-height:18px; color:#626b60; }
++
+   .pr-signature-templates { padding:16px 0 4px; }
+   .signature-wrap > .section:has(.pr-signature-templates) { background:transparent; border:0; }
+-  .pr-template-heading { font-size:12px; color:#303730; margin-bottom:10px; }
++  .pr-template-heading { font-size:12px; color:#303730; margin-bottom:8px; }
+   .pr-template-heading > span { color:#626b60; font-size:11px; margin-left:10px; }
+-  .pr-template-grid { display:grid; grid-template-columns:repeat(3,minmax(0,1fr)); gap:8px; }
++  .pr-template-grid { display:grid; grid-template-columns:~"repeat(auto-fill, minmax(min(160px, 100%), 1fr))"; gap:8px; }
+   .pr-template-grid button { min-width:0; padding:0; overflow:hidden; text-align:left; background:#fffefa; border:1px solid #dfe2d9; border-radius:5px; }
+   .pr-template-grid button[aria-pressed=true], .pr-template-html[aria-pressed=true] { border-color:#4b634f; box-shadow:inset 0 0 0 1px #4b634f; }
+-  .pr-template-preview { display:block; height:88px; position:relative; overflow:hidden; pointer-events:none; }
+-  .pr-template-preview > span { display:block; width:270px; position:absolute; left:12px; top:12px; transform:scale(.65); transform-origin:top left; }
+-  .pr-template-name { display:block; padding:7px 10px; background:#f2f1eb; color:#303730; font-size:11px; border-top:1px solid #dfe2d9; }
++  .pr-template-preview { display:block; height:72px; position:relative; overflow:hidden; pointer-events:none; }
++  .pr-template-preview > span { display:block; width:270px; position:absolute; left:10px; top:10px; transform:scale(.52); transform-origin:top left; }
++  .pr-template-name { display:block; padding:5px 8px; background:#f2f1eb; color:#303730; font-size:11px; border-top:1px solid #dfe2d9; }
+   .pr-template-grid button[aria-pressed=true] .pr-template-name { background:#e9eee5; color:#4b634f; }
+-  .pr-template-html { margin-top:8px; width:100%; text-align:left; padding:10px; font-size:12px; background:transparent; }
+-  .pr-template-html span { font-size:11px; color:#626b60; margin-left:10px; }
+-  @media(max-width:1000px) { .pr-signature-layout { grid-template-columns:120px minmax(0,1fr); gap:18px; } .pr-template-grid { grid-template-columns:repeat(2,minmax(0,1fr)); } .pr-template-preview > span { transform:scale(.5); } }
++  .pr-template-html { margin-top:8px; width:100%; text-align:left; }
++  .pr-template-html span { font-size:11px; color:#626b60; margin-left:8px; }
++
++  footer { margin-top:20px; padding-top:12px; border-top:1px solid #dfe2d9; display:flex; flex-wrap:wrap; align-items:center; justify-content:space-between; gap:8px 12px; font-size:12px; color:#626b60; }
++  .pr-signature-remove { color:#9a433e; }
++  .pr-signature-remove:hover { background:#f7eeea; }
++  .pr-signature-delete-note { min-width:0; overflow-wrap:anywhere; }
++  .pr-signature-delete-note strong, .pr-signature-delete-note span { display:block; }
++  .pr-signature-delete-note strong { color:#303730; font-weight:500; }
++  .pr-signature-delete-actions { display:flex; flex-wrap:wrap; gap:6px; }
++  .pr-signature-empty { margin:14px 0 0; color:#626b60; }
++}
++
++@container pr-signatures (max-width: 560px) {
++  .preferences-wrap.pr-preferences .pr-settings-page .pr-signature-settings {
++    .pr-signature-layout { grid-template-columns:minmax(0,1fr); gap:16px; }
++    .pr-signature-list { display:flex; flex-wrap:wrap; align-items:center; gap:8px 10px; border:0; padding:0; }
++    .pr-signature-list nav { display:flex; flex-wrap:wrap; gap:4px; margin:0; min-width:0; }
++    .pr-signature-list nav button { width:auto; max-width:100%; margin:0; }
++  }
+ }
+ 
+ .preferences-wrap.pr-preferences {
+diff --git a/app/internal_packages/preferences/lib/preferences-root.tsx b/app/internal_packages/preferences/lib/preferences-root.tsx
+index 6c40628..b837863 100644
+--- a/app/internal_packages/preferences/lib/preferences-root.tsx
++++ b/app/internal_packages/preferences/lib/preferences-root.tsx
+@@ -75,6 +75,7 @@ class PreferencesRoot extends React.Component<{ tab: any; tabs: any[]; selection
+     const page =
+       AppEnv.config.get('core.paperReed.enabled') &&
+       {
++        Signatures: ['邮件签名', '为不同发件地址设置默认落款。'],
+         Templates: ['邮件模板', '把常用表达留好，让下一封信从容开始。'],
+         MCP: ['Agent 连接', '连接本机 Agent，明确它可以访问的邮件与操作。'],
+         Appearance: ['外观', '调整界面大小、邮件正文配色和菜单栏提示。'],
