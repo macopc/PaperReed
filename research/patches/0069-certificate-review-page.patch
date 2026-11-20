@@ -1,0 +1,805 @@
+diff --git a/app/internal_packages/onboarding/lib/certificate-review.ts b/app/internal_packages/onboarding/lib/certificate-review.ts
+index bf76647..709cdfe 100644
+--- a/app/internal_packages/onboarding/lib/certificate-review.ts
++++ b/app/internal_packages/onboarding/lib/certificate-review.ts
+@@ -2,8 +2,8 @@ import { X509Certificate } from 'crypto';
+ import net from 'net';
+ import { localized, Account } from 'mailspring-exports';
+ 
+-// A certificate mailsync's --mode test rejected. Accepting it stores `sha256` in the account's
+-// settings as `<service>_certificate_sha256`, and mailsync then accepts exactly that certificate.
++// A certificate rejected by mailsync's account test. The fingerprint identifies the
++// certificate for display and comparison during review.
+ export interface RejectedCertificate {
+   service: 'imap' | 'smtp';
+   host: string;
+@@ -23,7 +23,8 @@ export interface CertificateDescription {
+   problems: string[];
+ }
+ 
+-function commonName(distinguishedName: string) {
++function commonName(distinguishedName?: string) {
++  if (!distinguishedName) return '';
+   const cn = distinguishedName.split('\n').find((part) => part.startsWith('CN='));
+   if (cn) return cn.slice(3);
+   const o = distinguishedName.split('\n').find((part) => part.startsWith('O='));
+@@ -31,22 +32,39 @@ function commonName(distinguishedName: string) {
+ }
+ 
+ // "DNS:mail.example.com, IP Address:127.0.0.1" -> ["mail.example.com", "127.0.0.1"]
+-function subjectAltNames(cert: X509Certificate) {
++function serverAltNames(cert: X509Certificate) {
+   if (!cert.subjectAltName) return [];
+-  return cert.subjectAltName
+-    .split(', ')
+-    .map((entry) => entry.slice(entry.indexOf(':') + 1))
+-    .filter(Boolean);
++  // Node can quote SAN values as JSON strings. Keep quoted values together before
++  // selecting the DNS and IP entries that describe server identities.
++  const entries = cert.subjectAltName.match(/(?:[^",]|"(?:[^"\\]|\\.)*")+/g) || [];
++  return entries.flatMap(entry => {
++    const match = /^(?:DNS|IP Address):(.+)$/.exec(entry.trimStart());
++    if (!match) return [];
++    const value = match[1];
++    const name: string = value.startsWith('"') ? JSON.parse(value) : value;
++    return name ? [name] : [];
++  });
+ }
+ 
+-// mailsync reports only that validation failed, so the reasons a person can act on are read
+-// from the certificate itself. Anything else is an issuer the platform doesn't trust.
++function isSelfSigned(cert: X509Certificate) {
++  // A CA and the leaf it signed can have the same distinguished name.
++  if (cert.subject !== cert.issuer) return false;
++  try {
++    return cert.verify(cert.publicKey);
++  } catch {
++    // The runtime can read metadata for certificates with unsupported public key parameters.
++    return false;
++  }
++}
++
++// The certificate supplies diagnostic details. Mailsync makes the trust decision.
+ export function describeRejectedCertificate(
+   rejected: RejectedCertificate,
+-  now = new Date()
++  now = new Date(),
++  paperReed = false
+ ): CertificateDescription {
+   const cert = new X509Certificate(Buffer.from(rejected.chain[0], 'base64'));
+-  const names = subjectAltNames(cert);
++  const names = serverAltNames(cert);
+   const validFrom = new Date(cert.validFrom);
+   const validTo = new Date(cert.validTo);
+   const problems: string[] = [];
+@@ -55,24 +73,29 @@ export function describeRejectedCertificate(
+     ? cert.checkIP(rejected.host)
+     : cert.checkHost(rejected.host);
+   if (!matchesHost) {
+-    problems.push(
+-      localized(
+-        'It was issued for %@, not %@.',
+-        (names.length ? names : [commonName(cert.subject)]).join(', '),
+-        rejected.host
+-      )
+-    );
++    const serverNames = names.join(', ');
++    if (paperReed) {
++      problems.push(serverNames
++        ? `证书适用于 ${serverNames}，与当前服务器 ${rejected.host} 不匹配。`
++        : `证书的名称与当前服务器 ${rejected.host} 不匹配。`);
++    } else {
++      problems.push(localized('It was issued for %@, not %@.', serverNames || commonName(cert.subject), rejected.host));
++    }
+   }
+   if (now > validTo) {
+-    problems.push(localized('It expired on %@.', validTo.toLocaleDateString()));
++    problems.push(paperReed ? `证书已于 ${validTo.toLocaleDateString('zh-CN')} 过期。`
++      : localized('It expired on %@.', validTo.toLocaleDateString()));
+   } else if (now < validFrom) {
+-    problems.push(localized('It is not valid until %@.', validFrom.toLocaleDateString()));
++    problems.push(paperReed ? `证书要到 ${validFrom.toLocaleDateString('zh-CN')} 才生效。`
++      : localized('It is not valid until %@.', validFrom.toLocaleDateString()));
+   }
+-  if (cert.checkIssued(cert)) {
+-    problems.push(localized('It is self-signed, so no certificate authority vouches for it.'));
++  if (isSelfSigned(cert)) {
++    problems.push(paperReed ? '这是自签名证书，未由证书颁发机构签发。'
++      : localized('It is self-signed, so no certificate authority vouches for it.'));
+   } else if (problems.length === 0) {
+     problems.push(
+-      localized('It was issued by %@, which this computer does not trust.', commonName(cert.issuer))
++      paperReed ? '系统无法验证此证书。'
++        : localized('It was issued by %@, which this computer does not trust.', commonName(cert.issuer))
+     );
+   }
+ 
+diff --git a/app/internal_packages/onboarding/lib/decorators/create-page-for-form.tsx b/app/internal_packages/onboarding/lib/decorators/create-page-for-form.tsx
+index 5ae061c..d34a424 100644
+--- a/app/internal_packages/onboarding/lib/decorators/create-page-for-form.tsx
++++ b/app/internal_packages/onboarding/lib/decorators/create-page-for-form.tsx
+@@ -5,7 +5,7 @@ import { RetinaImg } from 'mailspring-component-kit';
+ import { localized, Account } from 'mailspring-exports';
+ 
+ import * as OnboardingActions from '../onboarding-actions';
+-import { finalizeAndValidateAccount } from '../onboarding-helpers';
++import { finalizeAndValidateAccount, serverConnectionProblem } from '../onboarding-helpers';
+ import FormErrorMessage from '../form-error-message';
+ import AccountProviders from '../account-providers';
+ import { forgetCertificateIfServerChanged } from '../certificate-review';
+@@ -190,13 +190,13 @@ const CreatePageForForm = (FormComponent: React.ComponentType<any> & Record<stri
+         .catch((err) => {
+           if (this.props.isCurrentVisit?.() === false) return;
+           const isBasicForm = FormComponent.displayName === 'AccountBasicSettingsForm';
+-          // No credentials have gone to a server whose certificate was rejected. The user
+-          // reviews the certificates, and accepting them retries with their fingerprints.
+-          if (err.certificates?.length) {
++          // The bundled engine reports details while continuing to enforce system trust.
++          if (err.certificates?.length && (serverForm || !err.certificateDetailsOnly)) {
+             this.setState({ submitting: false });
+             OnboardingActions.setAccount(draft, {
+               confirmServers: serverForm && this.props.confirmServers,
+               rejectedCertificates: err.certificates,
++              certificateRejectionLog: serverForm ? err.rawLog || err.message : undefined,
+             });
+             // From the template-based form, Back leads to the full settings, where a wrong
+             // guessed host or username can be corrected if connecting still fails.
+@@ -222,7 +222,7 @@ const CreatePageForForm = (FormComponent: React.ComponentType<any> & Record<stri
+             OnboardingActions.moveToPage('account-settings-imap');
+             return;
+           }
+-          const problem = serverForm ? FormComponent.connectionProblem(err, account) : null;
++          const problem = serverForm ? serverConnectionProblem(err, account) : null;
+           const errorFieldNames = problem?.errorFieldNames ?? [];
+           if (!problem && err.message.includes('Authentication Error')) {
+             if (/smtp/i.test(err.message)) {
+diff --git a/app/internal_packages/onboarding/lib/oauth-signin-page.tsx b/app/internal_packages/onboarding/lib/oauth-signin-page.tsx
+index df6e484..c356eff 100644
+--- a/app/internal_packages/onboarding/lib/oauth-signin-page.tsx
++++ b/app/internal_packages/onboarding/lib/oauth-signin-page.tsx
+@@ -184,9 +184,9 @@ export default class OAuthSignInPage extends React.Component<
+       errorMessage = localized(
+         'A network error occurred. Please check your internet connection and try again.'
+       );
+-    } else if (err.certificates?.length) {
+-      // The engine advises reconnecting to review the certificate, which OAuth accounts don't
+-      // offer: Gmail and Microsoft always present a trusted certificate.
++    } else if (err.certificates?.length && !err.certificateDetailsOnly) {
++      // OAuth accounts cannot use the legacy certificate review. Detail-only failures already
++      // contain the system trust advice applicable to this connection.
+       errorMessage = localized(
+         `Mailspring can't verify the server for %@. Its certificate is not trusted, which can happen when antivirus or network software intercepts secure connections.`,
+         this.props.serviceName
+diff --git a/app/internal_packages/onboarding/lib/onboarding-helpers.ts b/app/internal_packages/onboarding/lib/onboarding-helpers.ts
+index 96c08fe..168929a 100644
+--- a/app/internal_packages/onboarding/lib/onboarding-helpers.ts
++++ b/app/internal_packages/onboarding/lib/onboarding-helpers.ts
+@@ -601,7 +601,53 @@ export function buildO365AuthURL({ withGraphSend = true }: { withGraphSend?: boo
+   })}`;
+ }
+ 
++export function serverConnectionProblem(error: {
++  errorCode?: string;
++  errorService?: string;
++  errorAdvice?: string;
++  isNetworkError?: boolean;
++  message?: string;
++}, account: Account) {
++  const outgoing = error.errorService === 'smtp';
++  const server = outgoing ? '发信服务器' : '收信服务器';
++  const protocol = outgoing ? 'smtp' : 'imap';
++  if (['ErrorAuthentication', 'ErrorAuthenticationRequired'].includes(error.errorCode)) {
++    return {
++      message: `${server}拒绝登录。请核对用户名和密码，或使用服务商要求的应用专用密码。`,
++      errorFieldNames: [`settings.${protocol}_username`, `settings.${protocol}_password`],
++    };
++  }
++  if (error.errorCode === 'ErrorCertificate') {
++    return {
++      message: `无法验证${server}的证书。请核对服务器地址和证书。使用私有证书时，请确认来源，再按服务商说明加入系统信任。`,
++    };
++  }
++  if (error.errorAdvice) {
++    const next = account.settings[`${protocol}_allow_insecure_ssl`]
++      ? '已允许旧版 TLS，请联系服务商更新加密设置。'
++      : '若服务商确认需要旧版加密，可在该服务器的高级设置中允许旧版 TLS。';
++    return { message: `无法与${server}建立安全连接。请核对端口和加密方式。${next}` };
++  }
++  if (['ErrorTLSNotAvailable', 'ErrorStartTLSNotAvailable'].includes(error.errorCode)) {
++    return { message: `无法与${server}建立安全连接。请核对端口和加密方式。` };
++  }
++  if (error.isNetworkError) return { message: '网络连接中断。请检查网络后重试。' };
++  if (error.errorCode === 'ErrorConnection') {
++    return { message: `无法连接${server}。请检查服务器地址和端口后重试。` };
++  }
++  if (error.errorCode === 'ErrorNeedsConnectToWebmail') {
++    return { message: '请先登录邮箱网页版，完成服务商要求的操作后重试。' };
++  }
++  return { message: error.message || '未能连接邮箱。请核对服务器设置后重试。' };
++}
++
+ export async function finalizeAndValidateAccount(account: Account, existingId?: string) {
++  if (AppEnv.config.get('core.paperReed.enabled')) {
++    // Paper Reed keeps reviewed fingerprints on the onboarding draft only. They are
++    // omitted from validation requests and from the account saved after validation.
++    delete account.settings.imap_certificate_sha256;
++    delete account.settings.smtp_certificate_sha256;
++  }
+   if (account.settings.imap_host) {
+     account.settings.imap_host = account.settings.imap_host.trim();
+   }
+diff --git a/app/internal_packages/onboarding/lib/onboarding-root.tsx b/app/internal_packages/onboarding/lib/onboarding-root.tsx
+index 6b4fb15..3cfc860 100644
+--- a/app/internal_packages/onboarding/lib/onboarding-root.tsx
++++ b/app/internal_packages/onboarding/lib/onboarding-root.tsx
+@@ -51,6 +51,7 @@ interface OnboardingRootState {
+   account: Account;
+   confirmServers: boolean;
+   rejectedCertificates: RejectedCertificate[];
++  certificateRejectionLog?: string;
+ }
+ 
+ export default class OnboardingRoot extends React.Component<
+@@ -89,6 +90,7 @@ export default class OnboardingRoot extends React.Component<
+       account: OnboardingStore.account(),
+       confirmServers: OnboardingStore.confirmServers(),
+       rejectedCertificates: OnboardingStore.rejectedCertificates(),
++      certificateRejectionLog: OnboardingStore.certificateRejectionLog(),
+     };
+   };
+ 
+@@ -134,6 +136,7 @@ export default class OnboardingRoot extends React.Component<
+       account: this.state.account,
+       confirmServers: this.state.confirmServers,
+       rejectedCertificates: this.state.rejectedCertificates,
++      certificateRejectionLog: this.state.certificateRejectionLog,
+       isCurrentVisit,
+       saving: accountSaveState === 'saving',
+     };
+diff --git a/app/internal_packages/onboarding/lib/onboarding-store.ts b/app/internal_packages/onboarding/lib/onboarding-store.ts
+index 214a8de..fc4c239 100644
+--- a/app/internal_packages/onboarding/lib/onboarding-store.ts
++++ b/app/internal_packages/onboarding/lib/onboarding-store.ts
+@@ -41,6 +41,7 @@ class OnboardingStore extends MailspringStore {
+   // Cleared by any later setAccount, such as submitting the form or going back.
+   _confirmServers = false;
+   _rejectedCertificates: RejectedCertificate[] = [];
++  _certificateRejectionLog?: string;
+ 
+   constructor() {
+     super();
+@@ -168,7 +169,8 @@ class OnboardingStore extends MailspringStore {
+     {
+       confirmServers = false,
+       rejectedCertificates = [],
+-    }: { confirmServers?: boolean; rejectedCertificates?: RejectedCertificate[] } = {}
++      certificateRejectionLog,
++    }: { confirmServers?: boolean; rejectedCertificates?: RejectedCertificate[]; certificateRejectionLog?: string } = {}
+   ) => {
+     if (this._accountSaveState) return;
+     if (!(acct instanceof Account)) {
+@@ -177,6 +179,7 @@ class OnboardingStore extends MailspringStore {
+     this._account = acct;
+     this._confirmServers = confirmServers;
+     this._rejectedCertificates = rejectedCertificates;
++    this._certificateRejectionLog = certificateRejectionLog;
+     this.trigger();
+   };
+ 
+@@ -365,6 +368,10 @@ class OnboardingStore extends MailspringStore {
+   rejectedCertificates() {
+     return this._rejectedCertificates;
+   }
++
++  certificateRejectionLog() {
++    return this._certificateRejectionLog;
++  }
+ }
+ 
+ export default new OnboardingStore();
+diff --git a/app/internal_packages/onboarding/lib/page-account-certificate.tsx b/app/internal_packages/onboarding/lib/page-account-certificate.tsx
+index aa18e86..34b106f 100644
+--- a/app/internal_packages/onboarding/lib/page-account-certificate.tsx
++++ b/app/internal_packages/onboarding/lib/page-account-certificate.tsx
+@@ -4,7 +4,7 @@ import { localized, Account } from 'mailspring-exports';
+ import { RetinaImg } from 'mailspring-component-kit';
+ 
+ import * as OnboardingActions from './onboarding-actions';
+-import { finalizeAndValidateAccount } from './onboarding-helpers';
++import { finalizeAndValidateAccount, serverConnectionProblem } from './onboarding-helpers';
+ import FormErrorMessage from './form-error-message';
+ import {
+   RejectedCertificate,
+@@ -17,13 +17,17 @@ interface AccountCertificatePageProps {
+   account: Account;
+   confirmServers?: boolean;
+   rejectedCertificates: RejectedCertificate[];
++  certificateRejectionLog?: string;
+   isCurrentVisit?: () => boolean;
+ }
+ 
+ interface AccountCertificatePageState {
+   submitting: boolean;
++  connectionFailure?: boolean;
+   errorMessage?: string;
+   errorLog?: string;
++  firstReportServices?: string;
++  retryBlocked?: boolean;
+ }
+ 
+ // Lets a long fingerprint wrap between bytes without changing the text that is copied.
+@@ -45,29 +49,108 @@ const ServiceLabels = {
+   smtp: () => localized('Outgoing Mail') + ' (SMTP)',
+ };
+ 
+-// Shown when a server's certificate fails validation. Accepting stores each certificate's
+-// fingerprint in the account, and mailsync then trusts exactly those certificates: if a server
+-// later presents a different one, the account stops connecting until the user reviews it again.
++const PaperReedServiceLabels = { imap: '收信服务器 IMAP', smtp: '发信服务器 SMTP' };
++
++function certificateServiceNames(reports: RejectedCertificate[]) {
++  return [...new Set(reports.map(({ service }) => PaperReedServiceLabels[service]))].join('、');
++}
++
++function normalizeFingerprint(fingerprint: string) {
++  return typeof fingerprint === 'string' ? fingerprint.replace(/:/g, '').toLowerCase() : '';
++}
++
++function certificateRejectionFeedback(
++  reviewedAccount: Account,
++  reports: RejectedCertificate[],
++  log: string | undefined
++) {
++  const { imap_certificate_sha256, smtp_certificate_sha256 } = reviewedAccount.settings;
++  const hasReviewedCertificate = Boolean(imap_certificate_sha256 || smtp_certificate_sha256);
++  const reviewed = reports.map(({ service }) =>
++    normalizeFingerprint(reviewedAccount.settings[`${service}_certificate_sha256`])
++  );
++  const rejectedAgain = reports.filter(({ sha256 }, index) =>
++    reviewed[index] && reviewed[index] === normalizeFingerprint(sha256)
++  );
++  const retryBlocked = rejectedAgain.length > 0;
++  const affected = certificateServiceNames(rejectedAgain);
++  return {
++    firstReportServices: hasReviewedCertificate
++      ? certificateServiceNames(reports.filter((_, index) => !reviewed[index]))
++      : '',
++    retryBlocked,
++    errorMessage: retryBlocked
++      ? `已核对的证书仍未通过验证（${affected}）。私有证书请先核对来源，再按管理员指引加入系统信任。修复后返回设置。`
++      : null,
++    errorLog: retryBlocked ? log : null,
++  };
++}
++
++// Shown when a server's certificate fails validation. Paper Reed keeps reviewed fingerprints
++// on the current draft to distinguish new, changed and repeatedly rejected certificates.
+ export default class AccountCertificatePage extends React.Component<
+   AccountCertificatePageProps,
+   AccountCertificatePageState
+ > {
+   static displayName = 'AccountCertificatePage';
+ 
+-  state: AccountCertificatePageState = { submitting: false };
++  state: AccountCertificatePageState;
++  private reviewPage = React.createRef<HTMLDivElement>();
++  private returning = React.createRef<HTMLButtonElement>();
++  private accepting = false;
++
++  constructor(props: AccountCertificatePageProps) {
++    super(props);
++    // The draft contains the fingerprints previously reviewed in this setup. Compare each
++    // new rejection before updating the draft or replacing the current review state.
++    const { account, rejectedCertificates, certificateRejectionLog } = props;
++    this.state = {
++      submitting: false,
++      ...(AppEnv.config.get('core.paperReed.enabled')
++        ? certificateRejectionFeedback(account, rejectedCertificates, certificateRejectionLog)
++        : {}),
++    };
++  }
+ 
+   componentDidMount() {
+     ipcRenderer.send('resize-window', { width: 900, height: 660 });
++    this._showResult();
++  }
++
++  _showResult = () => {
++    const page = this.reviewPage.current;
++    if (!page || this.props.isCurrentVisit?.() === false) return;
++    page.scrollTop = 0;
++    this.returning.current?.focus({ preventScroll: true });
++  };
++
++  _inspectCertificate(rejected: RejectedCertificate, paperReed: boolean) {
++    let description: CertificateDescription = null;
++    if (rejected.chain?.length) {
++      try {
++        description = describeRejectedCertificate(rejected, new Date(), paperReed);
++      } catch (err) {
++        console.warn(`Could not read the certificate presented by ${rejected.host}`, err);
++      }
++    }
++    const fingerprint = normalizeFingerprint(rejected.sha256);
++    const usable = /^[a-f0-9]{64}$/.test(fingerprint) &&
++      (!rejected.chain?.length || normalizeFingerprint(description?.fingerprint) === fingerprint);
++    return { description, usable };
+   }
+ 
+   _onAccept = async () => {
+     const { account, rejectedCertificates, confirmServers } = this.props;
+     const paperReed = AppEnv.config.get('core.paperReed.enabled');
+-    const accepted = withAcceptedCertificates(account, rejectedCertificates);
++    if (this.accepting || this.props.isCurrentVisit?.() === false) return;
++    if (paperReed && (this.state.retryBlocked || !rejectedCertificates.length ||
++      rejectedCertificates.some(rejected => !this._inspectCertificate(rejected, true).usable))) return;
++    this.accepting = true;
++    const reviewed = withAcceptedCertificates(account, rejectedCertificates);
+     this.setState({ submitting: true, errorMessage: null, errorLog: null });
+ 
+     try {
+-      const validated = await finalizeAndValidateAccount(paperReed ? accepted.clone() : accepted);
++      const validated = await finalizeAndValidateAccount(paperReed ? account.clone() : reviewed);
+       if (this.props.isCurrentVisit?.() === false) return;
+       if (!paperReed) {
+         OnboardingActions.moveToPage('account-onboarding-success');
+@@ -76,27 +159,67 @@ export default class AccountCertificatePage extends React.Component<
+     } catch (err) {
+       if (this.props.isCurrentVisit?.() === false) return;
+       if (err.certificates?.length) {
+-        // A server presented a certificate other than the one just reviewed.
+-        this.setState({ submitting: false });
+-        OnboardingActions.setAccount(accepted, {
++        const reports: RejectedCertificate[] = err.certificates;
++        OnboardingActions.setAccount(reviewed, {
+           confirmServers: paperReed && confirmServers,
+-          rejectedCertificates: err.certificates,
++          rejectedCertificates: reports,
+         });
++        this.setState({
++          submitting: false,
++          connectionFailure: false,
++          ...(paperReed ? certificateRejectionFeedback(reviewed, reports, err.rawLog || err.message) : {}),
++        }, this._showResult);
+         return;
+       }
+-      // Keep the accepted fingerprints, so going back to correct a password doesn't ask again.
+-      OnboardingActions.setAccount(accepted, { confirmServers: paperReed && confirmServers, rejectedCertificates });
+-      this.setState({ submitting: false, errorMessage: err.message, errorLog: err.rawLog });
++      // Keep the review attached to the draft while the user corrects the connection settings.
++      OnboardingActions.setAccount(reviewed, { confirmServers: paperReed && confirmServers, rejectedCertificates });
++      this.setState({
++        submitting: false,
++        connectionFailure: true,
++        firstReportServices: '',
++        retryBlocked: false,
++        errorMessage: paperReed ? serverConnectionProblem(err, reviewed).message : err.message,
++        errorLog: paperReed ? err.rawLog || err.message : err.rawLog,
++      }, this._showResult);
++    } finally {
++      this.accepting = false;
+     }
+   };
+ 
+-  _renderCertificate(services: RejectedCertificate[], description: CertificateDescription) {
++  _renderCertificate(services: RejectedCertificate[], description: CertificateDescription, paperReed: boolean) {
+     const { sha256 } = services[0];
+     const { settings } = this.props.account;
+     const replacesAccepted = services.some((s) => {
+       const accepted = settings[`${s.service}_certificate_sha256`];
+-      return accepted && accepted.toLowerCase() !== sha256.toLowerCase();
++      return accepted && normalizeFingerprint(accepted) !== normalizeFingerprint(sha256);
+     });
++    if (paperReed) {
++      const fingerprint = normalizeFingerprint(sha256).toUpperCase().match(/.{1,2}/g)?.join(':') ?? '';
++      return (
++        <section className="certificate" key={sha256 + services[0].host}>
++          <div className="certificate-servers">
++            {services.map(({ service, host, port }) => (
++              <div key={service}><span>{PaperReedServiceLabels[service]}</span><strong>{host}:{port}</strong></div>
++            ))}
++          </div>
++          {description ? (
++            <ul className="certificate-problems">
++              {description.problems.map(problem => <li key={problem}>{problem}</li>)}
++            </ul>
++          ) : <p className="pr-certificate-note">{services[0].chain?.length
++            ? '无法读取证书详情。' : '此连接仅提供 SHA-256 指纹。'}</p>}
++          <dl>
++            {description && <>
++              <dt>{description.names.length ? '适用名称' : '证书主体'}</dt>
++              <dd>{description.names.join('、') || description.issuedTo}</dd>
++              <dt>签发者</dt><dd>{description.issuedBy}</dd>
++              <dt>有效期</dt><dd>{description.validFrom.toLocaleDateString('zh-CN')} 至 {description.validTo.toLocaleDateString('zh-CN')}</dd>
++            </>}
++            <dt>SHA-256 指纹</dt><dd className="fingerprint">{breakableFingerprint(fingerprint)}</dd>
++          </dl>
++        </section>
++      );
++    }
+     return (
+       <div className="certificate" key={sha256 + services[0].host}>
+         <div className="certificate-servers">
+@@ -144,21 +267,17 @@ export default class AccountCertificatePage extends React.Component<
+     );
+   }
+ 
+-  _renderCertificates() {
++  _renderCertificates(paperReed = false) {
+     // ProtonMail Bridge and most self-hosted servers present one certificate for both services.
+     const groups = new Map<string, RejectedCertificate[]>();
+     for (const rejected of this.props.rejectedCertificates) {
+-      const key = `${rejected.sha256} ${rejected.host}`;
++      const fingerprint = paperReed ? normalizeFingerprint(rejected.sha256) : rejected.sha256;
++      const key = `${fingerprint} ${rejected.host}`;
+       groups.set(key, [...(groups.get(key) || []), rejected]);
+     }
+     return [...groups.values()].map((services) => {
+-      let description: CertificateDescription = null;
+-      try {
+-        description = describeRejectedCertificate(services[0]);
+-      } catch (err) {
+-        console.warn(`Could not read the certificate presented by ${services[0].host}`, err);
+-      }
+-      return this._renderCertificate(services, description);
++      const { description } = this._inspectCertificate(services[0], paperReed);
++      return this._renderCertificate(services, description, paperReed);
+     });
+   }
+ 
+@@ -185,6 +304,64 @@ export default class AccountCertificatePage extends React.Component<
+ 
+   render() {
+     const { errorMessage, errorLog } = this.state;
++    if (AppEnv.config.get('core.paperReed.enabled')) {
++      const { submitting, connectionFailure, firstReportServices, retryBlocked } = this.state;
++      const { account, rejectedCertificates } = this.props;
++      const usable = rejectedCertificates.length > 0 &&
++        rejectedCertificates.every(rejected => this._inspectCertificate(rejected, true).usable);
++      const replacementServices = certificateServiceNames(rejectedCertificates.filter(({ service, sha256 }) => {
++        const accepted = normalizeFingerprint(account.settings[`${service}_certificate_sha256`]);
++        return accepted && accepted !== normalizeFingerprint(sha256);
++      }));
++      const heading = connectionFailure
++        ? (submitting ? '正在验证邮箱连接' : '连接邮箱失败')
++        : '无法验证服务器证书';
++      const retryLabel = connectionFailure ? '重新验证' : '修复后重新验证';
++      return (
++        <div className="page account-setup AccountCertificatePage pr-certificate-setup" ref={this.reviewPage}
++          onKeyDown={event => {
++            if ((event.key === 'Enter' || event.key === ' ') && (event.repeat || event.nativeEvent.isComposing)) {
++              event.preventDefault();
++            }
++          }}>
++          <div className="pr-onboarding-brand">Paper Reed</div>
++          <section className="pr-certificate-content" aria-labelledby="pr-certificate-heading">
++            <h2 id="pr-certificate-heading">{heading}</h2>
++            {!connectionFailure && !retryBlocked && <p className="pr-certificate-intro">
++              请通过可信渠道核对地址、指纹和证书来源。私有证书请按管理员指引加入系统信任后重试。
++            </p>}
++            {errorMessage && <FormErrorMessage message={errorMessage} log={errorLog}
++              errorId="pr-certificate-retry-error" logLabel="查看诊断" />}
++            {!connectionFailure && (replacementServices || firstReportServices || !usable) && <div className="pr-certificate-error" role="alert"
++              key={rejectedCertificates.map(({ service, sha256 }) => `${service}:${sha256}`).join('|')}>
++              {replacementServices && <div>
++                服务器提供了不同的证书（{replacementServices}）。{!retryBlocked && '请重新核对指纹。'}
++              </div>}
++              {firstReportServices && <div>
++                收到尚未核对的服务器证书（{firstReportServices}）。{!retryBlocked && '请核对指纹。'}
++              </div>}
++              {!usable && <div>无法读取证书详情、证书详情与收到的指纹不一致，或指纹无效。请返回设置。</div>}
++            </div>}
++            {connectionFailure
++              ? <details className="pr-certificate-history">
++                <summary>上次报告的证书</summary>
++                <div className="certificates">{this._renderCertificates(true)}</div>
++              </details>
++              : <div className="certificates">{this._renderCertificates(true)}</div>}
++          </section>
++          <div className="pr-certificate-actions">
++            <button type="button" className="btn pr-certificate-return" ref={this.returning}
++              aria-describedby={errorMessage ? 'pr-certificate-retry-error' : undefined}
++              onClick={() => OnboardingActions.moveToPreviousPage()}>返回设置</button>
++            <button type="button" className="btn pr-certificate-retry"
++              aria-disabled={submitting || !usable || retryBlocked === true}
++              aria-describedby={retryBlocked ? 'pr-certificate-retry-error' : undefined}
++              onClick={this._onAccept}>{submitting ? '正在重新验证…' : retryLabel}</button>
++            <span className="sr-only" role="status">{submitting && '正在重新验证…'}</span>
++          </div>
++        </div>
++      );
++    }
+ 
+     return (
+       <div className="page account-setup AccountCertificatePage">
+diff --git a/app/internal_packages/onboarding/lib/page-account-settings-imap.tsx b/app/internal_packages/onboarding/lib/page-account-settings-imap.tsx
+index f6a85ea..4fc6d77 100644
+--- a/app/internal_packages/onboarding/lib/page-account-settings-imap.tsx
++++ b/app/internal_packages/onboarding/lib/page-account-settings-imap.tsx
+@@ -112,46 +112,6 @@ class AccountIMAPSettingsForm extends React.Component<AccountIMAPSettingsFormPro
+     return { errorMessage, errorFieldNames, populated };
+   };
+ 
+-  static connectionProblem = (error: {
+-    errorCode?: string;
+-    errorService?: string;
+-    errorAdvice?: string;
+-    isNetworkError?: boolean;
+-    message?: string;
+-  }, account: Account) => {
+-    const outgoing = error.errorService === 'smtp';
+-    const server = outgoing ? '发信服务器' : '收信服务器';
+-    const protocol = outgoing ? 'smtp' : 'imap';
+-    if (['ErrorAuthentication', 'ErrorAuthenticationRequired'].includes(error.errorCode)) {
+-      return {
+-        message: `${server}拒绝登录。请核对用户名和密码，或使用服务商要求的应用专用密码。`,
+-        errorFieldNames: [`settings.${protocol}_username`, `settings.${protocol}_password`],
+-      };
+-    }
+-    if (error.errorCode === 'ErrorCertificate') {
+-      return {
+-        message: `无法验证${server}的证书。请核对服务器地址和证书。使用私有证书时，请确认来源，再按服务商说明加入系统信任。`,
+-      };
+-    }
+-    if (error.errorAdvice) {
+-      const next = account.settings[`${protocol}_allow_insecure_ssl`]
+-        ? '已允许旧版 TLS，请联系服务商更新加密设置。'
+-        : '若服务商确认需要旧版加密，可在该服务器的高级设置中允许旧版 TLS。';
+-      return { message: `无法与${server}建立安全连接。请核对端口和加密方式。${next}` };
+-    }
+-    if (['ErrorTLSNotAvailable', 'ErrorStartTLSNotAvailable'].includes(error.errorCode)) {
+-      return { message: `无法与${server}建立安全连接。请核对端口和加密方式。` };
+-    }
+-    if (error.isNetworkError) return { message: '网络连接中断。请检查网络后重试。' };
+-    if (error.errorCode === 'ErrorConnection') {
+-      return { message: `无法连接${server}。请检查服务器地址和端口后重试。` };
+-    }
+-    if (error.errorCode === 'ErrorNeedsConnectToWebmail') {
+-      return { message: '请先登录邮箱网页版，完成服务商要求的操作后重试。' };
+-    }
+-    return { message: error.message || '未能连接邮箱。请核对服务器设置后重试。' };
+-  };
+-
+   componentDidMount() {
+     ipcRenderer.send('resize-window', { width: 900, height: AppEnv.config.get('core.paperReed.enabled') ? 780 : 660 });
+   }
+diff --git a/app/internal_packages/onboarding/styles/onboarding.less b/app/internal_packages/onboarding/styles/onboarding.less
+index 2aa9595..baca7b9 100644
+--- a/app/internal_packages/onboarding/styles/onboarding.less
++++ b/app/internal_packages/onboarding/styles/onboarding.less
+@@ -906,13 +906,119 @@ body.platform-win32 {
+   .AccountIMAPSettingsForm input {
+     margin-bottom: 10px;
+   }
+-  &:has(.page-container:not([inert]) .pr-server-setup) > .dragRegion::before {
++  &:has(.page-container:not([inert]) :is(.pr-server-setup, .pr-certificate-setup)) > .dragRegion::before {
+     content: '';
+     position: absolute;
+     inset: 0 -26px -8px;
+     background: #faf9f6;
+     pointer-events: none;
+   }
++  .page.pr-certificate-setup {
++    min-width: 0;
++    padding: 36px 24px 0;
++    scroll-padding: 40px 0 76px;
++    .pr-onboarding-brand { margin-bottom: 8px; }
++    h2 { padding: 0; margin: 0 0 12px; }
++    .pr-certificate-content { max-width: 584px; margin: 0 auto; }
++    .pr-certificate-intro, .pr-certificate-error, .message.error {
++      padding: 8px 12px;
++      margin: 0 0 12px;
++      border-left: 2px solid #947445;
++      background: #f4efe3;
++      color: #66502f;
++      line-height: 20px;
++      text-align: left;
++      overflow-wrap: anywhere;
++    }
++    .pr-certificate-error, .message.error {
++      border-left-color: #a56a60;
++      background: #f5ede8;
++      color: #813f36;
++    }
++    .certificates { width: auto; margin: 12px 0 0; }
++    .pr-certificate-history {
++      margin-top: 12px;
++      padding: 8px 0;
++      color: #4e594c;
++      text-align: left;
++    }
++    .pr-certificate-history summary {
++      display: list-item;
++      list-style-position: inside;
++      line-height: 20px;
++      cursor: pointer;
++    }
++    .certificate {
++      padding: 12px 0;
++      margin: 0;
++      border: 0;
++      border-top: 1px solid #d9ddd4;
++      border-radius: 0;
++      background: transparent;
++    }
++    .certificate-servers > div {
++      display: grid;
++      grid-template-columns: 132px minmax(0, 1fr);
++      gap: 4px 12px;
++      margin-bottom: 4px;
++      color: #626b60;
++    }
++    .certificate-servers strong {
++      color: #353a36;
++      overflow-wrap: anywhere;
++    }
++    .certificate-problems, .pr-certificate-note {
++      margin: 8px 0;
++      color: #66502f;
++      line-height: 20px;
++      overflow-wrap: anywhere;
++    }
++    dl { grid-template-columns: 132px minmax(0, 1fr); gap: 4px 12px; line-height: 20px; }
++    dt { color: #626b60; }
++    dd { min-width: 0; overflow-wrap: anywhere; }
++    .fingerprint { color: #353a36; font-size: 12px; }
++    .pr-certificate-actions {
++      position: sticky;
++      bottom: 0;
++      display: flex;
++      flex-wrap: wrap;
++      justify-content: flex-end;
++      gap: 8px;
++      max-width: 584px;
++      margin: 8px auto 0;
++      padding: 12px 0 16px;
++      border-top: 1px solid #d9ddd4;
++      background: #faf9f6;
++    }
++    .pr-certificate-actions .btn { min-height: 36px; margin: 0; padding: 0 12px; }
++    .pr-certificate-return { min-width: 112px; background: #65775e; border-color: #65775e; color: white; }
++    .pr-certificate-return:hover { background: #4b634f; }
++    .pr-certificate-retry { min-width: 144px; border-color: #b9a587; color: #66502f; }
++    .pr-certificate-retry:hover:not([aria-disabled='true']) { background: #f4efe3; }
++    .pr-certificate-retry[aria-disabled='true'] { opacity: .65; cursor: default; }
++    button:focus-visible, .pr-certificate-history summary:focus-visible {
++      outline: 2px solid #4b634f;
++      outline-offset: 2px;
++    }
++    .pr-server-view-log {
++      margin: 0 0 0 8px;
++      padding: 0;
++      border: 0;
++      background: transparent;
++      color: inherit;
++      font: inherit;
++      text-decoration: underline;
++      cursor: pointer;
++    }
++    @media (max-width: 480px) {
++      .certificate-servers > div, dl { grid-template-columns: 120px minmax(0, 1fr); gap: 4px 8px; }
++    }
++    @media (max-width: 340px) {
++      .certificate-servers > div, dl { grid-template-columns: minmax(0, 1fr); gap: 0; }
++      .certificate-servers > div { margin-bottom: 6px; }
++      dd { margin-bottom: 4px; }
++    }
++  }
+   .page.pr-server-setup {
+     min-width: 0;
+     padding: 36px 24px 0;
+diff --git a/app/src/mailsync-process.ts b/app/src/mailsync-process.ts
+index 1fb2c14..3eeceb5 100644
+--- a/app/src/mailsync-process.ts
++++ b/app/src/mailsync-process.ts
+@@ -348,8 +348,9 @@ export class MailsyncProcess extends EventEmitter {
+             const error = Object.assign(new Error(msg), { errorCode: response.error });
+             (error as any).rawLog = this._stripSecrets(response.log);
+             (error as any).errorAdvice = response.error_advice || null;
+-            // Certificates that failed validation, for the user to review and accept.
++            // Certificates that failed validation, for the user to review.
+             (error as any).certificates = response.certificates || null;
++            (error as any).certificateDetailsOnly = response.certificate_details_only === true;
+             (error as any).errorService = response.error_service || null;
+             // Set when the engine classified the failure as this machine being unable to
+             // reach the network, rather than a server refusing or rejecting us.

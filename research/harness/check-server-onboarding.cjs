@@ -218,8 +218,8 @@ module.exports = async ({ phase, main, run, until, shot, out, fixture }) => {
       assert.equal(await run('window.prServerValidatedPort'), 465);
       if (retry) {
         await run('window.prServerDiagnostic={errorCode:"ErrorConnection"};true');
-        await certificatePage.getByRole('button', { name: 'Accept and Connect' }).click();
-        await certificatePage.locator('.message.error').filter({ hasText: 'local diagnostic fixture' }).waitFor();
+        await certificatePage.getByRole('button', { name: '修复后重新验证' }).click();
+        await certificatePage.getByRole('alert').filter({ hasText: '无法连接收信服务器' }).waitFor();
         assert.equal(await run('window.prServerValidatedPort'), 465);
       }
       await titleBack.click();

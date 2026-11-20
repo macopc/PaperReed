@@ -361,9 +361,10 @@ module.exports = async ({ phase, app, main, run, until, shot, out, fixture, work
         { service: 'imap', host: 'imap.mail.me.com', port: 993, sha256: fingerprint, chain: [] },
       ] };
       await setup.evaluate(`window.prICloud.settle(${JSON.stringify(diagnostic)});true`);
-      await setup.page.locator('.AccountCertificatePage').locator('button.btn-add-account').click();
+      await setup.page.locator('.AccountCertificatePage').getByRole('button', { name: '修复后重新验证' }).click();
       await until(() => setup.evaluate('window.prICloud.attempts.length===2'), 'accepted certificate validation pending');
-      assert.equal(await setup.evaluate('window.prICloud.attempts[1].settings.imap_certificate_sha256'), fingerprint);
+      assert.equal(await setup.evaluate('window.prICloud.attempts[1].settings.imap_certificate_sha256'), undefined,
+        'reviewed fingerprints do not become trust settings on a reconnect');
     }
     await removeOriginal();
     await setup.evaluate('window.prICloud.settle();true');

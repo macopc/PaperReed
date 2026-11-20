@@ -1,0 +1,179 @@
+diff --git a/MailSync/MailUtils.cpp b/MailSync/MailUtils.cpp
+index 2c91c7b..dcc5b9c 100644
+--- a/MailSync/MailUtils.cpp
++++ b/MailSync/MailUtils.cpp
+@@ -122,6 +122,10 @@ std::string MailUtils::toBase58(const unsigned char * pbegin, size_t len)
+ 
+ static const std::string base64_chars = "ABCDEFGHIJKLMNOPQRSTUVWXYZabcdefghijklmnopqrstuvwxyz0123456789+/";
+ 
++std::string MailUtils::sha256Hex(const char * bytes, size_t len) {
++    return picosha2::hash256_hex_string(bytes, bytes + len);
++}
++
+ std::string MailUtils::toBase64(const char * pbegin, size_t in_len) {
+   std::string ret;
+   int i = 0;
+diff --git a/MailSync/MailUtils.hpp b/MailSync/MailUtils.hpp
+index 330f34a..a182756 100644
+--- a/MailSync/MailUtils.hpp
++++ b/MailSync/MailUtils.hpp
+@@ -39,6 +39,7 @@ private:
+ public:
+     static string toBase58(const unsigned char * pbegin, size_t len);
+     static string toBase64(const char * pbegin, size_t len);
++    static string sha256Hex(const char * bytes, size_t len);
+     
+     static string getEnvUTF8(string key);
+     static bool setEnvUTF8(string key, string value);
+diff --git a/MailSync/main.cpp b/MailSync/main.cpp
+index 036f265..f0a4563 100644
+--- a/MailSync/main.cpp
++++ b/MailSync/main.cpp
+@@ -78,6 +78,19 @@ std::thread * metadataExpirationThread = nullptr;
+ class AccumulatorLogger : public ConnectionLogger {
+ public:
+     string accumulated = "";
++    bool collectRejectedCertificate = false;
++    string rejectedLeaf;
++    string rejectedFingerprint;
++
++    bool wantsRejectedCertificate() const override {
++        return collectRejectedCertificate;
++    }
++
++    void logRejectedCertificate(Data * leaf) override {
++        const auto bytes = leaf->bytes();
++        rejectedLeaf = MailUtils::toBase64(bytes, leaf->length());
++        rejectedFingerprint = MailUtils::sha256Hex(bytes, leaf->length());
++    }
+     
+     void log(string str) {
+         accumulated = accumulated + str;
+@@ -305,6 +318,7 @@ int runTestAuth(shared_ptr<Account> account, string & errorService) {
+     // Enable very detailed mailcore logging and redirect the messages to our accumulator log
+     MCLogEnabled = 1;
+     MCLogFn = MCLogToAccumulatorLog;
++    alogger.collectRejectedCertificate = true;
+ 
+     // NOTE: This method returns the account upon success but the client is not
+     // reading the result. This function cannot mutate the account object.
+@@ -453,6 +467,17 @@ done:
+         if (tlsAdvice != "") {
+             resp["error_advice"] = tlsAdvice;
+         }
++        if (err == ErrorCertificate && !alogger.rejectedLeaf.empty()) {
++            const bool incoming = errorService == "imap";
++            resp["certificates"] = json::array({{
++                {"service", errorService},
++                {"host", incoming ? session.hostname()->UTF8Characters() : smtp.hostname()->UTF8Characters()},
++                {"port", incoming ? session.port() : smtp.port()},
++                {"sha256", alogger.rejectedFingerprint},
++                {"chain", json::array({alogger.rejectedLeaf})}
++            }});
++            resp["certificate_details_only"] = true;
++        }
+         cout << resp.dump();
+         return 1;
+     }
+diff --git a/Vendor/mailcore2/src/core/basetypes/MCConnectionLogger.h b/Vendor/mailcore2/src/core/basetypes/MCConnectionLogger.h
+index d5282db..d4ed5d4 100644
+--- a/Vendor/mailcore2/src/core/basetypes/MCConnectionLogger.h
++++ b/Vendor/mailcore2/src/core/basetypes/MCConnectionLogger.h
+@@ -38,6 +38,8 @@ namespace mailcore {
+     class MAILCORE_EXPORT ConnectionLogger {
+     public:
+         virtual void log(void * sender, ConnectionLogType logType, Data * buffer) {}
++        virtual bool wantsRejectedCertificate() const { return false; }
++        virtual void logRejectedCertificate(Data * leaf) {}
+     };
+     
+ }
+diff --git a/Vendor/mailcore2/src/core/imap/MCIMAPSession.cpp b/Vendor/mailcore2/src/core/imap/MCIMAPSession.cpp
+index a104bf4..c7e0ca4 100644
+--- a/Vendor/mailcore2/src/core/imap/MCIMAPSession.cpp
++++ b/Vendor/mailcore2/src/core/imap/MCIMAPSession.cpp
+@@ -600,7 +600,12 @@ bool IMAPSession::checkCertificate()
+ {
+     if (!isCheckCertificateEnabled())
+         return true;
+-    return mailcore::checkCertificate(mImap->imap_stream, hostname());
++    if (mailcore::checkCertificate(mImap->imap_stream, hostname()))
++        return true;
++    lockConnectionLogger();
++    mailcore::reportRejectedCertificate(mImap->imap_stream, connectionLoggerNoLock());
++    unlockConnectionLogger();
++    return false;
+ }
+ 
+ void IMAPSession::body_progress(size_t current, size_t maximum, void * context)
+diff --git a/Vendor/mailcore2/src/core/security/MCCertificateUtils.cpp b/Vendor/mailcore2/src/core/security/MCCertificateUtils.cpp
+index d04cc4a..4bb1eaa 100644
+--- a/Vendor/mailcore2/src/core/security/MCCertificateUtils.cpp
++++ b/Vendor/mailcore2/src/core/security/MCCertificateUtils.cpp
+@@ -12,6 +12,8 @@
+ #endif
+ 
+ #include "MCCertificateUtils.h"
++#include "MCConnectionLogger.h"
++#include "MCData.h"
+ 
+ #if __APPLE__
+ #include <CoreFoundation/CoreFoundation.h>
+@@ -147,6 +149,24 @@ done:
+ }
+ #endif
+ 
++void mailcore::reportRejectedCertificate(mailstream *stream, ConnectionLogger *logger)
++{
++    if (!logger || !logger->wantsRejectedCertificate()) {
++        return;
++    }
++    carray *chain = mailstream_get_certificate_chain(stream);
++    if (!chain) {
++        return;
++    }
++    if (carray_count(chain) > 0) {
++        auto leaf = static_cast<MMAPString *>(carray_get(chain, 0));
++        if (leaf && leaf->len > 0) {
++            logger->logRejectedCertificate(Data::dataWithBytes(leaf->str, leaf->len));
++        }
++    }
++    mailstream_certificate_chain_free(chain);
++}
++
+ bool mailcore::checkCertificate(mailstream *stream, String *hostname)
+ {
+ #if __APPLE__
+diff --git a/Vendor/mailcore2/src/core/security/MCCertificateUtils.h b/Vendor/mailcore2/src/core/security/MCCertificateUtils.h
+index d5b9267..bd73835 100644
+--- a/Vendor/mailcore2/src/core/security/MCCertificateUtils.h
++++ b/Vendor/mailcore2/src/core/security/MCCertificateUtils.h
+@@ -14,8 +14,10 @@
+ #include <MailCore/MCString.h>
+ 
+ namespace mailcore {
++    class ConnectionLogger;
+     
+     bool checkCertificate(mailstream * stream, String * hostname);
++    void reportRejectedCertificate(mailstream * stream, ConnectionLogger * logger);
+     
+ }
+ 
+diff --git a/Vendor/mailcore2/src/core/smtp/MCSMTPSession.cpp b/Vendor/mailcore2/src/core/smtp/MCSMTPSession.cpp
+index 03d0ec0..1b83055 100644
+--- a/Vendor/mailcore2/src/core/smtp/MCSMTPSession.cpp
++++ b/Vendor/mailcore2/src/core/smtp/MCSMTPSession.cpp
+@@ -205,7 +205,12 @@ bool SMTPSession::checkCertificate()
+ {
+     if (!isCheckCertificateEnabled())
+         return true;
+-    return mailcore::checkCertificate(mSmtp->stream, hostname());
++    if (mailcore::checkCertificate(mSmtp->stream, hostname()))
++        return true;
++    lockConnectionLogger();
++    mailcore::reportRejectedCertificate(mSmtp->stream, connectionLoggerNoLock());
++    unlockConnectionLogger();
++    return false;
+ }
+ 
+ void SMTPSession::setSendingCancelled(bool isCancelled) {

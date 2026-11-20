@@ -668,6 +668,8 @@ async function checkGooglePage(phase) {
  if(imapPhase){await require('./check-imap-onboarding.cjs')({phase:imapPhase,main,run,until,shot,out});await stop();return;}
  const serverPhase=process.env.PAPER_REED_SERVER_PAGE_CHECK;
  if(serverPhase){await require('./check-server-onboarding.cjs')({phase:serverPhase,main,run,until,shot,out,fixture});await stop();return;}
+ const certificatePhase=process.env.PAPER_REED_CERTIFICATE_PAGE_CHECK;
+ if(certificatePhase){await require('./check-certificate-onboarding.cjs')({phase:certificatePhase,main,run,until,shot,out,fixture,work});await stop();return;}
  const activePage=main.locator('.page-container:not([inert])');
  await activePage.locator('[data-provider=gmail]').click();
  await activePage.getByRole('button',{name:'使用 Google 登录',exact:true}).waitFor();
