@@ -22,6 +22,9 @@ try:
             assert count in (51, 52, 101, 102)
             for i in range(len(samples), count):
                 server.append('INBOX', message(i+1, subject=f'Reminder fixture {i+1}'))
+        if os.environ.get('PAPER_REED_PINNED_PAGE_CHECK') == 'pagination':
+            for i in range(len(samples), 52):
+                server.append('INBOX', message(i+1, subject=f'Pin fixture {i+1}'))
     else:
         server.append('INBOX',message(1))
     if os.environ.get('PAPER_REED_ORGANIZATION_CHECK'):
@@ -43,6 +46,7 @@ try:
     assert run.returncode==0
     if a.workspace and any(os.environ.get(name) for name in (
         'PAPER_REED_COMPOSE_PAGE_CHECK', 'PAPER_REED_SEARCH_PAGE_CHECK', 'PAPER_REED_SNOOZE_PAGE_CHECK',
+        'PAPER_REED_PINNED_PAGE_CHECK',
     )):
         assert not sent, len(sent)
         result_path=Path(os.environ['PAPER_REED_UI_OUTPUT'])/'result.json'

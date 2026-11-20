@@ -1,0 +1,696 @@
+diff --git a/app/internal_packages/mcp-server/lib/mcp-tools.ts b/app/internal_packages/mcp-server/lib/mcp-tools.ts
+index 0cb34d82d532483e5f0c516744acfa000d0677f0..4595fc8fe0d22dfde4e3c78b6c117b2c6bcd5f87 100644
+--- a/app/internal_packages/mcp-server/lib/mcp-tools.ts
++++ b/app/internal_packages/mcp-server/lib/mcp-tools.ts
+@@ -1269,6 +1269,7 @@ export function registerTools(server: McpServer) {
+             const summary = serializeThreadSummary(t);
+             const local = states[t.id];
+             if (reminders) local.snoozeUntil = reminders.get(t.id);
++            if (view === 'pinned') local.pinned = true;
+             return summary ? { ...summary, local } : null;
+           })
+           .filter(Boolean)
+diff --git a/app/internal_packages/paper-reed/lib/triage-controls.tsx b/app/internal_packages/paper-reed/lib/triage-controls.tsx
+index 8280d6f31fef9e922acc4f619b05a18b6cd8822e..97740ff51d2233a397d804d2978632119c30fb14 100644
+--- a/app/internal_packages/paper-reed/lib/triage-controls.tsx
++++ b/app/internal_packages/paper-reed/lib/triage-controls.tsx
+@@ -10,6 +10,14 @@ import {
+ } from '../../../src/services/mail-core/local-triage';
+ import { inboxDesktopAccess, MailTarget } from '../../../src/services/mail-core/inbox';
+ 
++export function keepNativeButtonActivation(event: React.KeyboardEvent<HTMLElement>) {
++  if (event.key !== 'Enter' && event.key !== ' ') return;
++  if (!(event.target instanceof Element) || !event.target.closest('button')) return;
++  // Keep the workspace keymap from treating Enter as a request to open a conversation.
++  event.stopPropagation();
++  if (event.repeat) event.preventDefault();
++}
++
+ export const triageError = (message: string) =>
+   ({
+     'invalid-snooze-time': '请选择未来的时间。',
+@@ -47,6 +55,7 @@ export function TriageControls({
+   busy,
+   onBusy,
+   onDone,
++  onUnpin,
+ }: {
+   targets: MailTarget[];
+   states: Record<string, LocalState>;
+@@ -54,6 +63,7 @@ export function TriageControls({
+   busy: boolean;
+   onBusy: (busy: boolean) => void;
+   onDone: () => void;
++  onUnpin?: () => void;
+ }) {
+   const [panel, setPanel] = useState('');
+   const [error, setError] = useState('');
+@@ -61,9 +71,11 @@ export function TriageControls({
+   const trigger = useRef<HTMLButtonElement>(null);
+   const labelTrigger = useRef<HTMLButtonElement>(null);
+   const restoreFocus = () => (panel === 'labels' ? labelTrigger : trigger).current?.focus();
+-  const pinned = targets.every((t) => states[t.threadId]?.pinned);
++  const pinned = !!onUnpin || targets.every((t) => states[t.threadId]?.pinned);
+   const snoozed = targets.some((t) => states[t.threadId]?.snoozeUntil);
+   const run = async (change: Omit<LocalChange, 'targets'>) => {
++    if (busy) return;
++    const activePanel = document.activeElement?.closest('.pr-local-panel');
+     onBusy(true);
+     setError('');
+     try {
+@@ -74,8 +86,11 @@ export function TriageControls({
+           `${result.items.length - failed.length} / ${result.items.length} 完成 · ${triageError(failed[0].error)}`
+         );
+       else {
++        if (panel && activePanel?.isConnected &&
++            (activePanel.contains(document.activeElement) || document.activeElement === document.body)) {
++          restoreFocus();
++        }
+         setPanel('');
+-        restoreFocus();
+       }
+       onDone();
+     } catch (e) {
+@@ -97,6 +112,7 @@ export function TriageControls({
+       className="pr-local-controls"
+       aria-label="本机整理"
+       onKeyDown={(e) => {
++        keepNativeButtonActivation(e);
+         if (e.key === 'Escape') {
+           setPanel('');
+           restoreFocus();
+@@ -106,18 +122,19 @@ export function TriageControls({
+     >
+       <div className="pr-local-buttons">
+         <button
+-          disabled={busy}
++          aria-disabled={busy}
+           data-local-action={pinned ? 'unpin' : 'pin'}
+-          onClick={() => run({ action: pinned ? 'unpin' : 'pin' })}
++          onClick={onUnpin || (() => run({ action: pinned ? 'unpin' : 'pin' }))}
+         >
+           {pinned ? '取消置顶' : '置顶'}
+         </button>
+         <button
+-          disabled={busy}
++          aria-disabled={busy}
+           ref={trigger}
+           data-local-panel="snooze"
+           aria-expanded={panel === 'snooze'}
+           onClick={() => {
++            if (busy) return;
+             setPanel(panel === 'snooze' ? '' : 'snooze');
+             setError('');
+           }}
+@@ -134,11 +151,12 @@ export function TriageControls({
+           </button>
+         )}
+         <button
+-          disabled={busy}
++          aria-disabled={busy}
+           ref={labelTrigger}
+           data-local-panel="labels"
+           aria-expanded={panel === 'labels'}
+           onClick={() => {
++            if (busy) return;
+             setPanel(panel === 'labels' ? '' : 'labels');
+             setError('');
+           }}
+diff --git a/app/internal_packages/paper-reed/lib/workspace.tsx b/app/internal_packages/paper-reed/lib/workspace.tsx
+index 1a9eddcfc6468d67b832fe416b9ca9940add18aa..e8c23c24b87824395a629231dea4ecd044dc24f3 100644
+--- a/app/internal_packages/paper-reed/lib/workspace.tsx
++++ b/app/internal_packages/paper-reed/lib/workspace.tsx
+@@ -8,7 +8,7 @@ import {
+   LocalLabel,
+   LocalState,
+ } from '../../../src/services/mail-core/local-triage';
+-import { TriageControls, LabelManager, PinMark, localTime, triageError } from './triage-controls';
++import { TriageControls, LabelManager, PinMark, keepNativeButtonActivation, localTime, triageError } from './triage-controls';
+ import { randomUUID } from 'crypto';
+ import {
+   queryInbox,
+@@ -20,6 +20,7 @@ import {
+   inboxDesktopAccess,
+   MailAction,
+   MailReceipt,
++  MailTarget,
+ } from '../../../src/services/mail-core/inbox';
+ import { desktopDraftRecoveryInfo, DraftRecoveryInfo } from '../../../src/services/mail-core';
+ import React from 'react';
+@@ -103,13 +104,6 @@ function completedInboxScan(scans: InboxScanState[], mappingRevision: number) {
+     : null;
+ }
+ 
+-function keepNativeButtonActivation(event: React.KeyboardEvent<HTMLButtonElement>) {
+-  if (event.key !== 'Enter' && event.key !== ' ') return;
+-  // The workspace keymap binds Enter to opening a conversation.
+-  event.stopPropagation();
+-  if (event.repeat) event.preventDefault();
+-}
+-
+ interface State {
+   palette?: boolean;
+   labels: LocalLabel[];
+@@ -139,7 +133,8 @@ interface State {
+   unreadOnly: boolean;
+   checked: string[];
+   busy: boolean;
+-  snoozeFeedback?: { scope: string; text: string; failed?: boolean };
++  followUpRefillScope?: string;
++  followUpFeedback?: { scope: string; text: string; failed?: boolean };
+   receipt: MailReceipt[];
+   receiptAction: string;
+   operationsError: string;
+@@ -236,8 +231,8 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   moving = false;
+   private moveSaved: Promise<boolean> | null = null;
+   private searchBlockedBySave = false;
+-  private snoozeVisit = 0;
+-  private snoozePageBeforeLoad?: { scope: string; ids: Set<string> };
++  private followUpVisit = 0;
++  private followUpPageBeforeLoad?: { scope: string; ids: Set<string> };
+   receiptStarted = 0;
+   operationGeneration = 0;
+   componentDidMount() {
+@@ -250,7 +245,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+           this.scheduleRefresh();
+       }),
+       onLocalTriageChanged(() => {
+-        if (this.isSnoozedView()) this.generation++;
++        if (this.followUpView()) this.generation++;
+         this.scheduleRefresh();
+       }),
+       CategoryStore.listen(() => {
+@@ -326,13 +321,14 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   }
+   componentDidUpdate(_previousProps: unknown, previous: State) {
+     const { route, searchPending, agentCopyCancelled, accountId, unreadOnly, searchVisit } = this.state;
+-    if (previous.route === 'list' && previous.folder === 'snoozed' && !previous.query &&
+-        (route !== 'list' || !this.isSnoozedView() || accountId !== previous.accountId ||
++    if (previous.route === 'list' && this.followUpView(previous) &&
++        (route !== 'list' || this.followUpView() !== this.followUpView(previous) ||
++          accountId !== previous.accountId ||
+           unreadOnly !== previous.unreadOnly || searchVisit !== previous.searchVisit ||
+           (searchPending && !previous.searchPending))) {
+-      this.snoozeVisit++;
+-      this.snoozePageBeforeLoad = undefined;
+-      if (this.state.snoozeFeedback) this.setState({ snoozeFeedback: undefined });
++      this.followUpVisit++;
++      this.followUpPageBeforeLoad = undefined;
++      if (this.state.followUpFeedback) this.setState({ followUpFeedback: undefined });
+     }
+     if (previous.route === 'list' && route !== 'list' && (searchPending || agentCopyCancelled)) {
+       this.setState({ searchPending: false, agentCopyCancelled: false },
+@@ -446,6 +442,10 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       if (reminders) {
+         for (const row of rows) local[row.id].snoozeUntil = reminders.get(row.id);
+       }
++      if (!query && folder === 'pinned' && this.state.route === 'list') {
++        // Membership already certifies that the displayed row was pinned in the list snapshot.
++        for (const row of rows) local[row.id].pinned = true;
++      }
+       const recovery =
+         folder === 'drafts' && !query ? await desktopDraftRecoveryInfo(rows as Message[]) : [];
+       const snippets: Record<string, string> = {};
+@@ -462,9 +462,9 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       }
+       const more = rows.length > limit;
+       if (current()) {
+-        const page = this.snoozePageBeforeLoad;
++        const page = this.followUpPageBeforeLoad;
+         const restoreFocus = this.restoreListFocus(false, page?.scope === scope ? page.ids : undefined);
+-        this.snoozePageBeforeLoad = undefined;
++        this.followUpPageBeforeLoad = undefined;
+         this.setState((previous) => ({
+           rows: rows.slice(0, limit),
+           labels,
+@@ -474,6 +474,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+           more,
+           loading: false,
+           listRead: { scope, inboxScan, failed: false },
++          followUpRefillScope: undefined,
+           searchClearing: false,
+           checked: previous.checked.filter((id) =>
+             rows.slice(0, limit).some((row) => row.id === id)
+@@ -482,47 +483,54 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       }
+     } catch {
+       if (current()) {
+-        this.snoozePageBeforeLoad = undefined;
+-        this.setState({ loading: false, listRead: { scope, inboxScan: null, failed: true } },
+-          this.restoreListFocus());
++        this.followUpPageBeforeLoad = undefined;
++        this.setState(previous => ({
++          loading: false,
++          followUpRefillScope: previous.followUpRefillScope === scope
++            ? undefined : previous.followUpRefillScope,
++          listRead: { scope, inboxScan: null, failed: true },
++        }), this.restoreListFocus());
+       }
+     }
+   };
+   private loadMore = () => {
+-    if (this.state.limit >= 100) return;
+-    if (this.isSnoozedView()) this.snoozePageBeforeLoad = {
++    if (this.state.limit >= 100 || this.listActionsUnavailable()) return;
++    if (this.followUpView()) this.followUpPageBeforeLoad = {
+       scope: this.listReadScope(),
+       ids: new Set(this.state.rows.map(row => row.id)),
+     };
+     this.setState({ limit: this.state.limit + 50 }, this.refresh);
+   };
+   private restoreListFocus(leavingView = false, previousPage?: ReadonlySet<string>) {
+-    const snoozed = this.isSnoozedView();
+-    const selector = '.pr-mail-row, .pr-end-snooze, .pr-snooze-empty button, .pr-snooze-row input';
+-    const row = this.state.route === 'list' && (this.state.query || snoozed) &&
+-      document.activeElement?.closest<HTMLInputElement | HTMLButtonElement>(
+-        snoozed ? selector + ', .pr-load-more' : selector
+-      );
+-    const id = row && row.closest<HTMLElement>('.pr-snooze-row')?.dataset.snoozeId;
++    const view = this.followUpView();
++    const bulkUnpin = '.pr-local-controls [data-local-action=unpin]';
++    let selector = '.pr-mail-row, .pr-follow-up-action, .pr-follow-up-empty button, .pr-follow-up-row input';
++    if (view) {
++      selector += ', .pr-load-more, .pr-local-controls :is(button,input,select), .pr-selection-actions button';
++    }
++    const row = this.state.route === 'list' && (this.state.query || view) &&
++      document.activeElement?.closest<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>(selector);
++    const id = row && row.closest<HTMLElement>('.pr-follow-up-row')?.dataset.followUpId;
+     const loadingMore = row && row.matches('.pr-load-more');
+     const index = loadingMore ? this.state.rows.length :
+-      snoozed ? this.state.rows.findIndex(item => item.id === id) : -1;
++      view ? this.state.rows.findIndex(item => item.id === id) : -1;
+     return () => {
+       const firstAdded = loadingMore && previousPage &&
+         this.state.rows.find(item => !previousPage.has(item.id));
+       const reachedLimit = firstAdded && row.getAttribute('aria-disabled') === 'true';
+       if (row && this.state.route === 'list' && (row.disabled || !row.isConnected || reachedLimit) &&
+           (document.activeElement === row || document.activeElement === document.body)) {
+-        const selector = row.matches('.pr-end-snooze') ? '.pr-end-snooze'
+-          : row.matches('input') ? '.pr-snooze-row input' : '.pr-snooze-row .pr-mail-row';
+-        const stillSnoozed = !leavingView && snoozed && this.isSnoozedView();
+-        const candidates = stillSnoozed
++        const selector = row.matches('.pr-follow-up-action') ? '.pr-follow-up-action'
++          : row.matches('.pr-follow-up-row input') ? '.pr-follow-up-row input' : '.pr-follow-up-row .pr-mail-row';
++        const sameView = !leavingView && view && view === this.followUpView();
++        const candidates = sameView
+           ? Array.from(document.querySelectorAll<HTMLElement>(selector + ':not(:disabled)'))
+           : [];
+-        const replacement = (firstAdded &&
++        const replacement = (sameView && row.matches(bulkUnpin) &&
++          document.querySelector<HTMLElement>(bulkUnpin)) || (firstAdded &&
+           candidates.find(candidate => candidate.dataset.threadId === firstAdded.id))
+           || candidates[Math.min(Math.max(index, 0), candidates.length - 1)];
+-        const fallback = (stillSnoozed && document.querySelector<HTMLElement>('.pr-snooze-empty button'))
++        const fallback = (sameView && document.querySelector<HTMLElement>('.pr-follow-up-empty button'))
+           || document.querySelector<HTMLInputElement>('.pr-search-input');
+         (replacement || fallback)?.focus();
+       }
+@@ -593,7 +601,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   };
+   navigate = (folder: string, accountId = this.state.accountId) =>
+     this.move(() => {
+-      const restoreFocus = this.isSnoozedView() && this.restoreListFocus(true);
++      const restoreFocus = this.followUpView() && this.restoreListFocus(true);
+       const changingAccount = accountId !== this.state.accountId;
+       const { query, searchText, searchPending, searchClearing, searchVisit } = this.state;
+       Actions.setFocus({ collection: 'thread', item: null });
+@@ -805,10 +813,17 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     return !!searchPending || !!searchClearing || (!!query && (loading || listRead?.failed ||
+       listRead?.scope !== this.listReadScope()));
+   }
+-  isSnoozedView = () => this.state.folder === 'snoozed' && !this.state.query;
++  private followUpView({ folder, query }: State = this.state) {
++    return !query && (folder === 'pinned' || folder === 'snoozed') ? folder : null;
++  }
++  private followUpRefilling() {
++    const { route, searchPending, followUpRefillScope } = this.state;
++    return route === 'list' && !searchPending &&
++      !!followUpRefillScope && followUpRefillScope === this.listReadScope();
++  }
+   listActionsUnavailable() {
+     const { loading, listRead } = this.state;
+-    return this.searchResultsUnavailable() || (this.isSnoozedView() &&
++    return this.followUpRefilling() || this.searchResultsUnavailable() || (!!this.followUpView() &&
+       (loading || listRead?.failed || listRead?.scope !== this.listReadScope()));
+   }
+   retrySearchRead = () => {
+@@ -849,8 +864,9 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     if (this.mounted && this.state.receipt === current) this.setState({ receipt: next });
+   };
+   organize = async (action: MailAction) => {
++    if (this.state.route !== 'list' || this.state.busy || this.listActionsUnavailable()) return;
+     const targets = this.selectedTargets();
+-    if (!targets.length || this.state.busy) return;
++    if (!targets.length) return;
+     this.receiptStarted = Date.now();
+     this.setState({ busy: true, receipt: [], receiptAction: action });
+     try {
+@@ -917,8 +933,8 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       { id: 'core:next-item', title: '下一封邮件', disabled: !listReady, run: () => browse(1) },
+       { id: 'core:previous-item', title: '上一封邮件', disabled: !listReady, run: () => browse(-1) },
+       { id: 'core:select-item', title: '选择邮件', disabled: !listReady, run: () => { const id = this.focusedRow()?.dataset.threadId; if (id) this.toggleChecked(id); } },
+-      { id: 'core:pop-sheet', title: '取消当前选择', disabled: !list, run: () => this.setState({ checked: [] }) },
+-      { id: 'multiselect-list:deselect-all', title: '取消选择', disabled: !list, run: () => this.setState({ checked: [] }) },
++      { id: 'core:pop-sheet', title: '取消当前选择', disabled: !list || this.followUpRefilling(), run: () => this.setState({ checked: [] }) },
++      { id: 'multiselect-list:deselect-all', title: '取消选择', disabled: !list || this.followUpRefilling(), run: () => this.setState({ checked: [] }) },
+       ...([['archive', '归档'], ['trash', '移到废纸篓'], ['read', '标为已读'], ['unread', '标为未读']] as [MailAction, string][]).map(([action, title]) => ({
+         id: { archive: 'core:archive-item', trash: 'core:delete-item', read: 'core:mark-as-read', unread: 'core:mark-as-unread' }[action],
+         title, disabled: !listReady || this.state.busy || this.state.loading || !this.selectedTargets().length || !this.selectedTargets().every(t => actionAvailable(action, t.accountId)),
+@@ -929,6 +945,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     ];
+   };
+   renderLocalControls(targets = this.selectedTargets()) {
++    const pinnedList = this.state.route === 'list' && this.followUpView() === 'pinned';
+     return (
+       !!targets.length && (
+         <TriageControls
+@@ -936,9 +953,10 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+           targets={targets}
+           labels={this.state.labels}
+           states={this.state.local}
+-          busy={this.state.busy}
++          busy={this.state.busy || this.followUpRefilling()}
+           onBusy={(busy) => this.setState({ busy })}
+           onDone={this.refresh}
++          onUnpin={pinnedList ? () => void this.removeFromFollowUp(targets) : undefined}
+         />
+       )
+     );
+@@ -954,8 +972,10 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   };
+   renderListTools(showCount: boolean, searchActive: boolean, searchUnavailable: boolean) {
+     const rows = this.state.rows.filter((r) => r instanceof Thread);
+-    const snoozed = this.isSnoozedView();
+-    const selected = searchUnavailable ? [] : this.selectedTargets();
++    const followUp = this.followUpView();
++    const refilling = this.followUpRefilling();
++    const keepSelection = !searchUnavailable || refilling;
++    const selected = keepSelection ? this.selectedTargets() : [];
+     const actions: [MailAction, string][] = [
+       ['read', '标为已读'],
+       ['unread', '标为未读'],
+@@ -967,7 +987,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     return (
+       <>
+         <div className="pr-list-tools">
+-          {(!snoozed || rows.length > 0) && (this.state.folder !== 'drafts' || this.state.query) && (
++          {(!followUp || rows.length > 0) && (this.state.folder !== 'drafts' || this.state.query) && (
+             <label>
+               <input
+                 type="checkbox"
+@@ -985,11 +1005,11 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+               <span>{selected.length ? `已选 ${selected.length} 个会话` : '选择当前列表'}</span>
+             </label>
+           )}
+-          {snoozed && !searchActive && rows.length > 0 && <span>提醒时间按系统时区显示</span>}
+-          {!searchActive && this.state.loading && this.state.rows.length > 0 && (
++          {followUp === 'snoozed' && !searchActive && rows.length > 0 && <span>提醒时间按系统时区显示</span>}
++          {!searchActive && (this.state.loading || refilling) && this.state.rows.length > 0 && (
+             <span className="pr-search-scope" role="status">正在更新 · 暂显示上次列表</span>
+           )}
+-          {!searchActive && searchUnavailable && !this.state.loading && this.state.rows.length > 0 && (
++          {!searchActive && searchUnavailable && !this.state.loading && !refilling && this.state.rows.length > 0 && (
+             <span className="pr-search-scope">下方暂显示上次列表</span>
+           )}
+           {(this.state.folder !== 'drafts' || this.state.query) && (
+@@ -1014,9 +1034,10 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+             </p>
+           )}
+         </div>
+-        {!searchUnavailable && this.renderLocalControls()}
++        {keepSelection && this.renderLocalControls(selected)}
+         {!!selected.length && (
+-          <div className="pr-selection-actions" role="group" aria-label="所选邮件操作">
++          <div className="pr-selection-actions" role="group" aria-label="所选邮件操作"
++            onKeyDown={keepNativeButtonActivation}>
+             {actions
+               .filter(
+                 ([action]) =>
+@@ -1043,6 +1064,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                     this.state.loading ||
+                     !selected.every((t) => actionAvailable(action, t.accountId))
+                   }
++                  aria-disabled={refilling || undefined}
+                   onClick={() => this.organize(action)}
+                 >
+                   {title}
+@@ -1050,8 +1072,11 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+               ))}
+             <button
+               type="button"
+-              onClick={() => this.setState({ checked: [] })}
++              onClick={() => {
++                if (!refilling) this.setState({ checked: [] }, this.restoreListFocus());
++              }}
+               disabled={this.state.busy}
++              aria-disabled={refilling || undefined}
+             >
+               取消选择
+             </button>
+@@ -1270,37 +1295,71 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       </div>
+     );
+   };
+-  private endSnooze = async (row: Thread) => {
+-    if (this.state.busy || !this.isSnoozedView() || this.listActionsUnavailable()) return;
++  private removeFromFollowUp = async (targets: MailTarget[]) => {
++    const view = this.followUpView();
++    if (this.state.route !== 'list' || this.state.busy || !view || !targets.length ||
++        this.listActionsUnavailable()) return;
++    const snoozed = view === 'snoozed';
++    const label = snoozed ? '结束稍后' : '取消置顶';
+     const scope = this.listReadScope();
+-    const visit = this.snoozeVisit;
++    const visit = this.followUpVisit;
+     const visible = () => this.mounted && this.state.route === 'list' &&
+-      !this.state.searchPending && this.snoozeVisit === visit && this.listReadScope() === scope;
+-    this.setState({ busy: true, snoozeFeedback: undefined });
++      !this.state.searchPending && this.followUpVisit === visit && this.listReadScope() === scope;
++    this.setState({ busy: true, followUpFeedback: undefined });
+     try {
+       const { items } = await changeLocalMail({
+-        action: 'unsnooze', targets: [{ accountId: row.accountId, threadId: row.id }],
++        action: snoozed ? 'unsnooze' : 'unpin', targets,
+       }, inboxDesktopAccess);
+-      if (items[0]?.status !== 'succeeded') throw new Error(items[0]?.error);
++      const removed = new Set(items.filter(item => item.status === 'succeeded').map(item => item.threadId));
++      const failed = removed.size !== targets.length;
++      if (targets.length === 1 && failed) throw new Error(items[0]?.error);
++      const replacePage = visible() && this.state.more &&
++        this.state.rows.length > 0 && this.state.rows.every(item => removed.has(item.id));
+       if (visible()) {
+         this.generation++;
++        const text = targets.length === 1 ? `已${label}。` :
++          `${label} · ${removed.size} / ${targets.length} 完成。` +
++          (failed ? '未完成的会话仍可重试。' : '');
+         this.setState(previous => ({
+-          rows: previous.rows.filter(item => item.id !== row.id),
+-          checked: previous.checked.filter(id => id !== row.id),
+-          snoozeFeedback: { scope, text: '已结束稍后。' },
++          rows: replacePage ? previous.rows : previous.rows.filter(item => !removed.has(item.id)),
++          checked: replacePage ? previous.checked : previous.checked.filter(id => !removed.has(id)),
++          followUpRefillScope: replacePage ? scope : undefined,
++          followUpFeedback: { scope, text, failed },
+         }), this.restoreListFocus());
++      } else if (this.mounted && scope === this.listReadScope() &&
++          this.state.rows.some(item => removed.has(item.id))) {
++        // Compose and reader routes can return to the same cached list.
++        this.setState({ followUpRefillScope: scope });
+       }
+       if (this.mounted) void this.refresh();
+     } catch (error) {
+       const reason = triageError(error.message);
+       if (visible()) this.setState({
+-        snoozeFeedback: { scope, text: '未能结束稍后。' +
++        followUpFeedback: { scope, text: `未能${label}。` +
+           (reason && reason !== error.message ? reason : '请重试。'), failed: true },
+       });
+     } finally {
+       if (this.mounted) this.setState({ busy: false });
+     }
+   };
++  private renderFollowUpRow(row: Thread, unavailable: boolean, until?: number) {
++    const snoozed = until !== undefined;
++    const label = snoozed ? '结束稍后' : '取消置顶';
++    return (
++      <div className={`pr-follow-up-row ${snoozed ? 'pr-snooze-row' : 'pr-pinned-row'}`}
++        key={row.id} data-follow-up-id={row.id} data-snooze-id={snoozed ? row.id : undefined}>
++        {this.renderRow(row, unavailable, until)}
++        <button type="button" className={`pr-follow-up-action ${snoozed ? 'pr-end-snooze' : 'pr-unpin'}`}
++          data-snooze-id={snoozed ? row.id : undefined}
++          aria-label={`${label} · ${row.subject || '无主题'}`}
++          aria-disabled={unavailable || this.state.busy}
++          onKeyDown={keepNativeButtonActivation}
++          onClick={() => void this.removeFromFollowUp([{ accountId: row.accountId, threadId: row.id }])}>
++          {label}
++        </button>
++      </div>
++    );
++  }
+   renderSnoozedRows(unavailable: boolean) {
+     const groups = new Map<string, { row: Thread; until: number }[]>();
+     for (const row of this.state.rows) {
+@@ -1313,26 +1372,19 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     return Array.from(groups, ([day, items]) => (
+       <section className="pr-snooze-day" key={day} aria-label={day}>
+         <h2>{day}</h2>
+-        {items.map(({ row, until }) => (
+-          <div className="pr-snooze-row" key={row.id} data-snooze-id={row.id}>
+-            {this.renderRow(row, unavailable, until)}
+-            <button type="button" className="pr-end-snooze" data-snooze-id={row.id}
+-              aria-label={`结束稍后 · ${row.subject || '无主题'}`}
+-              aria-disabled={unavailable || this.state.busy}
+-              onKeyDown={keepNativeButtonActivation}
+-              onClick={() => void this.endSnooze(row)}>结束稍后</button>
+-          </div>
+-        ))}
++        {items.map(({ row, until }) => this.renderFollowUpRow(row, unavailable, until))}
+       </section>
+     ));
+   }
+-  renderSnoozedEmpty() {
++  renderFollowUpEmpty(view: 'pinned' | 'snoozed') {
+     const { unreadOnly } = this.state;
++    const snoozed = view === 'snoozed';
++    const label = snoozed ? '稍后' : '置顶';
+     return (
+-      <div className="pr-snooze-empty">
++      <div className={`pr-follow-up-empty ${snoozed ? 'pr-snooze-empty' : 'pr-pinned-empty'}`}>
+         <div role="status">
+-          <p>{unreadOnly ? '暂无未读的稍后邮件' : '暂无稍后邮件'}</p>
+-          {!unreadOnly && <small>可以在会话中选择稍后处理。</small>}
++          <p>暂无{unreadOnly ? '未读的' : ''}{label}邮件</p>
++          {!unreadOnly && <small>可以在会话中选择{snoozed ? '稍后处理' : '置顶'}。</small>}
+         </div>
+         <button onKeyDown={keepNativeButtonActivation} onClick={() => {
+           if (unreadOnly) {
+@@ -1458,12 +1510,13 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     const listRead = this.state.listRead?.scope === this.listReadScope() ? this.state.listRead : null;
+     const readFailed = listRead?.failed;
+     const searchActive = route === 'list' && (!!this.state.query || !!this.state.searchPending);
+-    const snoozed = route === 'list' && this.isSnoozedView();
++    const followUp = route === 'list' ? this.followUpView() : null;
++    const snoozed = followUp === 'snoozed';
+     const atListLimit = this.state.limit >= 100;
+-    const readBelowSearch = searchActive || snoozed || (route === 'list' && this.state.searchClearing);
++    const readBelowSearch = searchActive || followUp || (route === 'list' && this.state.searchClearing);
+     const searchUnavailable = route === 'list' && this.listActionsUnavailable();
+-    const snoozeFeedback = snoozed && !searchActive &&
+-      this.state.snoozeFeedback?.scope === this.listReadScope() && this.state.snoozeFeedback;
++    const followUpFeedback = followUp && !searchActive &&
++      this.state.followUpFeedback?.scope === this.listReadScope() && this.state.followUpFeedback;
+     const emptyInbox = route === 'list' && folder === 'inbox' && !searchActive && !rows.length;
+     const inboxState = emptyInbox && !readFailed
+       ? this.emptyInboxState(
+@@ -1646,17 +1699,20 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                     (!emptyInbox || inboxState === 'empty' || inboxState === 'unread'),
+                   searchActive, searchUnavailable
+                 )}
+-                {snoozeFeedback && (
+-                  <p className="pr-notice" role={snoozeFeedback.failed ? 'alert' : 'status'}>{snoozeFeedback.text}</p>
++                {followUpFeedback && (
++                  <p className={`pr-notice ${followUp === 'pinned' ? 'pr-pin-feedback' : ''}`}
++                    role={followUpFeedback.failed ? 'alert' : 'status'}>{followUpFeedback.text}</p>
+                 )}
+                 <div className="pr-mail-list" aria-label={title}
+-                  aria-busy={loading || !!this.state.searchPending}>
++                  aria-busy={loading || !!this.state.searchPending || this.followUpRefilling()}>
+                   {snoozed ? this.renderSnoozedRows(searchUnavailable) :
+-                    rows.map(row => this.renderRow(row, searchUnavailable))}
++                    rows.map(row => followUp === 'pinned' && row instanceof Thread
++                      ? this.renderFollowUpRow(row, searchUnavailable)
++                      : this.renderRow(row, searchUnavailable))}
+                   {inboxState && this.renderEmptyInbox(inboxState, accounts)}
+-                  {snoozed && !searchUnavailable && !rows.length && this.renderSnoozedEmpty()}
++                  {followUp && !searchUnavailable && !rows.length && this.renderFollowUpEmpty(followUp)}
+                   {searchActive && !searchUnavailable && !rows.length && this.renderSearchEmpty()}
+-                  {!searchActive && !rows.length && !emptyInbox && !readFailed && (!snoozed || loading) && (
++                  {!searchActive && !rows.length && !emptyInbox && !readFailed && (!followUp || loading) && (
+                     <p className="pr-empty" role="status">
+                       {loading ? '正在读取邮件…' : '这里还没有邮件'}
+                     </p>
+@@ -1664,13 +1720,14 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                   {this.state.more && !searchUnavailable && (
+                     <button
+                       className="pr-load-more"
+-                      disabled={!snoozed && atListLimit}
+-                      aria-disabled={snoozed ? atListLimit : undefined}
++                      disabled={!followUp && atListLimit}
++                      aria-disabled={followUp ? atListLimit : undefined}
+                       onKeyDown={keepNativeButtonActivation}
+                       onClick={this.loadMore}
+                     >
+                       {atListLimit
+-                        ? (snoozed && rows.length < 100 ? '正在加载更多…' : '已显示 100 个会话，请缩小搜索范围')
++                        ? (followUp && rows.length < 100 ? '正在加载更多…'
++                          : followUp === 'pinned' ? '已显示前 100 个置顶会话' : '已显示 100 个会话，请缩小搜索范围')
+                         : '加载更多'}
+                     </button>
+                   )}
+diff --git a/app/internal_packages/paper-reed/styles/paper-reed.less b/app/internal_packages/paper-reed/styles/paper-reed.less
+index 603c34b33049b385c1d53234858a10ddeb3fc54a..6b3c55737c9ec6446e526159e1665788cda45c31 100644
+--- a/app/internal_packages/paper-reed/styles/paper-reed.less
++++ b/app/internal_packages/paper-reed/styles/paper-reed.less
+@@ -85,6 +85,7 @@
+   .pr-load-more { display: block; margin: 20px auto; }
+   .pr-notice, .pr-agent-panel { border-left: 2px solid var(--pr-reed); padding: 12px 16px; background: var(--pr-inset); margin: 12px 0 20px; }
+   .pr-notice button { margin-left: 12px; }
++  .pr-pin-feedback[role=alert] { border-left-color: #9a433e; color: #9a433e; }
+   .pr-route-thread .pr-agent-panel, .pr-route-compose .pr-agent-panel { max-width: 640px; margin-inline: auto; }
+   .pr-agent-panel strong { font-weight: 500; }
+   .pr-agent-panel p { margin: 6px 0 8px; color: var(--pr-muted); }
+@@ -897,34 +898,36 @@
+     color: var(--pr-reed);
+   }
+   .pr-snooze-day + .pr-snooze-day { margin-top: 14px; }
+-  .pr-snooze-row {
++  .pr-follow-up-row {
+     display: grid;
+     grid-template-columns: minmax(0, 1fr) auto;
+     align-items: center;
+     gap: 12px;
+     border-bottom: 1px solid var(--pr-line);
+   }
+-  .pr-snooze-row .pr-mail-item, .pr-snooze-row .pr-mail-row { border-bottom: 0; }
++  .pr-follow-up-row .pr-mail-item, .pr-follow-up-row .pr-mail-row { border-bottom: 0; }
+   .pr-snooze-row .pr-date { font-variant-numeric: tabular-nums; }
+-  .pr-snooze-row button.pr-end-snooze, .pr-snooze-empty button { color: var(--pr-reed); }
+-  .pr-snooze-row button.pr-end-snooze[aria-disabled=true] {
++  .pr-follow-up-row button.pr-follow-up-action, .pr-follow-up-empty button { color: var(--pr-reed); }
++  .pr-follow-up-row button.pr-follow-up-action[aria-disabled=true],
++  .pr-local-buttons button[aria-disabled=true],
++  .pr-selection-actions button[aria-disabled=true] {
+     color: var(--pr-muted);
+     cursor: default;
+     opacity: .6;
+     background: transparent;
+   }
+-  .pr-snooze-empty {
++  .pr-follow-up-empty {
+     display: flex;
+     flex-wrap: wrap;
+     align-items: center;
+     gap: 8px 20px;
+     padding: 20px 0;
+   }
+-  .pr-snooze-empty p { margin: 0 0 3px; font-size: 14px; font-weight: 500; }
+-  .pr-snooze-empty small { color: var(--pr-muted); font-size: 12px; }
++  .pr-follow-up-empty p { margin: 0 0 3px; font-size: 14px; font-weight: 500; }
++  .pr-follow-up-empty small { color: var(--pr-muted); font-size: 12px; }
+   @container (max-width: 390px) {
+-    .pr-snooze-row { grid-template-columns: minmax(0, 1fr); gap: 0; }
+-    .pr-snooze-row .pr-end-snooze { justify-self: end; margin-bottom: 6px; }
++    .pr-follow-up-row { grid-template-columns: minmax(0, 1fr); gap: 0; }
++    .pr-follow-up-row .pr-follow-up-action { justify-self: end; margin-bottom: 6px; }
+   }
+   .pr-mail-row:disabled {
+     cursor: default;
+@@ -941,6 +944,7 @@
+   .pr-mail-item { display:grid; grid-template-columns:18px minmax(0,1fr); gap:10px; align-items:center; border-bottom:1px solid var(--pr-line); }
+   .pr-mail-item > input { margin:0 2px; cursor:pointer; }
+   .pr-mail-item.selected { background:#edf0e8; }
++  .pr-pinned-row:has(.pr-mail-item.selected) { background:#edf0e8; }
+   .pr-mail-item .pr-mail-row { border-bottom:0; }
+   .pr-mail-receipt { display:flex; flex-wrap:wrap; align-items:center; gap:12px; padding:10px 14px; background:var(--pr-inset); border-left:2px solid var(--pr-reed); font-size:12px; }
+   .pr-mail-receipt > button:last-of-type { margin-left:auto; } .pr-mail-receipt details { width:100%; color:#9a433e; }
