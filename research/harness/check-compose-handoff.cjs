@@ -45,6 +45,10 @@ async function startDesktop(){
    return;
  }
  if(mode==='workspace') {
+   if (process.env.PAPER_REED_COMPOSE_PAGE_CHECK) {
+     await require('./check-compose-page.cjs')({app,main,cdp,evaluate,until});
+     return;
+   }
    await require('./check-paper-reed-ui.cjs')({app,main,cdp,work,account,cli,click,evaluate,until, restart: async()=>{ await app.close(); await startDesktop(); return {app,main,cdp}; }});
    return;
  }

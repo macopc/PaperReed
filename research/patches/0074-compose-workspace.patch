@@ -1,0 +1,289 @@
+diff --git a/app/internal_packages/composer/lib/composer-header-actions.tsx b/app/internal_packages/composer/lib/composer-header-actions.tsx
+index 2558e627cc3f8cbe4be788b21e19619d6eedf163..30d7bc5b5df069a2747f540e7eea7db76aa3b716 100644
+--- a/app/internal_packages/composer/lib/composer-header-actions.tsx
++++ b/app/internal_packages/composer/lib/composer-header-actions.tsx
+@@ -109,7 +109,7 @@ export default class ComposerHeaderActions extends React.Component<ComposerHeade
+ 
+     return (
+       <RovingTabIndexToolbar
+-        label={localized('Composer header actions')}
++        label={AppEnv.config.get('core.paperReed.enabled') ? '收件人选项' : localized('Composer header actions')}
+         className="composer-header-actions"
+       >
+         {items}
+diff --git a/app/internal_packages/composer/lib/composer-header.tsx b/app/internal_packages/composer/lib/composer-header.tsx
+index 138bf0d41885f491925a405609bd9a10576e0533..8fd278d77ec644e7e62bdbdf9aa3748f50ee4715 100644
+--- a/app/internal_packages/composer/lib/composer-header.tsx
++++ b/app/internal_packages/composer/lib/composer-header.tsx
+@@ -25,6 +25,7 @@ const ScopedFromField = ListensToFluxStore(AccountContactField, {
+ interface ComposerHeaderProps {
+   draft: Message;
+   session: DraftEditingSession;
++  onSubjectConfirmed?: () => void;
+ }
+ interface ComposerHeaderState {
+   enabledFields: string[];
+@@ -132,6 +133,16 @@ export class ComposerHeader extends React.Component<ComposerHeaderProps, Compose
+     this.props.session.changes.add({ subject: event.target.value });
+   };
+ 
++  private _onSubjectKeyDown = (event: React.KeyboardEvent<HTMLTextAreaElement>) => {
++    if (event.key !== 'Enter' || event.nativeEvent.isComposing) return;
++    const { draft, onSubjectConfirmed } = this.props;
++    if (onSubjectConfirmed && (event.nativeEvent.keyCode === 229 || event.metaKey || event.ctrlKey || event.altKey)) return;
++    event.preventDefault();
++    if (onSubjectConfirmed && event.shiftKey) return;
++    if (onSubjectConfirmed && draft.to.length) onSubjectConfirmed();
++    else this.showAndFocusField(Fields.To);
++  };
++
+   _renderSubject = () => {
+     if (!this.state.enabledFields.includes(Fields.Subject)) {
+       return false;
+@@ -141,7 +152,7 @@ export class ComposerHeader extends React.Component<ComposerHeaderProps, Compose
+         <textarea aria-label="邮件主题" placeholder="邮件主题" rows={1}
+           ref={el => { this._els[Fields.Subject] = el; }}
+           value={this.props.draft.subject} onChange={this._onSubjectChange}
+-          onKeyDown={event => { if (event.key === 'Enter' && !event.nativeEvent.isComposing) { event.preventDefault(); this.showAndFocusField(Fields.To); } }} />
++          onKeyDown={this._onSubjectKeyDown} />
+       </div>
+     );
+     return (
+@@ -275,14 +286,26 @@ export class ComposerHeader extends React.Component<ComposerHeaderProps, Compose
+   };
+ 
+   render() {
++    const paperReed = AppEnv.config.get('core.paperReed.enabled');
++    const toolsByRecipients = paperReed && Boolean(this.props.onSubjectConfirmed);
++    const actions = (
++      <ComposerHeaderActions
++        key="address-actions"
++        headerMessageId={this.props.draft.headerMessageId}
++        enabledFields={this.state.enabledFields}
++        onShowAndFocusField={this.showAndFocusField}
++      />
++    );
++    const fields = this._renderFields();
++    if (toolsByRecipients) {
++      const toIndex = fields.findIndex(field => field.key === 'to');
++      fields.splice(toIndex + 1, 0, actions);
++    }
++
+     return (
+-      <header className="composer-header" aria-label={localized('Message addressing')}>
+-        {AppEnv.config.get('core.paperReed.enabled') && this._renderSubject()}
+-        <ComposerHeaderActions
+-          headerMessageId={this.props.draft.headerMessageId}
+-          enabledFields={this.state.enabledFields}
+-          onShowAndFocusField={this.showAndFocusField}
+-        />
++      <header className="composer-header" aria-label={paperReed ? '邮件地址' : localized('Message addressing')}>
++        {paperReed && this._renderSubject()}
++        {!toolsByRecipients && actions}
+         <KeyCommandsRegion
+           tabIndex={-1}
+           ref={(el) => {
+@@ -292,9 +315,9 @@ export class ComposerHeader extends React.Component<ComposerHeaderProps, Compose
+           }}
+           className="expanded-participants"
+         >
+-          {this._renderFields()}
++          {fields}
+         </KeyCommandsRegion>
+-        {!AppEnv.config.get('core.paperReed.enabled') && this._renderSubject()}
++        {!paperReed && this._renderSubject()}
+       </header>
+     );
+   }
+diff --git a/app/internal_packages/composer/lib/composer-view.tsx b/app/internal_packages/composer/lib/composer-view.tsx
+index d0a92068ea1148db00c2e98dbe3e9f315171a181..caa562b2c2398b4784ba82f679f01802c3a5257d 100644
+--- a/app/internal_packages/composer/lib/composer-view.tsx
++++ b/app/internal_packages/composer/lib/composer-view.tsx
+@@ -44,6 +44,7 @@ interface ComposerViewProps {
+   session: DraftEditingSession;
+   className?: string;
+   children?: React.ReactNode;
++  workspace?: boolean;
+ }
+ interface ComposerViewState {
+   quotedTextHidden: boolean;
+@@ -152,6 +153,8 @@ export default class ComposerView extends React.Component<ComposerViewProps, Com
+     }
+   }
+ 
++  private focusBody = () => this.editor.current?.focus();
++
+   _renderContent() {
+     const restrictWidth = AppEnv.config.get('core.reading.restrictMaxWidth');
+     const { quotedTextHidden, quotedTextPresent } = this.state;
+@@ -159,7 +162,12 @@ export default class ComposerView extends React.Component<ComposerViewProps, Com
+ 
+     return (
+       <div className={`composer-centered ${restrictWidth && 'restrict-width'}`}>
+-        <ComposerHeader ref={this.header} draft={draft} session={session} />
++        <ComposerHeader
++          ref={this.header}
++          draft={draft}
++          session={session}
++          onSubjectConfirmed={this.props.workspace ? this.focusBody : undefined}
++        />
+         <div
+           className="compose-body"
+           onMouseUp={this._onMouseUpComposerBody}
+@@ -546,6 +554,15 @@ export default class ComposerView extends React.Component<ComposerViewProps, Com
+   };
+ 
+   renderPaperReedActions() {
++    const send = (
++      <SendActionButton
++        tabIndex={0}
++        ref={this.sendButton}
++        style={{}}
++        draft={this.props.draft}
++        isValidDraft={this._isValidDraft}
++      />
++    );
+     return (
+       <>
+         <div className="pr-compose-actions" role="group" aria-label="邮件操作">
+@@ -572,19 +589,14 @@ export default class ComposerView extends React.Component<ComposerViewProps, Com
+           <button type="button" className="pr-copy-agent" onClick={this.copyForAgent}>
+             {cliStatus().ready ? '复制给 Agent' : '连接 Agent'}
+           </button>
+-          <SendActionButton
+-            tabIndex={0}
+-            ref={this.sendButton}
+-            style={{}}
+-            draft={this.props.draft}
+-            isValidDraft={this._isValidDraft}
+-          />
++          {!this.props.workspace && send}
+           <details className="pr-compose-more">
+             <summary aria-label="更多邮件操作">•••</summary>
+             <button type="button" onClick={this._onDestroyDraft}>
+               删除草稿
+             </button>
+           </details>
++          {this.props.workspace && send}
+         </div>
+         {this.state.agentNotice && (
+           <p className="pr-agent-receipt" role="status">
+@@ -599,7 +611,7 @@ export default class ComposerView extends React.Component<ComposerViewProps, Com
+     const paperReed = AppEnv.config.get('core.paperReed.enabled');
+     return (
+       <div
+-        className={`${this.props.className || ''} ${paperReed ? 'pr-composer' : ''} ${this.state.formatOpen ? 'pr-format-open' : ''}`}
++        className={`${this.props.className || ''} ${paperReed ? 'pr-composer' : ''} ${paperReed && this.props.workspace ? 'pr-workspace-composer' : ''} ${this.state.formatOpen ? 'pr-format-open' : ''}`}
+       >
+         <KeyCommandsRegion
+           localHandlers={this._keymapHandlers}
+diff --git a/app/internal_packages/paper-reed/lib/workspace.tsx b/app/internal_packages/paper-reed/lib/workspace.tsx
+index 08861bddd3c159b5de7487d3f04def51da4c8c79..944cf6bceb1fcff5d2bd70011b88f81e2eecb4e6 100644
+--- a/app/internal_packages/paper-reed/lib/workspace.tsx
++++ b/app/internal_packages/paper-reed/lib/workspace.tsx
+@@ -48,7 +48,7 @@ import ComposerView from '../../composer/lib/composer-view';
+ import InflatesDraftClientId from '../../../src/decorators/inflates-draft-client-id';
+ import DraftFactory from '../../../src/flux/stores/draft-factory';
+ 
+-const Composer = InflatesDraftClientId(ComposerView);
++const Composer = InflatesDraftClientId<{ workspace?: boolean }>(ComposerView);
+ const folders = [
+   ['inbox', '收件箱'],
+   ['pinned', '置顶'],
+@@ -1388,7 +1388,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                   {DraftStore.isSendingDraft(selected.headerMessageId) ? (
+                     <p role="status">正在发送，请等待服务器确认…</p>
+                   ) : (
+-                    <Composer headerMessageId={selected.headerMessageId} onDraftReady={() => {}}>{back}</Composer>
++                    <Composer workspace headerMessageId={selected.headerMessageId} onDraftReady={() => {}}>{back}</Composer>
+                   )}
+                 </div>
+               )
+diff --git a/app/internal_packages/paper-reed/styles/paper-reed.less b/app/internal_packages/paper-reed/styles/paper-reed.less
+index 84fb8871a7478c49200105fa59bf08fe77ac05b0..4102a5f98853387e929f37717b68aa850b30cc99 100644
+--- a/app/internal_packages/paper-reed/styles/paper-reed.less
++++ b/app/internal_packages/paper-reed/styles/paper-reed.less
+@@ -258,6 +258,63 @@
+   .pr-editor .composer-body-wrap { min-height: 0; }
+   .pr-editor .pr-composer [contenteditable] { min-height: clamp(80px, calc(100vh - 670px), 200px); }
+   .pr-editor .pr-composer .pr-subject-heading { margin-bottom: 12px; }
++  .pr-workspace-composer .expanded-participants {
++    display: grid;
++    grid-template-columns: minmax(0, 1fr) auto;
++    border-top: 1px solid var(--pr-line);
++  }
++  .pr-workspace-composer .expanded-participants > .composer-participant-field {
++    grid-column-start: 1;
++    grid-column-end: -1;
++    min-width: 0;
++  }
++  .pr-workspace-composer .expanded-participants > .to-field { grid-column: 1; }
++  .pr-workspace-composer .expanded-participants > .composer-header-actions {
++    grid-column: 2;
++    align-items: flex-start;
++    padding: 0 0 0 8px;
++    gap: 8px;
++    border-bottom: 1px solid var(--pr-line);
++  }
++  .pr-workspace-composer .expanded-participants .composer-header-actions .action {
++    display: inline-flex;
++    align-items: center;
++    min-height: 41px;
++    padding: 0 4px;
++    white-space: nowrap;
++  }
++  .pr-workspace-composer .tokenizing-field-input > span:has(> input:is([role="combobox"], .token-editing-input)) {
++    position: relative;
++    display: inline-block;
++    max-width: 100%;
++    vertical-align: top;
++    overflow: clip;
++    overflow-clip-margin: 2px;
++  }
++  .pr-workspace-composer .tokenizing-field-input input:is([role="combobox"], .token-editing-input) {
++    max-width: 100%;
++    box-sizing: border-box;
++  }
++  .pr-workspace-composer .tokenizing-field-input .token-editing-input {
++    max-width: calc(~'100% - 7px');
++  }
++  .pr-workspace-composer .composer-participant-field .token { max-width: calc(~'100% - 6px'); }
++  .pr-workspace-composer .composer-participant-field .token .participant {
++    white-space: normal;
++    overflow-wrap: anywhere;
++  }
++  .pr-workspace-composer .composer-action-bar-wrap .pr-send { margin-right: 0; }
++  .pr-workspace-composer .compose-body { position: relative; }
++  .pr-workspace-composer .compose-body:has([contenteditable]:focus, textarea:focus)::before {
++    content: '';
++    position: absolute;
++    left: -12px;
++    top: 4px;
++    width: 2px;
++    height: 24px;
++    background: var(--pr-reed);
++    pointer-events: none;
++  }
+   .pr-editor .pr-composer .composer-participant-field { min-height: 42px; }
+   .pr-editor .pr-composer .composer-participant-field .tokenizing-field-wrap { padding: 6px 0; }
+   .pr-editor .pr-composer .compose-body { margin-top: 16px; }
+diff --git a/app/src/decorators/inflates-draft-client-id.tsx b/app/src/decorators/inflates-draft-client-id.tsx
+index 80580915eeacaabfc7cc104b3f88364335f24aad..d640880f337ccf253ff79ae6f398e6214b346bd2 100644
+--- a/app/src/decorators/inflates-draft-client-id.tsx
++++ b/app/src/decorators/inflates-draft-client-id.tsx
+@@ -4,13 +4,9 @@ import * as Actions from '../flux/actions';
+ import * as Utils from '../flux/models/utils';
+ import { Message, DraftEditingSession } from 'mailspring-exports';
+ 
+-function InflatesDraftClientId(
+-  ComposedComponent
+-): React.ComponentType<
+-  { headerMessageId: string; onDraftReady: () => void } & React.HTMLProps<HTMLElement>
+-> {
++function InflatesDraftClientId<ExtraProps extends object = Record<never, never>>(ComposedComponent) {
+   return class extends React.Component<
+-    { headerMessageId: string; onDraftReady: () => void } & React.HTMLProps<HTMLElement>,
++    { headerMessageId: string; onDraftReady: () => void } & React.HTMLProps<HTMLElement> & ExtraProps,
+     { draft: Message; session: DraftEditingSession; _lastHeaderMessageId: string }
+   > {
+     static displayName = ComposedComponent.displayName;
