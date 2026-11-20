@@ -36,13 +36,13 @@ try:
     sent=server.sent_messages()
     (work/'smtp-result.json').write_text(json.dumps({'submissions':len(sent),'subjects':[m.header('Subject') for m in sent]}))
     assert run.returncode==0
-    if a.workspace and os.environ.get('PAPER_REED_COMPOSE_PAGE_CHECK'):
+    if a.workspace and (os.environ.get('PAPER_REED_COMPOSE_PAGE_CHECK') or os.environ.get('PAPER_REED_SEARCH_PAGE_CHECK')):
         assert not sent, len(sent)
         result_path=Path(os.environ['PAPER_REED_UI_OUTPUT'])/'result.json'
         result=json.loads(result_path.read_text())
         result['observedSMTPSubmissions']=len(sent)
         result_path.write_text(json.dumps(result,indent=2)+'\n')
-        print('PASS isolated write-mail page; SMTP=0')
+        print('PASS isolated workspace page; SMTP=0')
         sys.exit(0)
     if a.controls and os.environ.get('PAPER_REED_CONTROLS_PHASE') != 'before' and os.environ.get('PAPER_REED_SUBPAGES_PHASE') != 'before' and os.environ.get('PAPER_REED_ORGANIZATION_PHASE') != 'before' and os.environ.get('PAPER_REED_TEMPLATE_AGENT_PHASE') != 'before':
         result_path=Path(__file__).resolve().parent.parent/('settings-validation-2026-11-16/result.json' if os.environ.get('PAPER_REED_SETTINGS_CHECK') else 'controls-validation-2026-11-16/result.json')

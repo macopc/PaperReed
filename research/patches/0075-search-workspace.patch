@@ -1,0 +1,657 @@
+diff --git a/app/internal_packages/paper-reed/lib/mail-search.tsx b/app/internal_packages/paper-reed/lib/mail-search.tsx
+index 56cc7821f122e97de24579f0d3c95047fabe5ae0..06c1abfa2ebcc38349111f93f199da6442a8699d 100644
+--- a/app/internal_packages/paper-reed/lib/mail-search.tsx
++++ b/app/internal_packages/paper-reed/lib/mail-search.tsx
+@@ -3,52 +3,71 @@ import React from 'react';
+ // Keep keystrokes local: querying is debounced, typing never re-renders the mailbox.
+ export default class MailSearch extends React.Component<{
+   query: string;
+-  onSearch: (query: string) => void;
++  onSearch: (query: string, isCurrent: () => boolean, explicit: boolean) => Promise<boolean>;
+   onPending: () => void;
+-}, { text: string; pending: boolean }> {
+-  state = { text: this.props.query, pending: false };
++}, { text: string; pending: boolean; blocked: boolean }> {
++  state = { text: this.props.query, pending: false, blocked: false };
+   timer: ReturnType<typeof setTimeout>;
+   composing = false;
++  revision = 0;
+   input = React.createRef<HTMLInputElement>();
+-  componentDidUpdate(previous: Readonly<typeof this.props>) {
+-    if (previous.query !== this.props.query && this.props.query !== this.state.text.trim()) {
+-      clearTimeout(this.timer);
+-      this.setState({ text: this.props.query, pending: false });
+-    }
++  componentWillUnmount() {
++    clearTimeout(this.timer);
++    this.revision++;
+   }
+-  componentWillUnmount() { clearTimeout(this.timer); }
+-  submit = () => {
++  submit = async (explicit = false) => {
++    if (this.composing || !this.state.pending) return;
+     clearTimeout(this.timer);
+-    if (this.composing) return;
+-    this.setState({ pending: false });
+-    this.props.onSearch(this.state.text);
++    const revision = ++this.revision;
++    const isCurrent = () => revision === this.revision;
++    this.setState({ pending: false, blocked: false });
++    const applied = await this.props.onSearch(this.state.text, isCurrent, explicit);
++    if (isCurrent() && !applied) this.setState({ pending: true, blocked: true });
+   };
+-  change = (text: string) => {
++  change = (text: string, immediate = false) => {
++    this.revision++;
+     clearTimeout(this.timer);
+     this.props.onPending();
+-    this.setState({ text, pending: true });
+-    if (!this.composing) this.timer = setTimeout(this.submit, 180);
++    this.setState({ text, pending: true, blocked: false },
++      immediate ? () => void this.submit() : undefined);
++    if (!immediate && !this.composing) this.timer = setTimeout(() => void this.submit(), 180);
+   };
+   render() {
+     return (
+-      <form className="pr-search" role="search" onSubmit={(event) => {
+-        event.preventDefault(); this.submit();
+-      }}>
+-        <label className="sr-only" htmlFor="pr-mail-search">搜索本机邮件</label>
+-        <input ref={this.input} id="pr-mail-search" className="pr-search-input" value={this.state.text}
+-          placeholder="搜索邮件 · 发件人、主题或正文"
+-          onChange={(event) => this.change(event.target.value)}
+-          onBlur={() => { if (this.state.pending) this.submit(); }}
+-          onCompositionStart={() => { this.composing = true; clearTimeout(this.timer); }}
+-          onCompositionEnd={(event) => { this.composing = false; this.change(event.currentTarget.value); }} />
+-        {this.state.pending && <span role="status">输入中 · 列表尚未更新</span>}
+-        {!!this.state.text && <button type="button" onClick={() => {
+-          clearTimeout(this.timer);
+-          this.setState({ text: '', pending: false });
+-          this.props.onSearch('');
+-          this.input.current?.focus();
+-        }}>清除</button>}
+-      </form>
++      <>
++        <form className="pr-search" role="search" onSubmit={(event) => {
++          event.preventDefault();
++          void this.submit();
++        }}>
++          <label className="sr-only" htmlFor="pr-mail-search">搜索本机邮件</label>
++          <input ref={this.input} id="pr-mail-search" className="pr-search-input" value={this.state.text}
++            placeholder="搜索邮件 · 发件人、主题或正文"
++            onChange={(event) => this.change(event.target.value)}
++            onKeyDown={(event) => {
++              if (event.key !== 'Enter') return;
++              event.stopPropagation();
++              if (this.composing) return;
++              event.preventDefault();
++              if (!event.repeat && !event.nativeEvent.isComposing && event.keyCode !== 229) {
++                void this.submit(true);
++              }
++            }}
++            onCompositionStart={() => {
++              this.composing = true;
++              this.revision++;
++              clearTimeout(this.timer);
++            }}
++            onCompositionEnd={(event) => { this.composing = false; this.change(event.currentTarget.value); }} />
++          {!!this.state.text && <button type="button" onClick={() => {
++            this.composing = false;
++            this.change('', true);
++            this.input.current?.focus();
++          }} onKeyDown={(event) => {
++            if (event.key === 'Enter' || event.key === ' ') event.stopPropagation();
++          }}>清除</button>}
++        </form>
++        {this.state.blocked && <p className="pr-search-blocked" role="alert">搜索尚未更新，按 Enter 重试。</p>}
++      </>
+     );
+   }
+ }
+diff --git a/app/internal_packages/paper-reed/lib/workspace.tsx b/app/internal_packages/paper-reed/lib/workspace.tsx
+index 944cf6bceb1fcff5d2bd70011b88f81e2eecb4e6..79418bed450072d686b91cb4a3ee2a8c656b9639 100644
+--- a/app/internal_packages/paper-reed/lib/workspace.tsx
++++ b/app/internal_packages/paper-reed/lib/workspace.tsx
+@@ -122,7 +122,11 @@ interface State {
+   notice: string;
+   agent: boolean;
+   copied: boolean;
++  agentCopyCancelled?: boolean;
+   searchText: string;
++  searchPending?: boolean;
++  searchClearing?: boolean;
++  searchVisit: number;
+   query: string;
+   unreadOnly: boolean;
+   checked: string[];
+@@ -201,6 +205,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     agent: false,
+     copied: false,
+     searchText: '',
++    searchVisit: 0,
+     query: '',
+     unreadOnly: false,
+     checked: [],
+@@ -220,6 +225,8 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   refreshTimer: ReturnType<typeof setTimeout>;
+   operationTimer: ReturnType<typeof setInterval>;
+   moving = false;
++  private moveSaved: Promise<boolean> | null = null;
++  private searchBlockedBySave = false;
+   receiptStarted = 0;
+   operationGeneration = 0;
+   componentDidMount() {
+@@ -303,6 +310,13 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     this.refreshOperations();
+     this.openPendingThread();
+   }
++  componentDidUpdate(_previousProps: unknown, previous: State) {
++    const { route, searchPending, agentCopyCancelled } = this.state;
++    if (previous.route === 'list' && route !== 'list' && (searchPending || agentCopyCancelled)) {
++      this.setState({ searchPending: false, agentCopyCancelled: false },
++        searchPending ? this.refresh : undefined);
++    }
++  }
+   componentWillUnmount() {
+     const { folder, accountId, route, selected, query, searchText, unreadOnly } = this.state;
+     lastLocation = { folder, accountId, route, selected, query, searchText, unreadOnly };
+@@ -341,6 +355,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     return true;
+   }
+   refresh = async () => {
++    if (this.state.searchPending) return;
+     const generation = ++this.generation;
+     const { folder, limit, query, unreadOnly } = this.state;
+     const ids = this.accountIds();
+@@ -354,7 +369,8 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+         )
+       : null;
+     const current = () =>
+-      this.mounted && generation === this.generation && scope === this.listReadScope() &&
++      this.mounted && !this.state.searchPending &&
++      generation === this.generation && scope === this.listReadScope() &&
+       (!readingInbox || mappingRevision === this.inboxMappingRevision);
+     try {
+       let rows: (Thread | Message)[] = [];
+@@ -426,15 +442,26 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+           more: rows.length > limit,
+           loading: false,
+           listRead: { scope, inboxScan, failed: false },
++          searchClearing: false,
+           checked: previous.checked.filter((id) =>
+             rows.slice(0, limit).some((row) => row.id === id)
+           ),
+-        }));
++        }), this.restoreSearchFocus());
+     } catch {
+       if (current())
+-        this.setState({ loading: false, listRead: { scope, inboxScan: null, failed: true } });
++        this.setState({ loading: false, listRead: { scope, inboxScan: null, failed: true } },
++          this.restoreSearchFocus());
+     }
+   };
++  private restoreSearchFocus() {
++    const row = this.state.route === 'list' && this.state.query && this.focusedRow();
++    return () => {
++      if (row && this.state.route === 'list' && (row.disabled || !row.isConnected) &&
++          (document.activeElement === row || document.activeElement === document.body)) {
++        document.querySelector<HTMLInputElement>('.pr-search-input')?.focus();
++      }
++    };
++  }
+   refreshOperations = async () => {
+     const generation = ++this.operationGeneration;
+     const accountId = this.state.accountId;
+@@ -464,6 +491,8 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   move = async (next: () => void | boolean | Promise<void | boolean>) => {
+     if (this.moving) return false;
+     this.moving = true;
++    let finishSave: (saved: boolean) => void;
++    this.moveSaved = new Promise(resolve => { finishSave = resolve; });
+     let saved = false;
+     try {
+       for (const session of this.dirtySessions()) {
+@@ -489,12 +518,17 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       });
+       return false;
+     } finally {
++      if (!saved && this.state.searchPending) this.searchBlockedBySave = true;
+       this.moving = false;
++      this.moveSaved = null;
++      finishSave(saved);
+       if (this.mounted && pendingThread?.options.inbox) void this.openPendingThread();
+     }
+   };
+   navigate = (folder: string, accountId = this.state.accountId) =>
+     this.move(() => {
++      const changingAccount = accountId !== this.state.accountId;
++      const { query, searchText, searchPending, searchClearing, searchVisit } = this.state;
+       Actions.setFocus({ collection: 'thread', item: null });
+       this.setState(
+         {
+@@ -505,8 +539,11 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+           rows: [],
+           loading: true,
+           limit: 50,
+-          query: accountId !== this.state.accountId ? this.state.query : '',
+-          searchText: accountId !== this.state.accountId ? this.state.searchText : '',
++          query: changingAccount ? query : '',
++          searchText: changingAccount ? searchText : '',
++          searchPending: changingAccount && searchPending,
++          searchClearing: searchClearing || (!changingAccount && (!!query || !!searchPending)),
++          searchVisit: searchVisit + (changingAccount ? 0 : 1),
+           checked: [],
+         },
+         this.refresh
+@@ -572,7 +609,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       const selected = this.state.selected;
+       Actions.setFocus({ collection: 'thread', item: null });
+       this.setState({ route: 'list', selected: null, checked: [] }, () => {
+-        const row = Array.from(document.querySelectorAll<HTMLButtonElement>('.pr-mail-row')).find(
++        const row = Array.from(document.querySelectorAll<HTMLButtonElement>('.pr-mail-row:not(:disabled)')).find(
+           (el) => selected instanceof Message
+             ? el.dataset.draftId === selected.headerMessageId
+             : el.dataset.threadId === selected?.id
+@@ -598,9 +635,18 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       await DraftStore._finalizeAndPersistNewMessage(draft);
+       this.setState({ route: 'compose', selected: draft });
+     });
+-  copyContext = () =>
+-    this.move(async () => {
++  copyContext = () => {
++    const listScope = this.state.route === 'list' ? this.listReadScope() : null;
++    if (listScope && this.searchResultsUnavailable()) return;
++    const selection = () => JSON.stringify([...this.state.checked].sort());
++    const requestedSelection = listScope && selection();
++    return this.move(async () => {
+       const { selected, route, folder } = this.state;
++      if (listScope && (route !== 'list' || this.searchResultsUnavailable() ||
++          listScope !== this.listReadScope() || requestedSelection !== selection())) {
++        this.setState({ agentCopyCancelled: true });
++        return false;
++      }
+       let context: Record<string, unknown> = {
+         scope: 'mailbox',
+         accountIds: this.accountIds(),
+@@ -637,8 +683,9 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       } else if (route === 'thread' && selected)
+         context = { scope: 'thread', accountId: selected.accountId, threadId: selected.id };
+       await clipboard.writeText(agentHandoff(context));
+-      this.setState({ agent: true, copied: true });
++      this.setState({ agent: true, copied: true, agentCopyCancelled: false });
+     });
++  };
+   preferences = () =>
+     this.move(() => {
+       Actions.openPreferences();
+@@ -648,21 +695,49 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       Actions.switchPreferencesTab('MCP');
+       Actions.openPreferences();
+     });
+-  search = (query = this.state.searchText) =>
+-    this.move(() =>
++  onSearchPending = () => {
++    if (this.state.searchPending) return;
++    this.searchBlockedBySave = false;
++    this.generation++;
++    this.setState({ searchPending: true, checked: [] });
++  };
++  search = async (text: string, isCurrent: () => boolean, explicit: boolean) => {
++    const canSearch = () => this.mounted && isCurrent() && this.state.route === 'list';
++    // An existing move can save successfully even when its search is superseded.
++    while (this.moveSaved && canSearch()) {
++      if (!(await this.moveSaved)) return false;
++    }
++    if (!canSearch() || (this.searchBlockedBySave && !explicit)) return false;
++    return this.move(() => {
++      if (!canSearch()) return false;
++      const query = text.trim();
+       this.setState(
+         {
+-          query: query.trim(),
+-          searchText: query,
++          query,
++          searchText: text,
++          searchPending: false,
++          searchClearing: !query,
+           route: 'list',
+           selected: null,
++          rows: query || !this.state.query ? this.state.rows : [],
++          more: !!query && this.state.more,
+           checked: [],
+           limit: 50,
+           loading: true,
+         },
+         this.refresh
+-      )
+-    );
++      );
++    });
++  };
++  searchResultsUnavailable() {
++    const { query, searchPending, searchClearing, loading, listRead } = this.state;
++    return !!searchPending || !!searchClearing || (!!query && (loading || listRead?.failed ||
++      listRead?.scope !== this.listReadScope()));
++  }
++  retrySearchRead = () => {
++    document.querySelector<HTMLInputElement>('.pr-search-input')?.focus();
++    this.setState({ loading: true }, this.refresh);
++  };
+   toggleChecked = (id: string) =>
+     this.setState((s) => ({
+       checked: s.checked.includes(id) ? s.checked.filter((x) => x !== id) : [...s.checked, id],
+@@ -739,11 +814,18 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+         this.refreshMailReceipt();
+       });
+   };
+-  focusSearch = () => this.move(() => this.setState({ route: 'list', selected: null }, () =>
+-    document.querySelector<HTMLInputElement>('.pr-search-input')?.focus()));
++  focusSearch = () => {
++    const focus = () => document.querySelector<HTMLInputElement>('.pr-search-input')?.focus();
++    if (this.state.route !== 'list') {
++      return this.move(() => this.setState({ route: 'list', selected: null }, focus));
++    }
++    if (this.state.palette) this.setState({ palette: false }, focus);
++    else focus();
++  };
+   focusedRow = () => document.activeElement?.closest<HTMLButtonElement>('.pr-mail-row');
+   commands = (): MailCommand[] => {
+     const list = this.state.route === 'list';
++    const listReady = list && !this.searchResultsUnavailable();
+     const browse = (delta: number) => {
+       const rows = Array.from(document.querySelectorAll<HTMLButtonElement>('.pr-mail-row'));
+       const index = rows.indexOf(this.focusedRow());
+@@ -755,18 +837,18 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       { id: 'core:focus-search', title: '聚焦邮件搜索', run: this.focusSearch },
+       { id: 'paper-reed:compose', title: '写邮件', run: this.compose },
+       ...folders.map(([folder, title]) => ({ id: ({ inbox: 'navigation:go-to-inbox', sent: 'navigation:go-to-sent', drafts: 'navigation:go-to-drafts', pinned: 'navigation:go-to-starred' })[folder] || `paper-reed:folder-${folder}`, title: `前往${title}`, run: () => this.navigate(folder) })),
+-      { id: 'core:next-item', title: '下一封邮件', disabled: !list, run: () => browse(1) },
+-      { id: 'core:previous-item', title: '上一封邮件', disabled: !list, run: () => browse(-1) },
+-      { id: 'core:select-item', title: '选择邮件', disabled: !list, run: () => { const id = this.focusedRow()?.dataset.threadId; if (id) this.toggleChecked(id); } },
++      { id: 'core:next-item', title: '下一封邮件', disabled: !listReady, run: () => browse(1) },
++      { id: 'core:previous-item', title: '上一封邮件', disabled: !listReady, run: () => browse(-1) },
++      { id: 'core:select-item', title: '选择邮件', disabled: !listReady, run: () => { const id = this.focusedRow()?.dataset.threadId; if (id) this.toggleChecked(id); } },
+       { id: 'core:pop-sheet', title: '取消当前选择', disabled: !list, run: () => this.setState({ checked: [] }) },
+       { id: 'multiselect-list:deselect-all', title: '取消选择', disabled: !list, run: () => this.setState({ checked: [] }) },
+       ...([['archive', '归档'], ['trash', '移到废纸篓'], ['read', '标为已读'], ['unread', '标为未读']] as [MailAction, string][]).map(([action, title]) => ({
+         id: { archive: 'core:archive-item', trash: 'core:delete-item', read: 'core:mark-as-read', unread: 'core:mark-as-unread' }[action],
+-        title, disabled: !list || this.state.busy || this.state.loading || !this.selectedTargets().length || !this.selectedTargets().every(t => actionAvailable(action, t.accountId)),
++        title, disabled: !listReady || this.state.busy || this.state.loading || !this.selectedTargets().length || !this.selectedTargets().every(t => actionAvailable(action, t.accountId)),
+         run: () => this.organize(action),
+       })),
+       { id: 'paper-reed:settings', title: '打开设置', shortcutId: 'application:open-preferences', run: this.preferences },
+-      { id: 'paper-reed:agent', title: '交给 Agent', run: this.copyContext },
++      { id: 'paper-reed:agent', title: '交给 Agent', disabled: list && !listReady, run: this.copyContext },
+     ];
+   };
+   renderLocalControls(targets = this.selectedTargets()) {
+@@ -793,9 +875,9 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   setUnreadOnly = (unreadOnly: boolean) => {
+     this.setState({ unreadOnly, checked: [], loading: true }, this.refresh);
+   };
+-  renderListTools(showCount: boolean) {
++  renderListTools(showCount: boolean, searchActive: boolean, searchUnavailable: boolean) {
+     const rows = this.state.rows.filter((r) => r instanceof Thread);
+-    const selected = this.selectedTargets();
++    const selected = searchUnavailable ? [] : this.selectedTargets();
+     const actions: [MailAction, string][] = [
+       ['read', '标为已读'],
+       ['unread', '标为未读'],
+@@ -806,9 +888,6 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     ];
+     return (
+       <>
+-        <MailSearch key={`${this.state.folder}:${this.state.accountId}`}
+-          query={this.state.query} onSearch={this.search}
+-          onPending={() => { this.generation++; }} />
+         <div className="pr-list-tools">
+           {(this.state.folder !== 'drafts' || this.state.query) && (
+             <label>
+@@ -820,7 +899,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                     el.indeterminate =
+                       !!this.state.checked.length && this.state.checked.length < rows.length;
+                 }}
+-                disabled={!rows.length || this.state.busy || this.state.loading}
++                disabled={!rows.length || this.state.busy || this.state.loading || searchUnavailable}
+                 onChange={(e) =>
+                   this.setState({ checked: e.target.checked ? rows.map((r) => r.id) : [] })
+                 }
+@@ -828,10 +907,11 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+               <span>{selected.length ? `已选 ${selected.length} 个会话` : '选择当前列表'}</span>
+             </label>
+           )}
+-          {this.state.loading && this.state.rows.length ? (
++          {!searchActive && this.state.loading && this.state.rows.length > 0 && (
+             <span className="pr-search-scope" role="status">正在更新 · 暂显示上次列表</span>
+-          ) : !selected.length && this.state.query && (
+-            <span className="pr-search-scope">仅搜索本机已同步邮件</span>
++          )}
++          {!searchActive && searchUnavailable && !this.state.loading && this.state.rows.length > 0 && (
++            <span className="pr-search-scope">下方暂显示上次列表</span>
+           )}
+           {(this.state.folder !== 'drafts' || this.state.query) && (
+             <label className="pr-unread-filter">
+@@ -855,7 +935,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+             </p>
+           )}
+         </div>
+-        {this.renderLocalControls()}
++        {!searchUnavailable && this.renderLocalControls()}
+         {!!selected.length && (
+           <div className="pr-selection-actions" role="group" aria-label="所选邮件操作">
+             {actions
+@@ -901,6 +981,42 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       </>
+     );
+   }
++  renderSearchSummary(unavailable: boolean, failed: boolean) {
++    const { accountId, rows, more, searchPending } = this.state;
++    const account = accountId ? AccountStore.accountForId(accountId)?.emailAddress : '全部邮箱';
++    return (
++      <div className="pr-search-summary">
++        <span className="pr-search-context">
++          <strong>{account}</strong>
++          <span>仅搜索本机已同步邮件</span>
++        </span>
++        <span className="pr-search-progress" role="status">
++          {searchPending ? '等待更新搜索…' :
++            failed ? null : unavailable ? '正在搜索本机邮件…' :
++            <span className="pr-search-count">{rows.length}{more ? '+' : ''} 个会话</span>}
++        </span>
++        {unavailable && rows.length > 0 && (
++          <span className="pr-search-retained">下方暂显示上次列表</span>
++        )}
++      </div>
++    );
++  }
++  renderSearchEmpty() {
++    return (
++      <div className="pr-search-empty">
++        <div role="status">
++          <p>{this.state.unreadOnly ? '没找到匹配的未读邮件' : '没找到匹配的邮件'}</p>
++          <small>可以更换关键词或邮箱范围。</small>
++        </div>
++        {this.state.unreadOnly && (
++          <button onKeyDown={keepNativeButtonActivation} onClick={() => {
++            document.querySelector<HTMLInputElement>('.pr-unread-filter input')?.focus();
++            this.setUnreadOnly(false);
++          }}>显示全部邮件</button>
++        )}
++      </div>
++    );
++  }
+   renderMailReceipt() {
+     const items = this.state.receipt;
+     if (!items.length) return null;
+@@ -957,7 +1073,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       </div>
+     );
+   }
+-  renderRow = (row: Thread | Message) => {
++  renderRow = (row: Thread | Message, searchUnavailable: boolean) => {
+     const draft = row instanceof Message;
+     const recovery =
+       draft &&
+@@ -985,6 +1101,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+         key={row.id}
+         onKeyDown={keepNativeButtonActivation}
+         onClick={() => this.open(row)}
++        disabled={searchUnavailable}
+         data-draft-id={draft ? row.headerMessageId : undefined}
+         data-thread-id={!draft ? row.id : undefined}
+         aria-label={`${recovery ? '恢复副本，' : copyCount ? '原稿，' : ''}${row.unread ? '未读，' : ''}${name}，${row.subject || '无主题'}`}
+@@ -1064,7 +1181,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+           type="checkbox"
+           aria-label={`选择 ${row.subject || '无主题'}`}
+           checked={this.state.checked.includes(row.id)}
+-          disabled={this.state.busy || this.state.loading}
++          disabled={this.state.busy || this.state.loading || searchUnavailable}
+           onChange={() => this.toggleChecked(row.id)}
+         />
+         {content}
+@@ -1183,14 +1300,17 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     const failed = accounts.filter((a) => a.hasSyncStateError() || !OnlineStatusStore.isAccountOnline(a.id));
+     const listRead = this.state.listRead?.scope === this.listReadScope() ? this.state.listRead : null;
+     const readFailed = listRead?.failed;
+-    const emptyInbox = route === 'list' && folder === 'inbox' && !this.state.query && !rows.length;
++    const searchActive = route === 'list' && (!!this.state.query || !!this.state.searchPending);
++    const readInSearch = searchActive || (route === 'list' && this.state.searchClearing);
++    const searchUnavailable = route === 'list' && this.searchResultsUnavailable();
++    const emptyInbox = route === 'list' && folder === 'inbox' && !searchActive && !rows.length;
+     const inboxState = emptyInbox && !readFailed
+       ? this.emptyInboxState(
+           accounts.map((account) => this.inboxScanState(account)), failed, listRead?.inboxScan ?? null
+         )
+       : null;
+     const title =
+-      route === 'compose' ? '写一封信' : this.state.query ? '搜索结果' : this.locationTitle();
++      route === 'compose' ? '写一封信' : searchActive ? '搜索结果' : this.locationTitle();
+     const editingDraft = route === 'compose' && selected instanceof Message &&
+       !DraftStore.isSendingDraft(selected.headerMessageId);
+     const back = (
+@@ -1314,10 +1434,10 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+             {this.state.notice && (
+               <div className="pr-notice" role="alert">
+                 {this.state.notice}
+-                <button onClick={this.refresh}>重新读取</button>
++                {!this.state.searchPending && <button onClick={this.refresh}>重新读取</button>}
+               </div>
+             )}
+-            {readFailed && (
++            {readFailed && !readInSearch && (
+               <div className="pr-notice" role="alert">
+                 {mailReadError}
+                 <button onKeyDown={keepNativeButtonActivation} onClick={this.refresh}>重新读取</button>
+@@ -1332,7 +1452,8 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                     : '在连接设置中安装 CLI 并检查连接，再把当前任务交给 Agent。'}
+                 </p>
+                 <div>
+-                  <button onClick={cliStatus().ready ? this.copyContext : this.agentPreferences}>
++                  <button disabled={searchUnavailable && cliStatus().ready}
++                    onClick={cliStatus().ready ? this.copyContext : this.agentPreferences}>
+                     {cliStatus().ready
+                       ? this.state.copied
+                         ? '已复制任务'
+@@ -1346,20 +1467,34 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+             )}
+             {route === 'list' ? (
+               <>
+-                {this.renderListTools(!emptyInbox || inboxState === 'empty' || inboxState === 'unread')}
+-                <div className="pr-mail-list" aria-label={title} aria-busy={loading}>
+-                  {rows.map(this.renderRow)}
++                <MailSearch key={this.state.searchVisit} query={this.state.searchText}
++                  onSearch={this.search} onPending={this.onSearchPending} />
++                {searchActive && this.renderSearchSummary(searchUnavailable, readFailed && !loading)}
++                {this.state.agentCopyCancelled && (
++                  <p className="pr-notice" role="status">交接已取消。核对当前结果后重新复制给 Agent。</p>
++                )}
++                {readInSearch && readFailed && !loading && !this.state.searchPending && (
++                  <div className="pr-notice" role="alert">
++                    {mailReadError}
++                    <button onKeyDown={keepNativeButtonActivation} onClick={this.retrySearchRead}>重新读取</button>
++                  </div>
++                )}
++                {this.renderListTools(
++                  !searchActive && !searchUnavailable &&
++                    (!emptyInbox || inboxState === 'empty' || inboxState === 'unread'),
++                  searchActive, searchUnavailable
++                )}
++                <div className="pr-mail-list" aria-label={title}
++                  aria-busy={loading || !!this.state.searchPending}>
++                  {rows.map(row => this.renderRow(row, searchUnavailable))}
+                   {inboxState && this.renderEmptyInbox(inboxState, accounts)}
+-                  {!rows.length && !emptyInbox && !readFailed && (
++                  {searchActive && !searchUnavailable && !rows.length && this.renderSearchEmpty()}
++                  {!searchActive && !rows.length && !emptyInbox && !readFailed && (
+                     <p className="pr-empty" role="status">
+-                      {loading
+-                        ? '正在读取邮件…'
+-                        : this.state.query
+-                          ? '没找到匹配的邮件。请试试其他关键词或邮箱范围。'
+-                          : '这里还没有邮件'}
++                      {loading ? '正在读取邮件…' : '这里还没有邮件'}
+                     </p>
+                   )}
+-                  {this.state.more && (
++                  {this.state.more && !searchUnavailable && (
+                     <button
+                       className="pr-load-more"
+                       disabled={this.state.limit >= 100}
+diff --git a/app/internal_packages/paper-reed/styles/paper-reed.less b/app/internal_packages/paper-reed/styles/paper-reed.less
+index 4102a5f98853387e929f37717b68aa850b30cc99..b32378f7ebdb04fdc2fc99510e05ffaead2a0b8b 100644
+--- a/app/internal_packages/paper-reed/styles/paper-reed.less
++++ b/app/internal_packages/paper-reed/styles/paper-reed.less
+@@ -850,8 +850,8 @@
+     display: flex;
+     align-items: center;
+     gap: 8px;
+-    max-width: 560px;
+-    margin: 16px 0 12px;
++    min-width: 0;
++    margin: 16px 0 10px;
+     padding: 0 10px 0 12px;
+     border: 1px solid var(--pr-line);
+     border-radius: 6px;
+@@ -862,11 +862,39 @@
+     box-shadow: 0 0 0 1px var(--pr-reed);
+     background: var(--pr-paper);
+   }
+-  .pr-search > [role=status] { color: var(--pr-muted); font-size: 11px; white-space: nowrap; }
+-  .pr-search-input { flex:1; min-width:0; border:0; box-shadow:none; padding:6px 0; font:14px/22px -apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif; color:var(--pr-ink); background:transparent; }
++  .pr-search-input { flex:1; min-width:0; border:0; box-shadow:none; padding:8px 0; font:14px/22px -apple-system,BlinkMacSystemFont,'PingFang SC',sans-serif; color:var(--pr-ink); background:transparent; }
+   .pr-search-input:focus { outline:none; box-shadow:none; }
+   .pr-search button:hover { background: rgba(63, 75, 60, .08); color: var(--pr-ink); }
+-  .pr-search button { color:var(--pr-muted); white-space:nowrap; } .pr-search kbd { margin-left:8px; font:inherit; opacity:.65; }
++  .pr-search button { color:var(--pr-muted); white-space:nowrap; }
++  .pr-search-blocked { margin: 0 0 10px; color: #9a433e; font-size: 12px; }
++  .pr-search-summary {
++    display: flex;
++    flex-wrap: wrap;
++    align-items: baseline;
++    gap: 4px 16px;
++    min-height: 23px;
++    margin-bottom: 10px;
++    font-size: 12px;
++    color: var(--pr-muted);
++  }
++  .pr-search-context { display: flex; flex: 1 1 auto; flex-wrap: wrap; gap: 3px 10px; min-width: 0; }
++  .pr-search-context strong { color: var(--pr-ink); font-weight: 500; overflow-wrap: anywhere; }
++  .pr-search-count { color: var(--pr-ink); font-variant-numeric: tabular-nums; }
++  .pr-search-empty {
++    display: flex;
++    flex-wrap: wrap;
++    gap: 8px 20px;
++    align-items: center;
++    padding: 20px 0;
++  }
++  .pr-search-empty p { margin: 0 0 3px; font-size: 14px; font-weight: 500; }
++  .pr-search-empty small { color: var(--pr-muted); font-size: 12px; }
++  .pr-search-empty button { color: var(--pr-reed); }
++  .pr-mail-row:disabled {
++    cursor: default;
++    opacity: .62;
++    background: transparent;
++  }
+   .pr-list-tools { margin-bottom:8px; display:flex; flex-wrap:wrap; align-items:center; gap:12px 24px; min-height:28px; font-size:11px; color:var(--pr-muted); }
+   .pr-list-tools label { display:flex; align-items:center; gap:8px; cursor:pointer; }
+   .pr-unread-filter { margin-left:auto; } .pr-search-scope { flex:1; }
