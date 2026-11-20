@@ -666,6 +666,8 @@ async function checkGooglePage(phase) {
  if(icloudPhase){await require('./check-icloud-onboarding.cjs')({phase:icloudPhase,app,main,run,until,shot,out,fixture,work});await stop();return;}
  const imapPhase=process.env.PAPER_REED_IMAP_PAGE_CHECK;
  if(imapPhase){await require('./check-imap-onboarding.cjs')({phase:imapPhase,main,run,until,shot,out});await stop();return;}
+ const serverPhase=process.env.PAPER_REED_SERVER_PAGE_CHECK;
+ if(serverPhase){await require('./check-server-onboarding.cjs')({phase:serverPhase,main,run,until,shot,out,fixture});await stop();return;}
  const activePage=main.locator('.page-container:not([inert])');
  await activePage.locator('[data-provider=gmail]').click();
  await activePage.getByRole('button',{name:'使用 Google 登录',exact:true}).waitFor();
@@ -720,7 +722,7 @@ async function checkGooglePage(phase) {
  await activePage.locator('[id="settings.imap_host"]').waitFor();
  for(const protocol of ['imap','smtp']){
    await activePage.locator(`[id="settings.${protocol}_host"]`).fill(fixture.settings[protocol+'_host']);
-   await activePage.locator(`[id="settings.${protocol}_port"]`).selectOption({label:'Custom'});
+   await activePage.locator(`[id="settings.${protocol}_port"]`).selectOption('0');
    await activePage.locator(`[id="settings.${protocol}_port_custom"]`).fill(String(fixture.settings[protocol+'_port']));
    await activePage.locator(`[id="settings.${protocol}_security"]`).selectOption('none');
    await activePage.locator(`[id="settings.${protocol}_username"]`).fill(fixture.settings[protocol+'_username']);
@@ -740,8 +742,7 @@ async function checkGooglePage(phase) {
  })()`);
  try{
   await activePage.getByRole('button',{name:'连接邮箱',exact:true}).click();
-  await until(()=>run('!!document.querySelector(".message.error") && document.body.innerText.includes("Authentication Error")'),'wrong password shown');
-  assert((await activePage.locator('.message.error').first().innerText()).includes('Authentication Error'));
+  await activePage.getByRole('alert').filter({hasText:'收信服务器拒绝登录'}).waitFor();
   assert.deepEqual(await run('window.prFixtureDiagnostic'),{code:'ErrorAuthentication',network:false});
  }finally{
   await run('window.prRestoreMailsyncTest();true');

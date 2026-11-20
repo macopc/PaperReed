@@ -110,6 +110,14 @@ module.exports = async ({ phase, app, main, run, until, shot, out, fixture, work
   assert.equal(await smtpPort.inputValue(), '587');
   await imapHost.fill('imap.example.test');
   await smtpPort.selectOption('0');
+  await customSMTPPort.fill(' 465 ');
+  await back.click();
+  await settled.locator('.pr-icloud-setup').waitFor();
+  await servers.click();
+  assert.equal(await smtpPort.inputValue(), '0', 'the iCloud title bar returns with the custom port draft');
+  assert.equal(await customSMTPPort.inputValue(), ' 465 ');
+  assert.equal(await customSMTPPort.getAttribute('aria-invalid'), 'true');
+  assert.equal(await imapHost.inputValue(), 'imap.example.test');
   await customSMTPPort.fill('2525');
   await returnFromServers();
   assert.equal(await email.inputValue(), 'maya@example.test');
@@ -504,7 +512,7 @@ module.exports = async ({ phase, app, main, run, until, shot, out, fixture, work
   console.log('PASS exact spelling selects the corresponding iCloud account with or without the remembered variant');
 
   const result = { narrowFormFits: true, keyboardOrder: true, appleGuide: true, invalidFields: true,
-    serverSettingsRetained: true, serverDraftScopedToMailbox: true,
+    serverSettingsRetained: true, titleBarRetainsServerDraft: true, serverDraftScopedToMailbox: true,
     secureDefaults: true, duplicateValidationBlocked: true,
     stableAction: true, localizedDiagnostic: true, passwordFocusRestored: true, staleResultDiscarded: true,
     localValidationAndEncryptedSave: true, addressCaseReconnect: true, tlsHandshakeGuidance: true,
