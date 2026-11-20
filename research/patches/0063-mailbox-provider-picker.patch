@@ -1,0 +1,611 @@
+diff --git a/app/internal_packages/onboarding/lib/decorators/create-page-for-form.tsx b/app/internal_packages/onboarding/lib/decorators/create-page-for-form.tsx
+index 25f08e1..c87b691 100644
+--- a/app/internal_packages/onboarding/lib/decorators/create-page-for-form.tsx
++++ b/app/internal_packages/onboarding/lib/decorators/create-page-for-form.tsx
+@@ -14,7 +14,7 @@ let didWarnAboutGmailIMAP = false;
+ 
+ const CreatePageForForm = (FormComponent: React.ComponentType<any> & Record<string, any>) => {
+   return class Composed extends React.Component<
+-    { account: Account; confirmServers?: boolean },
++    { account: Account; confirmServers?: boolean; isCurrentVisit?: () => boolean },
+     {
+       account: Account;
+       submitting?: boolean;
+@@ -117,6 +117,7 @@ const CreatePageForForm = (FormComponent: React.ComponentType<any> & Record<stri
+       if (this._formEl.submit) {
+         this.setState({ submitting: true });
+         Promise.resolve(this._formEl.submit()).catch(err => {
++          if (this.props.isCurrentVisit?.() === false) return;
+           this.setState({ submitting: false, errorMessage: err.message });
+         });
+       } else {
+@@ -170,10 +171,14 @@ const CreatePageForForm = (FormComponent: React.ComponentType<any> & Record<stri
+ 
+       finalizeAndValidateAccount(account)
+         .then((validated) => {
+-          OnboardingActions.moveToPage('account-onboarding-success');
++          if (this.props.isCurrentVisit?.() === false) return;
++          if (!AppEnv.config.get('core.paperReed.enabled')) {
++            OnboardingActions.moveToPage('account-onboarding-success');
++          }
+           OnboardingActions.finishAndAddAccount(validated);
+         })
+         .catch((err) => {
++          if (this.props.isCurrentVisit?.() === false) return;
+           const isBasicForm = FormComponent.displayName === 'AccountBasicSettingsForm';
+           // No credentials have gone to a server whose certificate was rejected. The user
+           // reviews the certificates, and accepting them retries with their fingerprints.
+@@ -375,6 +380,7 @@ const CreatePageForForm = (FormComponent: React.ComponentType<any> & Record<stri
+             account={account}
+             errorFieldNames={errorFieldNames}
+             submitting={submitting}
++            isCurrentVisit={this.props.isCurrentVisit}
+             onFieldChange={this.onFieldChange}
+             onFieldKeyPress={this.onFieldKeyPress}
+             onConnect={this.onConnect}
+diff --git a/app/internal_packages/onboarding/lib/onboarding-root.tsx b/app/internal_packages/onboarding/lib/onboarding-root.tsx
+index 83bdf01..8c9970a 100644
+--- a/app/internal_packages/onboarding/lib/onboarding-root.tsx
++++ b/app/internal_packages/onboarding/lib/onboarding-root.tsx
+@@ -1,7 +1,7 @@
+ import React from 'react';
+ import { CSSTransition, TransitionGroup } from 'react-transition-group';
+ import { Account } from 'mailspring-exports';
+-import OnboardingStore from './onboarding-store';
++import OnboardingStore, { AccountSaveState, isGmail } from './onboarding-store';
+ import PageTopBar from './page-top-bar';
+ 
+ import WelcomePage from './page-welcome';
+@@ -40,6 +40,9 @@ const PageComponents = {
+ interface OnboardingRootState {
+   pageDepth: number;
+   page: string;
++  pageVisit: number;
++  accountSaveState: AccountSaveState;
++  returningToPicker: boolean;
+   account: Account;
+   confirmServers: boolean;
+   rejectedCertificates: RejectedCertificate[];
+@@ -56,7 +59,7 @@ export default class OnboardingRoot extends React.Component<
+ 
+   constructor(props) {
+     super(props);
+-    this.state = this._getStateFromStore();
++    this.state = { ...this._getStateFromStore(), returningToPicker: false };
+   }
+ 
+   componentDidMount() {
+@@ -66,15 +69,16 @@ export default class OnboardingRoot extends React.Component<
+   }
+ 
+   componentWillUnmount() {
+-    if (this.unsubscribe) {
+-      this.unsubscribe();
+-    }
++    this.unsubscribe?.();
++    this.unsubscribe = undefined;
+   }
+ 
+   _getStateFromStore = () => {
+     return {
+       page: OnboardingStore.page(),
+       pageDepth: OnboardingStore.pageDepth(),
++      pageVisit: OnboardingStore.pageVisit(),
++      accountSaveState: OnboardingStore.accountSaveState(),
+       account: OnboardingStore.account(),
+       confirmServers: OnboardingStore.confirmServers(),
+       rejectedCertificates: OnboardingStore.rejectedCertificates(),
+@@ -82,30 +86,74 @@ export default class OnboardingRoot extends React.Component<
+   };
+ 
+   _onStateChanged = () => {
+-    this.setState(this._getStateFromStore());
++    const next = this._getStateFromStore();
++    this.setState((previous) => ({
++      ...next,
++      returningToPicker: next.page === 'account-choose' &&
++        (previous.page !== next.page || previous.returningToPicker),
++    }));
++  };
++
++  _restoreProviderFocus = () => {
++    if (this.state.page !== 'account-choose') return;
++    const chooser = document.querySelector('.page-container:not([inert]) .pr-provider-choose');
++    if (chooser && !chooser.contains(document.activeElement)) {
++      const buttons = Array.from(chooser.querySelectorAll<HTMLButtonElement>('button[data-provider]'));
++      const { account } = this.state;
++      const provider = isGmail(account) ? 'gmail' : account.provider;
++      (buttons.find((button) => button.dataset.provider === provider) || buttons[0])?.focus();
++    }
++    this.setState({ returningToPicker: false });
++  };
++
++  _disableExitingPage = (node?: unknown) => {
++    if (node instanceof HTMLElement) node.inert = true;
+   };
+ 
+   render() {
+-    const Component = PageComponents[this.state.page];
++    const { pageVisit, accountSaveState } = this.state;
++    const Component = accountSaveState ? AccountOnboardingSuccess : PageComponents[this.state.page];
++    const paperReed = AppEnv.config.get('core.paperReed.enabled');
++    // Returning before a fade ends must open a fresh form with the current account.
++    const transitionKey = accountSaveState ? 'saving-account' : paperReed ? pageVisit : this.state.page;
++    const isCurrentVisit = paperReed
++      ? () => !!this.unsubscribe && OnboardingStore.pageVisit() === pageVisit
++      : undefined;
+     if (!Component) {
+       throw new Error(`Cannot find component for page: ${this.state.page}`);
+     }
+ 
+     return (
+       <div
+-        className={`page-frame ${AppEnv.config.get('core.paperReed.enabled') ? 'pr-onboarding' : ''}`}
++        className={`page-frame ${paperReed ? 'pr-onboarding' : ''}`}
++        onKeyDown={paperReed ? (event) => {
++          if (
++            (event.key === 'Enter' || event.key === ' ') &&
++            (event.target as HTMLElement).closest('button')
++          ) event.stopPropagation();
++        } : undefined}
+       >
+         <PageTopBar
+           pageDepth={this.state.pageDepth}
+           allowMoveBack={!['initial-preferences', 'account-choose'].includes(this.state.page)}
++          disableClose={paperReed && this.state.returningToPicker}
++          disableNavigation={!!accountSaveState}
+         />
+         <TransitionGroup component={null}>
+-          <CSSTransition key={this.state.page} classNames="alpha-fade" timeout={150}>
++          <CSSTransition
++            key={transitionKey}
++            classNames="alpha-fade"
++            timeout={150}
++            onExit={paperReed ? this._disableExitingPage : undefined}
++            onEntered={paperReed && this.state.page === 'account-choose' ? this._restoreProviderFocus : undefined}
++          >
+             <div className="page-container">
+               <Component
+                 account={this.state.account}
+                 confirmServers={this.state.confirmServers}
+                 rejectedCertificates={this.state.rejectedCertificates}
++                isCurrentVisit={isCurrentVisit}
++                saving={accountSaveState === 'saving'}
+               />
+             </div>
+           </CSSTransition>
+diff --git a/app/internal_packages/onboarding/lib/onboarding-store.ts b/app/internal_packages/onboarding/lib/onboarding-store.ts
+index f49cdd2..8504be1 100644
+--- a/app/internal_packages/onboarding/lib/onboarding-store.ts
++++ b/app/internal_packages/onboarding/lib/onboarding-store.ts
+@@ -12,13 +12,17 @@ import MailspringStore from 'mailspring-store';
+ import * as OnboardingActions from './onboarding-actions';
+ import { RejectedCertificate } from './certificate-review';
+ 
+-function isGmail(account: Account) {
++export function isGmail(account: Account) {
+   return account.provider === 'gmail' || account.settings.imap_host === 'imap.gmail.com' || account.settings.gmail_api_send;
+ }
+ 
++export type AccountSaveState = 'saving' | 'opening' | null;
++
+ class OnboardingStore extends MailspringStore {
+   _account: Account;
+   _pageStack: string[];
++  _pageVisit = 0;
++  _accountSaveState: AccountSaveState = null;
+   // Cleared by any later setAccount, such as submitting the form or going back.
+   _confirmServers = false;
+   _rejectedCertificates: RejectedCertificate[] = [];
+@@ -104,6 +108,7 @@ class OnboardingStore extends MailspringStore {
+   };
+ 
+   _onChooseAccountProvider = (provider: string) => {
++    if (this._accountSaveState) return;
+     if (AppEnv.config.get('core.paperReed.enabled')) {
+       this._pageStack = ['account-choose'];
+       this._onSetAccount(new Account({
+@@ -142,6 +147,7 @@ class OnboardingStore extends MailspringStore {
+       rejectedCertificates = [],
+     }: { confirmServers?: boolean; rejectedCertificates?: RejectedCertificate[] } = {}
+   ) => {
++    if (this._accountSaveState) return;
+     if (!(acct instanceof Account)) {
+       throw new Error('OnboardingActions.setAccount expects an Account instance.');
+     }
+@@ -152,16 +158,19 @@ class OnboardingStore extends MailspringStore {
+   };
+ 
+   _onMoveToPreviousPage = () => {
+-    if (this._pageStack.length <= 1) return;
++    if (this._accountSaveState || this._pageStack.length <= 1) return;
+     this._pageStack.pop();
++    this._pageVisit++;
+     this.trigger();
+   };
+ 
+   _onMoveToPage = (page: string) => {
++    if (this._accountSaveState) return;
+     if (AppEnv.config.get('core.paperReed.enabled') && page === 'account-settings-imap' && isGmail(this._account)) {
+       page = 'paper-reed-google';
+     }
+     this._pageStack.push(page);
++    this._pageVisit++;
+     this.trigger();
+   };
+ 
+@@ -189,6 +198,15 @@ class OnboardingStore extends MailspringStore {
+   };
+ 
+   _onFinishAndAddAccount = async (account: Account) => {
++    if (this._accountSaveState) return;
++    const paperReed = AppEnv.config.get('core.paperReed.enabled');
++    if (paperReed) {
++      this._accountSaveState = 'saving';
++      // Invalidate the submitting form before awaiting the credential and account writes.
++      this._pageVisit++;
++      this.trigger();
++    }
++
+     const isFirstAccount = AccountStore.accounts().length === 0;
+     // Matched the way addAccount matches the account it updates.
+     const isReconnect = AccountStore.accounts().some(
+@@ -203,6 +221,15 @@ class OnboardingStore extends MailspringStore {
+       }
+     } catch (e) {
+       AppEnv.reportError(e);
++      if (paperReed) {
++        this._accountSaveState = null;
++        this.trigger();
++        AppEnv.showErrorDialog({
++          title: '无法保存邮箱账号',
++          message: '邮箱账号未能保存。请重试。',
++        });
++        return;
++      }
+       AppEnv.showErrorDialog({
+         title: localized('Unable to Add Account'),
+         message: localized(
+@@ -214,7 +241,9 @@ class OnboardingStore extends MailspringStore {
+       return;
+     }
+ 
+-    if (AppEnv.config.get('core.paperReed.enabled')) {
++    if (paperReed) {
++      this._accountSaveState = 'opening';
++      this.trigger();
+       this._onOnboardingComplete();
+       return;
+     }
+@@ -239,6 +268,14 @@ class OnboardingStore extends MailspringStore {
+     return this._pageStack.length;
+   }
+ 
++  pageVisit() {
++    return this._pageVisit;
++  }
++
++  accountSaveState() {
++    return this._accountSaveState;
++  }
++
+   account() {
+     return this._account;
+   }
+diff --git a/app/internal_packages/onboarding/lib/page-account-certificate.tsx b/app/internal_packages/onboarding/lib/page-account-certificate.tsx
+index fd0bc5c..b12ac94 100644
+--- a/app/internal_packages/onboarding/lib/page-account-certificate.tsx
++++ b/app/internal_packages/onboarding/lib/page-account-certificate.tsx
+@@ -16,6 +16,7 @@ import {
+ interface AccountCertificatePageProps {
+   account: Account;
+   rejectedCertificates: RejectedCertificate[];
++  isCurrentVisit?: () => boolean;
+ }
+ 
+ interface AccountCertificatePageState {
+@@ -65,9 +66,13 @@ export default class AccountCertificatePage extends React.Component<
+ 
+     try {
+       const validated = await finalizeAndValidateAccount(accepted);
+-      OnboardingActions.moveToPage('account-onboarding-success');
++      if (this.props.isCurrentVisit?.() === false) return;
++      if (!AppEnv.config.get('core.paperReed.enabled')) {
++        OnboardingActions.moveToPage('account-onboarding-success');
++      }
+       OnboardingActions.finishAndAddAccount(validated);
+     } catch (err) {
++      if (this.props.isCurrentVisit?.() === false) return;
+       if (err.certificates?.length) {
+         // A server presented a certificate other than the one just reviewed.
+         this.setState({ submitting: false });
+diff --git a/app/internal_packages/onboarding/lib/page-account-choose.tsx b/app/internal_packages/onboarding/lib/page-account-choose.tsx
+index 500378b..649b641 100644
+--- a/app/internal_packages/onboarding/lib/page-account-choose.tsx
++++ b/app/internal_packages/onboarding/lib/page-account-choose.tsx
+@@ -4,22 +4,16 @@ import { RetinaImg } from 'mailspring-component-kit';
+ import * as OnboardingActions from './onboarding-actions';
+ import AccountProviders from './account-providers';
+ 
++const paperReedProviders = [
++  { provider: 'gmail', name: 'Gmail', description: '在浏览器中登录 Google，支持 Google Workspace。' },
++  { provider: 'icloud', name: 'iCloud 邮件', description: '使用 Apple 账户的应用专用密码。' },
++  { provider: 'imap', name: '其他 IMAP 邮箱', description: '输入邮箱和密码，必要时填写 IMAP 与 SMTP 设置。' },
++];
++
+ export default class AccountChoosePage extends React.Component<{ account?: object }> {
+   static displayName = 'AccountChoosePage';
+ 
+   _renderProviders() {
+-    if (AppEnv.config.get('core.paperReed.enabled')) {
+-      return [
+-        ['gmail', 'Gmail'],
+-        ['icloud', 'iCloud Mail'],
+-        ['imap', '其他 IMAP 邮箱'],
+-      ].map(([provider, name]) => (
+-        <button type="button" key={provider} className={`provider ${provider}`}
+-          data-provider={provider} onClick={() => OnboardingActions.chooseAccountProvider(provider)}>
+-          <span className="provider-name">{name}</span>
+-        </button>
+-      ));
+-    }
+     return AccountProviders.map(({ icon, displayName, provider }) => (
+       <div
+         key={provider}
+@@ -35,10 +29,41 @@ export default class AccountChoosePage extends React.Component<{ account?: objec
+   }
+ 
+   render() {
++    if (AppEnv.config.get('core.paperReed.enabled')) {
++      return (
++        <div className="page account-choose pr-provider-choose">
++          <section aria-labelledby="pr-provider-heading">
++            <div className="pr-onboarding-brand">Paper Reed</div>
++            <h2 id="pr-provider-heading">连接你的邮箱</h2>
++            <div className="provider-list">
++              {paperReedProviders.map(({ provider, name, description }) => (
++                <button
++                  type="button"
++                  key={provider}
++                  className="provider"
++                  data-provider={provider}
++                  aria-labelledby={`pr-provider-name-${provider}`}
++                  aria-describedby={`pr-provider-description-${provider}`}
++                  onClick={() => OnboardingActions.chooseAccountProvider(provider)}
++                >
++                  <span className="pr-provider-label">
++                    <span className="provider-name" id={`pr-provider-name-${provider}`}>{name}</span>
++                    <span className="pr-provider-description" id={`pr-provider-description-${provider}`}>
++                      {description}
++                    </span>
++                  </span>
++                  <span className="pr-provider-arrow" aria-hidden="true">›</span>
++                </button>
++              ))}
++            </div>
++            <p className="pr-provider-note">暂无法连接要求通过 Microsoft 网页授权的邮箱，例如部分 Outlook 或 Microsoft 365 账号。</p>
++          </section>
++        </div>
++      );
++    }
+     return (
+       <div className="page account-choose">
+-        <h2>{AppEnv.config.get('core.paperReed.enabled') ? '连接你的邮箱' : localized('Connect an email account')}</h2>
+-        {AppEnv.config.get('core.paperReed.enabled') && <p>其他邮箱可使用 IMAP / SMTP 服务器设置连接。</p>}
++        <h2>{localized('Connect an email account')}</h2>
+         <div className="provider-list">{this._renderProviders()}</div>
+       </div>
+     );
+diff --git a/app/internal_packages/onboarding/lib/page-account-onboarding-success.tsx b/app/internal_packages/onboarding/lib/page-account-onboarding-success.tsx
+index 0af25a6..b62204d 100644
+--- a/app/internal_packages/onboarding/lib/page-account-onboarding-success.tsx
++++ b/app/internal_packages/onboarding/lib/page-account-onboarding-success.tsx
+@@ -3,7 +3,7 @@ import { localized, Account } from 'mailspring-exports';
+ import { RetinaImg } from 'mailspring-component-kit';
+ import AccountProviders from './account-providers';
+ 
+-class AccountOnboardingSuccess extends Component<{ account: Account }> {
++class AccountOnboardingSuccess extends Component<{ account: Account; saving?: boolean }> {
+   // eslint-disable-line
+   static displayName = 'AccountOnboardingSuccess';
+ 
+@@ -12,8 +12,10 @@ class AccountOnboardingSuccess extends Component<{ account: Account }> {
+       return (
+         <div className="page account-setup">
+           <div className="pr-onboarding-brand">Paper Reed</div>
+-          <h2>邮箱已连接</h2>
+-          <p>正在打开收件箱…</p>
++          <div role="status">
++            <h2>{this.props.saving ? '正在保存邮箱账号…' : '邮箱已连接'}</h2>
++            {!this.props.saving && <p>正在打开收件箱…</p>}
++          </div>
+         </div>
+       );
+     const { account } = this.props;
+diff --git a/app/internal_packages/onboarding/lib/page-account-settings.tsx b/app/internal_packages/onboarding/lib/page-account-settings.tsx
+index baeda8f..165baea 100644
+--- a/app/internal_packages/onboarding/lib/page-account-settings.tsx
++++ b/app/internal_packages/onboarding/lib/page-account-settings.tsx
+@@ -10,6 +10,7 @@ interface AccountBasicSettingsFormProps {
+   account: Account;
+   errorFieldNames: string[];
+   submitting: boolean;
++  isCurrentVisit?: () => boolean;
+   onConnect: (account: Account) => void;
+   onFieldChange: (event: { target: { id: string; value: any } }) => void;
+   onFieldKeyPress: () => void;
+@@ -77,6 +78,7 @@ export class AccountBasicSettingsForm extends React.Component<AccountBasicSettin
+       const expanded = manual
+         ? { account: this.props.account.clone(), confirmServers: false }
+         : await expandAccountForSetup(this.props.account);
++      if (this.props.isCurrentVisit?.() === false) return;
+       const account = expanded.account;
+       account.settings = {
+         imap_username: account.emailAddress,
+diff --git a/app/internal_packages/onboarding/lib/page-top-bar.tsx b/app/internal_packages/onboarding/lib/page-top-bar.tsx
+index a224d9d..e815bba 100644
+--- a/app/internal_packages/onboarding/lib/page-top-bar.tsx
++++ b/app/internal_packages/onboarding/lib/page-top-bar.tsx
+@@ -1,10 +1,22 @@
+-import React from 'react';
++import React, { useEffect, useState } from 'react';
+ import { AccountStore } from 'mailspring-exports';
+ import { RetinaImg } from 'mailspring-component-kit';
+ import * as OnboardingActions from './onboarding-actions';
+ 
+-const PageTopBar = (props: { pageDepth: number; allowMoveBack?: boolean }) => {
++const PageTopBar = (props: {
++  pageDepth: number;
++  allowMoveBack?: boolean;
++  disableClose?: boolean;
++  disableNavigation?: boolean;
++}) => {
+   const { pageDepth } = props;
++  const paperReed = AppEnv.config.get('core.paperReed.enabled');
++  const [hasAccounts, setHasAccounts] = useState(() => AccountStore.accounts().length > 0);
++  useEffect(() => {
++    if (!paperReed) return;
++    const unsubscribe = AccountStore.listen(() => setHasAccounts(AccountStore.accounts().length > 0));
++    return () => { unsubscribe(); };
++  }, [paperReed]);
+ 
+   const closeClass = pageDepth > 1 ? 'back' : 'close';
+   const closeIcon = pageDepth > 1 ? 'onboarding-back.png' : 'onboarding-close.png';
+@@ -23,13 +35,25 @@ const PageTopBar = (props: { pageDepth: number; allowMoveBack?: boolean }) => {
+     }
+   };
+ 
+-  let backButton = (
+-    <div className={closeClass} onClick={closeAction} style={{ WebkitAppRegion: 'no-drag' } as any}>
+-      <RetinaImg name={closeIcon} mode={RetinaImg.Mode.ContentPreserve} />
+-    </div>
+-  );
+-  if (props.pageDepth > 1 && !props.allowMoveBack) {
+-    backButton = null;
++  let backButton = null;
++  if (pageDepth <= 1 || props.allowMoveBack) {
++    const icon = <RetinaImg name={closeIcon} mode={RetinaImg.Mode.ContentPreserve} />;
++    const buttonStyle = { WebkitAppRegion: 'no-drag' } as any;
++    backButton = paperReed ? (
++      <button
++        key={closeClass}
++        type="button"
++        className={closeClass + ' pr-onboarding-window-action'}
++        aria-label={pageDepth > 1 ? '返回上一步' : hasAccounts ? '关闭邮箱设置' : '退出 Paper Reed'}
++        disabled={props.disableNavigation || (pageDepth <= 1 && props.disableClose)}
++        onClick={closeAction}
++        style={buttonStyle}
++      >
++        {icon}
++      </button>
++    ) : (
++      <div className={closeClass} onClick={closeAction} style={buttonStyle}>{icon}</div>
++    );
+   }
+ 
+   const style: any = {
+diff --git a/app/internal_packages/onboarding/lib/paper-reed-google-page.tsx b/app/internal_packages/onboarding/lib/paper-reed-google-page.tsx
+index 3373277..15ee72e 100644
+--- a/app/internal_packages/onboarding/lib/paper-reed-google-page.tsx
++++ b/app/internal_packages/onboarding/lib/paper-reed-google-page.tsx
+@@ -4,7 +4,10 @@ import * as OnboardingActions from './onboarding-actions';
+ import { authorizeGoogle } from './paper-reed-google-auth';
+ import { buildPaperReedGmailAccount } from './onboarding-helpers';
+ 
+-export default class PaperReedGooglePage extends React.Component<{ account: Account }> {
++export default class PaperReedGooglePage extends React.Component<{
++  account: Account;
++  isCurrentVisit?: () => boolean;
++}> {
+   state = { phase: 'idle', error: '' };
+   authorization?: AbortController;
+ 
+@@ -14,22 +17,23 @@ export default class PaperReedGooglePage extends React.Component<{ account: Acco
+ 
+   connect = async () => {
+     const controller = new AbortController();
++    const isCurrent = () => !controller.signal.aborted && this.props.isCurrentVisit?.() !== false;
+     this.authorization = controller;
+     this.setState({ phase: 'authorizing', error: '' });
+     try {
+       const authorization = await authorizeGoogle(this.props.account.emailAddress, controller.signal);
+-      controller.signal.throwIfAborted();
++      if (!isCurrent()) return;
+       this.setState({ phase: 'connecting' });
+       const existing = AccountStore.accounts().find(a =>
+         a.emailAddress.toLowerCase() === authorization.emailAddress.toLowerCase()
+       );
+       const account = await buildPaperReedGmailAccount(authorization, existing);
+-      controller.signal.throwIfAborted();
++      if (!isCurrent()) return;
+       OnboardingActions.finishAndAddAccount(account);
+     } catch (error) {
+-      if (!controller.signal.aborted) this.setState({ error: error.message });
++      if (isCurrent()) this.setState({ error: error.message });
+     } finally {
+-      if (!controller.signal.aborted) this.setState({ phase: 'idle' });
++      if (isCurrent()) this.setState({ phase: 'idle' });
+     }
+   };
+ 
+diff --git a/app/internal_packages/onboarding/styles/onboarding.less b/app/internal_packages/onboarding/styles/onboarding.less
+index fa6b560..30a703e 100644
+--- a/app/internal_packages/onboarding/styles/onboarding.less
++++ b/app/internal_packages/onboarding/styles/onboarding.less
+@@ -766,6 +766,56 @@ body.platform-win32 {
+     background: #faf9f6;
+     overflow-y: auto;
+   }
++  .page.pr-provider-choose {
++    padding: 54px 24px 28px;
++    min-width: 0;
++    > section { max-width: 440px; margin: 0 auto; }
++    .pr-onboarding-brand { margin-bottom: 12px; }
++    h2 { margin: 0 0 16px; }
++    .provider-list { width: auto; display: grid; gap: 8px; }
++    .provider {
++      display: flex;
++      align-items: center;
++      justify-content: space-between;
++      gap: 12px;
++      width: 100%;
++      margin: 0;
++      padding: 8px 12px;
++      background: #fffefa;
++      border: 1px solid #d9ddd4;
++      border-radius: 5px;
++      line-height: 20px;
++      text-align: left;
++      cursor: pointer;
++    }
++    .provider:hover { background: #edf0e8; }
++    .pr-provider-label { min-width: 0; }
++    .provider-name { display: block; color: #353a36; font-size: 14px; font-weight: 500; }
++    .pr-provider-description { display: block; color: #626b60; font-size: 12px; overflow-wrap: anywhere; }
++    .pr-provider-arrow { color: #4b634f; font-size: 18px; }
++    .pr-provider-note { margin: 14px 0 0; color: #626b60; font-size: 12px; line-height: 20px; }
++  }
++  .pr-onboarding-window-action {
++    top: 6px;
++    left: 8px;
++    width: 28px;
++    height: 28px;
++    padding: 0;
++    display: grid;
++    place-items: center;
++    border: 0;
++    border-radius: 4px;
++    background: transparent;
++    opacity: 1;
++    cursor: pointer;
++  }
++  .pr-onboarding-window-action.back { left: 48px; }
++  .pr-onboarding-window-action:hover:not(:disabled) { background: #edf0e8; }
++  .pr-onboarding-window-action:disabled { opacity: .45; cursor: default; }
++  .pr-provider-choose .provider:focus-visible, .pr-onboarding-window-action:focus-visible {
++    outline: 2px solid #4b634f;
++    outline-offset: 2px;
++  }
+   .account-setup {
+     padding: 54px 56px 30px;
+   }
