@@ -3,6 +3,9 @@ module.exports = async ({main, cdp, account, evaluate, until, work, restartDeskt
   if (process.env.PAPER_REED_SUBPAGES_CHECK === 'general') {
     return require('./check-general-settings.cjs')({main, cdp, evaluate, until, work, restartDesktop});
   }
+  if (process.env.PAPER_REED_SUBPAGES_CHECK === 'subscription') {
+    return require('./check-subscription-settings.cjs')({main, cdp, evaluate, until});
+  }
   const out = path.resolve(__dirname, '../subpages-validation-2026-11-16');
   fs.mkdirSync(out, {recursive:true});
   const run = s => evaluate(cdp,s), action = s => main.locator(s).first().click();

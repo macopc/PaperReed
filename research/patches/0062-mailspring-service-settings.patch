@@ -1,0 +1,274 @@
+diff --git a/app/internal_packages/paper-reed/styles/paper-reed.less b/app/internal_packages/paper-reed/styles/paper-reed.less
+index 09b1e04..080b54f 100644
+--- a/app/internal_packages/paper-reed/styles/paper-reed.less
++++ b/app/internal_packages/paper-reed/styles/paper-reed.less
+@@ -389,6 +389,15 @@
+   .pr-settings-group > summary { cursor:pointer; }
+   .pr-settings-group[open] > summary, .pr-settings-group > h2 { margin-bottom:14px; }
+   .pr-settings-group > section { padding:0; }
++  .pr-subscription { max-width:560px; }
++  .pr-subscription p { margin:0 0 14px; color:#626b60; overflow-wrap:anywhere; }
++  .pr-subscription dl { margin:14px 0; border-top:1px solid #dfe2d9; }
++  .pr-subscription dl > div { display:flex; flex-wrap:wrap; justify-content:space-between; gap:4px 12px; padding:8px 0; border-bottom:1px solid #dfe2d9; }
++  .pr-subscription dt { color:#626b60; font-weight:400; }
++  .pr-subscription dd { margin:0; overflow-wrap:anywhere; }
++  .pr-service-actions { display:flex; flex-wrap:wrap; gap:8px; }
++  .pr-subscription .pr-service-actions button[aria-disabled=true] { color:#626b60; background:transparent; cursor:default; }
++  .pr-subscription .pr-service-status { margin:8px 0 0; }
+   .pr-general .pr-settings-group > section > h6 { display:none; }
+   .pr-general .pr-settings-group { padding:14px 0; }
+   .pr-general .pr-settings-group:first-child { padding-top:0; }
+diff --git a/app/internal_packages/preferences/lib/main.tsx b/app/internal_packages/preferences/lib/main.tsx
+index 69f37ff..17b2284 100644
+--- a/app/internal_packages/preferences/lib/main.tsx
++++ b/app/internal_packages/preferences/lib/main.tsx
+@@ -81,7 +81,9 @@ export function activate() {
+     new PreferencesUIStore.TabItem({
+       tabId: 'Subscription',
+       displayName: localized('Subscription'),
+-      componentClassFn: () => require('./tabs/preferences-identity').default,
++      componentClassFn: () => AppEnv.config.get('core.paperReed.enabled')
++        ? require('./tabs/paper-reed-subscription').default
++        : require('./tabs/preferences-identity').default,
+       order: 3,
+     })
+   );
+diff --git a/app/internal_packages/preferences/lib/preferences-root.tsx b/app/internal_packages/preferences/lib/preferences-root.tsx
+index 371da3f..7780f38 100644
+--- a/app/internal_packages/preferences/lib/preferences-root.tsx
++++ b/app/internal_packages/preferences/lib/preferences-root.tsx
+@@ -83,6 +83,7 @@ class PreferencesRoot extends React.Component<{ tab: any; tabs: any[]; selection
+         Folders: ['文件夹', '确认常用邮件用途对应的实际文件夹。'],
+         General: ['通用', '让阅读、写信与提醒符合你的习惯。'],
+         Accounts: ['邮箱账号', '管理账号名称、辨识颜色与发件身份。'],
++        Subscription: ['Mailspring 服务', '查看 Mailspring ID 与订阅状态。'],
+         Shortcuts: ['快捷键', '找到常用操作，调整为熟悉的按键。'],
+       }[selection.tabId];
+     const content = (
+diff --git a/app/internal_packages/preferences/lib/preferences-tabs-bar.tsx b/app/internal_packages/preferences/lib/preferences-tabs-bar.tsx
+index f87f34a..1e3d3cd 100644
+--- a/app/internal_packages/preferences/lib/preferences-tabs-bar.tsx
++++ b/app/internal_packages/preferences/lib/preferences-tabs-bar.tsx
+@@ -123,7 +123,7 @@ class PreferencesTabsBar extends React.Component<PreferencesTabBarProps> {
+       const names = {
+         General: '通用',
+         Accounts: '邮箱账号',
+-        Subscription: '订阅',
++        Subscription: 'Mailspring 服务',
+         Appearance: '外观',
+         Shortcuts: '快捷键',
+         'Mail Rules': '邮件规则',
+diff --git a/app/internal_packages/preferences/lib/tabs/paper-reed-subscription.tsx b/app/internal_packages/preferences/lib/tabs/paper-reed-subscription.tsx
+new file mode 100644
+index 0000000..2153da4
+--- /dev/null
++++ b/app/internal_packages/preferences/lib/tabs/paper-reed-subscription.tsx
+@@ -0,0 +1,117 @@
++import React, { useEffect, useRef, useState } from 'react';
++import { dialog, getCurrentWindow } from '@electron/remote';
++import { shell } from 'electron';
++import { Actions, IdentityStore, MailspringAPIRequest } from 'mailspring-exports';
++
++const planName = (plan: string) => (plan ? `Mailspring ${plan}` : '暂无套餐信息');
++
++export default function PaperReedSubscription() {
++  const [identity, setIdentity] = useState(() => IdentityStore.identity());
++  const [status, setStatus] = useState('');
++  const [pending, setPending] = useState(false);
++  const busy = useRef(false);
++  const mounted = useRef(false);
++  const effectivePlanDiffers = identity?.stripePlanEffective && identity.stripePlanEffective !== identity.stripePlan;
++
++  useEffect(() => {
++    mounted.current = true;
++    const unsubscribe = IdentityStore.listen(() => setIdentity(IdentityStore.identity()));
++    return () => {
++      mounted.current = false;
++      unsubscribe();
++    };
++  }, []);
++
++  const requireCurrentIdentity = () => {
++    const current = IdentityStore.identity();
++    if (!identity || current?.id !== identity.id || current.token !== identity.token) {
++      throw new Error('The active Mailspring identity changed.');
++    }
++  };
++
++  const run = async (action: () => Promise<void>, progress: string, error: string) => {
++    if (busy.current) return;
++    busy.current = true;
++    setPending(true);
++    setStatus(progress);
++    try {
++      await action();
++      if (mounted.current) setStatus('');
++    } catch {
++      if (mounted.current) setStatus(error);
++    } finally {
++      busy.current = false;
++      if (mounted.current) setPending(false);
++    }
++  };
++
++  const refresh = () => run(async () => {
++    requireCurrentIdentity();
++    await IdentityStore.fetchIdentity({ requireFresh: true });
++  }, '正在刷新订阅状态…', '无法刷新订阅状态。请检查连接后重试。');
++
++  const openPage = (path: string) => run(async () => {
++    requireCurrentIdentity();
++    const url = new URL(await IdentityStore.fetchSingleSignOnURL(path, { source: 'Preferences' }));
++    if (url.origin !== MailspringAPIRequest.rootURLForServer('identity')) {
++      throw new Error('Unexpected Mailspring account page');
++    }
++    if (!mounted.current) return;
++    requireCurrentIdentity();
++    await shell.openExternal(url.href);
++  }, '正在打开 Mailspring 页面…', '无法打开 Mailspring 页面，请重试。');
++
++  const signOut = () => {
++    if (busy.current) return;
++    const response = dialog.showMessageBoxSync(getCurrentWindow(), {
++      type: 'warning',
++      message: '退出 Mailspring ID？',
++      detail: 'Paper Reed 会重启，请先保存正在编辑的内容。重启后仍可使用已添加的邮箱账号。退出后，Paper Reed 内无法重新登录此 Mailspring ID。\n\n订阅和续费按原设置继续。若需调整订阅，请先打开「管理账单」。',
++      buttons: ['取消', '退出并重启'],
++      defaultId: 0,
++      cancelId: 0,
++    });
++    if (response === 1) Actions.logoutMailspringIdentity();
++  };
++
++  return (
++    <div className="pr-subscription">
++      <section className="pr-settings-group" aria-labelledby="pr-service-identity">
++        <h2 id="pr-service-identity">{identity ? 'Mailspring ID' : '未连接 Mailspring ID'}</h2>
++        {identity ? (
++          <>
++            <p className="pr-service-email">{identity.emailAddress}</p>
++            <dl>
++              <div><dt>订阅套餐</dt><dd>{planName(identity.stripePlan)}</dd></div>
++              {effectivePlanDiffers && (
++                <div><dt>当前权限</dt><dd>{planName(identity.stripePlanEffective)}</dd></div>
++              )}
++            </dl>
++            {effectivePlanDiffers && <p>功能以当前权限为准。可在「管理账单」核对付款和订阅状态。</p>}
++            <div className="pr-service-actions" aria-label="Mailspring 账号操作" role="group">
++              <button type="button" aria-disabled={pending || undefined} onClick={() => openPage('/dashboard')}>
++                管理账号
++              </button>
++              <button type="button" aria-disabled={pending || undefined} onClick={() => openPage('/dashboard#billing')}>
++                管理账单
++              </button>
++              {identity.stripePlan === 'Basic' && (
++                <button type="button" aria-disabled={pending || undefined} onClick={() => openPage('/payment')}>
++                  查看 Pro 方案
++                </button>
++              )}
++              <button type="button" aria-disabled={pending || undefined} onClick={refresh}>刷新状态</button>
++              <button type="button" aria-disabled={pending || undefined} onClick={signOut}>退出登录…</button>
++            </div>
++            <p className="pr-service-status" role="status">{status}</p>
++          </>
++        ) : (
++          <>
++            <p>收发邮件可直接连接邮箱，无需 Mailspring ID。</p>
++            <button type="button" onClick={() => Actions.switchPreferencesTab('Accounts')}>管理邮箱账号</button>
++          </>
++        )}
++      </section>
++    </div>
++  );
++}
+diff --git a/app/src/flux/stores/identity-store.ts b/app/src/flux/stores/identity-store.ts
+index 52a35e8..ce8d516 100644
+--- a/app/src/flux/stores/identity-store.ts
++++ b/app/src/flux/stores/identity-store.ts
+@@ -44,6 +44,8 @@ class _IdentityStore extends MailspringStore {
+   _identity: IIdentity = null;
+   _displayedPasswordError = false;
+   _disp: Disposable;
++  private _identityRequestSequence = 0;
++  private _lastAppliedIdentityRequest = 0;
+ 
+   constructor() {
+     super();
+@@ -142,12 +144,15 @@ class _IdentityStore extends MailspringStore {
+       : null;
+ 
+     if (this._identity && !this._identity.token) {
+-      const message = `Your Mailspring ID password could not be loaded from your keychain. Please visit Preferences > Subscription and click "Setup Mailspring ID" to sign in to your Mailspring account again.\n\nYour Mailspring ID email address is ${this._identity.emailAddress}.`;
++      const paperReed = AppEnv.config.get('core.paperReed.enabled');
++      const message = paperReed
++        ? `无法从钥匙串读取 ${this._identity.emailAddress} 的 Mailspring ID 登录信息。你可以继续使用已连接的邮箱，并在 Mailspring 网站管理该服务账号。`
++        : `Your Mailspring ID password could not be loaded from your keychain. Please visit Preferences > Subscription and click "Setup Mailspring ID" to sign in to your Mailspring account again.\n\nYour Mailspring ID email address is ${this._identity.emailAddress}.`;
+       console.warn(message);
+ 
+       if (!this._displayedPasswordError) {
+         this._displayedPasswordError = true;
+-        AppEnv.showErrorDialog({ title: 'Please Sign In', message });
++        AppEnv.showErrorDialog({ title: paperReed ? '无法连接 Mailspring ID' : 'Please Sign In', message });
+       }
+       this._identity = null;
+     }
+@@ -196,6 +201,7 @@ class _IdentityStore extends MailspringStore {
+     const pathWithUtmString = url.format({
+       pathname: pathWithUtm.pathname,
+       query: pathWithUtm.query,
++      hash: pathWithUtm.hash,
+     });
+ 
+     if (!pathWithUtmString.startsWith('/')) {
+@@ -232,11 +238,14 @@ class _IdentityStore extends MailspringStore {
+     true
+   );
+ 
+-  async fetchIdentity() {
++  async fetchIdentity({ requireFresh = false } = {}) {
+     if (!this._identity || !this._identity.token) {
++      if (requireFresh) throw new Error('No active Mailspring identity.');
+       return null;
+     }
+ 
++    const { id: identityId, token } = this._identity;
++    const request = ++this._identityRequestSequence;
+     let json;
+     try {
+       json = await makeRequest({
+@@ -245,6 +254,7 @@ class _IdentityStore extends MailspringStore {
+         method: 'GET',
+       });
+     } catch (err) {
++      if (requireFresh) throw err;
+       // Network failures here are routine (offline, timeouts, dropped connections)
+       // and will be retried by the next poll - don't let them reject and become
+       // unhandled promise rejections that get reported to Sentry.
+@@ -253,14 +263,25 @@ class _IdentityStore extends MailspringStore {
+     }
+ 
+     if (!json || !json.id) {
+-      AppEnv.reportError(new Error('/api/me returned invalid json'), json || {});
++      const error = new Error('/api/me returned invalid json');
++      if (requireFresh) throw error;
++      AppEnv.reportError(error, json || {});
+       return this._identity;
+     }
+ 
+-    if (json.id !== this._identity.id) {
++    if (this._identity?.id !== identityId || this._identity?.token !== token) {
++      if (requireFresh) throw new Error('The active Mailspring identity changed.');
++      return this._identity;
++    }
++
++    if (json.id !== identityId) {
++      if (requireFresh) throw new Error('The server returned a different Mailspring identity.');
+       console.log('Note: server returned a different identity object.');
+     }
+ 
++    // A slow poll can finish after a newer manual refresh has already updated the account.
++    if (request < this._lastAppliedIdentityRequest) return this._identity;
++    this._lastAppliedIdentityRequest = request;
+     const nextIdentity = Object.assign({}, this._identity, json);
+     await this.saveIdentity(nextIdentity);
+     return this._identity;
