@@ -74,7 +74,7 @@ async function checkDeletedGoogleReconnect() {
   const aliasExists=()=>app.evaluate(()=>global.application.config.get('accounts').some(a=>a.id==='fixture-google-alias'));
   await until(async()=>!await aliasExists(),'other window removed Gmail alias');
   await app.evaluate(()=>global.reconnectRace.release());
-  await until(async()=>onboarding.isClosed()||await run(`${onboardingStore}.accountSaveState()!=='saving'`),'reconnect save settled');
+  await until(async()=>onboarding.isClosed()||await run(`${onboardingStore}.accountSaveProgress()?.phase!=='saving'`),'reconnect save settled');
   const keys=await evaluate(mailboxSession,`require('mailspring-exports').KeyManager._getKeyHash()`);
   assert.equal(await aliasExists(),false,'a stale Google reconnect must never recreate a deleted account');
   assert(!onboarding.isClosed(),'a rejected save must leave onboarding open');
@@ -157,13 +157,15 @@ async function checkAbandonedSetup(store) {
   await run('window.prAbandonedSetup.restore();true');
  }
 }
-async function checkAccountSaveLocked() {
+async function checkAccountSaveLocked({clickBack=true}={}) {
  const active=main.locator('.page-container:not([inert])');
  const back=main.getByRole('button',{name:/^返回(上一步|邮箱选择)$/});
  await active.getByRole('status').getByText('正在保存邮箱账号…',{exact:true}).waitFor({timeout:2500});
  assert(await back.isDisabled(),'Back is disabled while the account is saved');
- const target=await back.boundingBox();
- await main.mouse.click(target.x+target.width/2,target.y+target.height/2);
+ if(clickBack){
+  const target=await back.boundingBox();
+  await main.mouse.click(target.x+target.width/2,target.y+target.height/2);
+ }
  assert.equal(await active.getByRole('button').count(),0,'the saving page cannot submit twice');
  assert(await run(`(()=>{
   const actions=require(${onboardingLib}+'onboarding-actions');
@@ -171,7 +173,8 @@ async function checkAccountSaveLocked() {
   actions.moveToPreviousPage();
   actions.chooseAccountProvider('icloud');
   actions.finishAndAddAccount(store.account());
-  return store.pageVisit()===visit && store.accountSaveState()==='saving';
+  const phase=store.accountSaveProgress?.()?.phase ?? store.accountSaveState?.();
+  return store.pageVisit()===visit && phase==='saving';
  })()`),'save-in-progress rejects queued navigation and duplicate submission');
 }
 async function checkAccountSaveFailure() {
@@ -205,7 +208,8 @@ async function checkAccountSaveFailure() {
   await google.click();
   await until(()=>run('window.prFailedSave.writes===1'),'pending Google account save');
   await checkAccountSaveLocked();
-  await active.and(main.locator('.alpha-fade-enter-done')).getByRole('status').waitFor();
+  const status=active.and(main.locator('.alpha-fade-enter-done')).getByRole('status');
+  await status.getByText('save-test@gmail.com',{exact:true}).waitFor();
   await shot('after-provider-saving');
   assert.equal(await run('window.prFailedSave.writes'),1);
   await run('window.prFailedSave.fail();true');
@@ -422,7 +426,11 @@ async function checkGoogleSavedSender(active) {
    probe.accounts.push({name:account.name,emailAddress:account.emailAddress,provider:account.provider});
    return account;
   };
-  store._onOnboardingComplete=()=>{probe.completed++;};
+  store._onOnboardingComplete=()=>{
+   probe.completed++;
+   // This fixture discards the write, so release the lock without opening a workspace.
+   require('electron').ipcRenderer.sendSync('account-setup-save-lock',false);
+  };
   probe.restore=()=>{
    auth.authorizeGoogle=original.authorize;MailsyncProcess.prototype.test=original.test;
    AccountStore.addAccount=original.save;store._onOnboardingComplete=original.complete;
@@ -670,6 +678,8 @@ async function checkGooglePage(phase) {
  if(serverPhase){await require('./check-server-onboarding.cjs')({phase:serverPhase,main,run,until,shot,out,fixture});await stop();return;}
  const certificatePhase=process.env.PAPER_REED_CERTIFICATE_PAGE_CHECK;
  if(certificatePhase){await require('./check-certificate-onboarding.cjs')({phase:certificatePhase,main,run,until,shot,out,fixture,work});await stop();return;}
+ const savePhase=process.env.PAPER_REED_ACCOUNT_SAVE_CHECK;
+ if(savePhase){await require('./check-account-save.cjs')({phase:savePhase,app,currentWindow:()=>main,selectWindow,run,until,shot,out,fixture,checkAccountSaveLocked});await stop();return;}
  const activePage=main.locator('.page-container:not([inert])');
  await activePage.locator('[data-provider=gmail]').click();
  await activePage.getByRole('button',{name:'使用 Google 登录',exact:true}).waitFor();
@@ -759,7 +769,7 @@ async function checkGooglePage(phase) {
   const ipc=require('electron').ipcRenderer,invoke=ipc.invoke;
   const probe=window.prCredentialWrite={calls:0};
   ipc.invoke=function(channel,...args){
-   if(channel!=='credentials:update')return invoke.call(this,channel,...args);
+   if(channel!=='credentials:add-account')return invoke.call(this,channel,...args);
    probe.calls++;
    return new Promise((resolve,reject)=>{
     probe.release=()=>invoke.call(this,channel,...args).then(resolve,reject);

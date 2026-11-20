@@ -1,0 +1,1290 @@
+diff --git a/app/internal_packages/onboarding/lib/onboarding-root.tsx b/app/internal_packages/onboarding/lib/onboarding-root.tsx
+index 3cfc860..ba2231d 100644
+--- a/app/internal_packages/onboarding/lib/onboarding-root.tsx
++++ b/app/internal_packages/onboarding/lib/onboarding-root.tsx
+@@ -1,7 +1,7 @@
+ import React from 'react';
+ import { CSSTransition, TransitionGroup } from 'react-transition-group';
+ import { Account } from 'mailspring-exports';
+-import OnboardingStore, { AccountSaveState, isGmail } from './onboarding-store';
++import OnboardingStore, { AccountSaveProgress, isGmail } from './onboarding-store';
+ import * as OnboardingActions from './onboarding-actions';
+ import PageTopBar from './page-top-bar';
+ 
+@@ -13,7 +13,7 @@ import AccountSettingsPage from './page-account-settings';
+ import AccountSettingsPageGmail from './page-account-settings-gmail';
+ import AccountSettingsPageO365 from './page-account-settings-o365';
+ import AccountSettingsPageIMAP from './page-account-settings-imap';
+-import AccountOnboardingSuccess from './page-account-onboarding-success';
++import AccountOnboardingSuccess, { PaperReedAccountSave } from './page-account-onboarding-success';
+ import InitialPreferencesPage from './page-initial-preferences';
+ import InitialSubscriptionPage from './page-initial-subscription';
+ import AccountSettingsPageOutlook from './page-account-settings-outlook';
+@@ -46,7 +46,7 @@ interface OnboardingRootState {
+   page: string;
+   previousPage?: string;
+   pageVisit: number;
+-  accountSaveState: AccountSaveState;
++  accountSaveProgress: AccountSaveProgress | null;
+   returningToPicker: boolean;
+   account: Account;
+   confirmServers: boolean;
+@@ -86,7 +86,7 @@ export default class OnboardingRoot extends React.Component<
+       previousPage: OnboardingStore.previousPage(),
+       pageDepth: OnboardingStore.pageDepth(),
+       pageVisit: OnboardingStore.pageVisit(),
+-      accountSaveState: OnboardingStore.accountSaveState(),
++      accountSaveProgress: OnboardingStore.accountSaveProgress(),
+       account: OnboardingStore.account(),
+       confirmServers: OnboardingStore.confirmServers(),
+       rejectedCertificates: OnboardingStore.rejectedCertificates(),
+@@ -120,15 +120,14 @@ export default class OnboardingRoot extends React.Component<
+   };
+ 
+   render() {
+-    const { page, pageVisit, accountSaveState } = this.state;
++    const { page, pageVisit, accountSaveProgress } = this.state;
+     const paperReed = AppEnv.config.get('core.paperReed.enabled');
+-    const activePage = paperReed && page === 'account-settings' ? PaperReedIMAPPage : PageComponents[page];
+-    const Component = accountSaveState ? AccountOnboardingSuccess : activePage;
+-    const preserveServerDraft = paperReed && !accountSaveState &&
++    const Component = paperReed && page === 'account-settings' ? PaperReedIMAPPage : PageComponents[page];
++    const preserveServerDraft = paperReed && !accountSaveProgress &&
+       page === 'account-settings-imap' &&
+       ['account-settings', 'paper-reed-icloud'].includes(this.state.previousPage);
+     // Returning before a fade ends must open a fresh form with the current account.
+-    const transitionKey = accountSaveState ? 'saving-account' : paperReed ? pageVisit : this.state.page;
++    const transitionKey = accountSaveProgress ? `saving-account-${pageVisit}` : paperReed ? pageVisit : this.state.page;
+     const isCurrentVisit = paperReed
+       ? () => !!this.unsubscribe && OnboardingStore.pageVisit() === pageVisit
+       : undefined;
+@@ -138,7 +137,6 @@ export default class OnboardingRoot extends React.Component<
+       rejectedCertificates: this.state.rejectedCertificates,
+       certificateRejectionLog: this.state.certificateRejectionLog,
+       isCurrentVisit,
+-      saving: accountSaveState === 'saving',
+     };
+     if (!Component) {
+       throw new Error(`Cannot find component for page: ${this.state.page}`);
+@@ -158,7 +156,7 @@ export default class OnboardingRoot extends React.Component<
+           pageDepth={this.state.pageDepth}
+           allowMoveBack={!['initial-preferences', 'account-choose'].includes(this.state.page)}
+           disableClose={paperReed && this.state.returningToPicker}
+-          disableNavigation={!!accountSaveState}
++          disableNavigation={!!accountSaveProgress}
+           onBack={preserveServerDraft
+             ? () => (this.serverForm?.onBack || OnboardingActions.moveToPreviousPage)()
+             : undefined}
+@@ -174,7 +172,9 @@ export default class OnboardingRoot extends React.Component<
+             onEntered={paperReed && this.state.page === 'account-choose' ? this._restoreProviderFocus : undefined}
+           >
+             <div className="page-container">
+-              {preserveServerDraft ? (
++              {accountSaveProgress ? (
++                <PaperReedAccountSave progress={accountSaveProgress} onRetry={OnboardingStore.retryAccountHandoff} />
++              ) : preserveServerDraft ? (
+                 <AccountSettingsPageIMAP {...pageProps} ref={form => {
+                   if (OnboardingStore.pageVisit() === pageVisit) this.serverForm = form;
+                 }} />
+diff --git a/app/internal_packages/onboarding/lib/onboarding-store.ts b/app/internal_packages/onboarding/lib/onboarding-store.ts
+index fc4c239..653bbe9 100644
+--- a/app/internal_packages/onboarding/lib/onboarding-store.ts
++++ b/app/internal_packages/onboarding/lib/onboarding-store.ts
+@@ -17,9 +17,13 @@ export function isGmail(account: Account) {
+   return account.provider === 'gmail' || account.settings.imap_host === 'imap.gmail.com' || account.settings.gmail_api_send;
+ }
+ 
+-export type AccountSaveState = 'saving' | 'opening' | null;
++export interface AccountSaveProgress {
++  phase: 'saving' | 'opening' | 'open-failed';
++  emailAddress: string;
++  firstAccount: boolean;
++}
+ 
+-function iCloudReconnectSnapshot(account: Account) {
++function reconnectSnapshot(account: Account) {
+   const { id, emailAddress, name, authedAt, provider, settings } = account;
+   return new Account({
+     id, emailAddress, name, authedAt, provider,
+@@ -35,8 +39,8 @@ class OnboardingStore extends MailspringStore {
+   _account: Account;
+   _pageStack: string[];
+   _pageVisit = 0;
+-  _accountSaveState: AccountSaveState = null;
+-  _icloudServerAccount?: Account;
++  _accountSaveProgress: AccountSaveProgress | null = null;
++  _serverReconnectAccount?: Account;
+   _matchedICloudAccounts: Account[] = [];
+   // Cleared by any later setAccount, such as submitting the form or going back.
+   _confirmServers = false;
+@@ -65,6 +69,11 @@ class OnboardingStore extends MailspringStore {
+     });
+ 
+     if (AppEnv.config.get('core.paperReed.enabled')) {
++      ipcRenderer.on('account-setup-open-failed', () => {
++        if (this._accountSaveProgress?.phase !== 'opening') return;
++        this._accountSaveProgress = { ...this._accountSaveProgress, phase: 'open-failed' };
++        this.trigger();
++      });
+       this._account = existingAccountJSON
+         ? new Account({}).fromJSON(existingAccountJSON)
+         : new Account({ name: '', emailAddress: '', provider: 'imap', settings: {} });
+@@ -72,8 +81,8 @@ class OnboardingStore extends MailspringStore {
+       if (existingAccountJSON) {
+         const page = isGmail(this._account) ? 'paper-reed-google' : 'account-settings-imap';
+         this._pageStack.push(page);
+-        if (page === 'account-settings-imap' && isICloudAccount(this._account)) {
+-          this._icloudServerAccount = iCloudReconnectSnapshot(this._account);
++        if (page === 'account-settings-imap') {
++          this._serverReconnectAccount = reconnectSnapshot(this._account);
+         }
+       }
+       return;
+@@ -128,9 +137,17 @@ class OnboardingStore extends MailspringStore {
+     }, 100);
+   };
+ 
++  retryAccountHandoff = () => {
++    const progress = this._accountSaveProgress;
++    if (progress?.phase !== 'open-failed' || !ipcRenderer.sendSync('account-setup-save-lock', true)) return;
++    this._accountSaveProgress = { ...progress, phase: 'opening' };
++    this.trigger();
++    this._onOnboardingComplete();
++  };
++
+   _onChooseAccountProvider = (provider: string) => {
+-    if (this._accountSaveState) return;
+-    this._icloudServerAccount = undefined;
++    if (this._accountSaveProgress) return;
++    this._serverReconnectAccount = undefined;
+     this._matchedICloudAccounts = [];
+     if (AppEnv.config.get('core.paperReed.enabled')) {
+       this._pageStack = ['account-choose'];
+@@ -172,7 +189,7 @@ class OnboardingStore extends MailspringStore {
+       certificateRejectionLog,
+     }: { confirmServers?: boolean; rejectedCertificates?: RejectedCertificate[]; certificateRejectionLog?: string } = {}
+   ) => {
+-    if (this._accountSaveState) return;
++    if (this._accountSaveProgress) return;
+     if (!(acct instanceof Account)) {
+       throw new Error('OnboardingActions.setAccount expects an Account instance.');
+     }
+@@ -184,10 +201,10 @@ class OnboardingStore extends MailspringStore {
+   };
+ 
+   _onMoveToPreviousPage = () => {
+-    if (this._accountSaveState || this._pageStack.length <= 1) return;
++    if (this._accountSaveProgress || this._pageStack.length <= 1) return;
+     this._pageStack.pop();
+     if (this.page() === 'paper-reed-icloud' || this.page() === 'account-choose') {
+-      this._icloudServerAccount = undefined;
++      this._serverReconnectAccount = undefined;
+     }
+     if (this.page() === 'account-choose') this._matchedICloudAccounts = [];
+     this._pageVisit++;
+@@ -195,14 +212,14 @@ class OnboardingStore extends MailspringStore {
+   };
+ 
+   _onMoveToPage = (page: string, existing?: Account) => {
+-    if (this._accountSaveState) return;
++    if (this._accountSaveProgress) return;
+     if (AppEnv.config.get('core.paperReed.enabled') && page === 'account-settings-imap' && isGmail(this._account)) {
+       page = 'paper-reed-google';
+     }
+     if (this.page() === 'paper-reed-icloud' && page === 'account-settings-imap') {
+-      this._icloudServerAccount = existing;
++      this._serverReconnectAccount = existing;
+     } else if (page !== 'account-certificate') {
+-      this._icloudServerAccount = undefined;
++      this._serverReconnectAccount = undefined;
+     }
+     if (page === 'account-choose') this._matchedICloudAccounts = [];
+     this._pageStack.push(page);
+@@ -234,44 +251,47 @@ class OnboardingStore extends MailspringStore {
+   };
+ 
+   _onFinishAndAddAccount = async (account: Account, existing?: Account) => {
+-    if (this._accountSaveState) return;
++    if (this._accountSaveProgress) return;
+     const page = this.page();
+     const original = existing ?? (
+       page === 'account-settings-imap' || page === 'account-certificate'
+-        ? this._icloudServerAccount
++        ? this._serverReconnectAccount
+         : undefined
+     );
+     const paperReed = AppEnv.config.get('core.paperReed.enabled');
++    const accounts = AccountStore.accounts();
++    const isFirstAccount = accounts.length === 0;
++    // Matched the way addAccount matches the account it updates.
++    const isReconnect = accounts.some(
++      (a) => a.id === account.id || a.emailAddress === account.emailAddress
++    );
++
+     if (paperReed) {
+-      this._accountSaveState = 'saving';
++      if (!ipcRenderer.sendSync('account-setup-save-lock', true)) return;
++      this._accountSaveProgress = {
++        phase: 'saving',
++        emailAddress: original?.emailAddress ?? account.emailAddress,
++        firstAccount: isFirstAccount,
++      };
+       // Invalidate the submitting form before awaiting the credential and account writes.
+       this._pageVisit++;
+       this.trigger();
+     }
+ 
+-    const isFirstAccount = AccountStore.accounts().length === 0;
+-    // Matched the way addAccount matches the account it updates.
+-    const isReconnect = AccountStore.accounts().some(
+-      (a) => a.id === account.id || a.emailAddress === account.emailAddress
+-    );
+-
+     let stored: Account | null;
+     try {
+       stored = original
+         ? await AccountStore.reconnectAccount(account, original)
+-        : await AccountStore.addAccount(account);
+-      if (stored && (original || isReconnect)) {
+-        // The account's sync process is still running with its old settings.
+-        Actions.restartAccountSync(stored);
+-      }
++        : await AccountStore.addAccount(account, { requirePersistence: paperReed });
+     } catch (e) {
+       AppEnv.reportError(e);
+       if (paperReed) {
+-        this._accountSaveState = null;
++        this._accountSaveProgress = null;
++        ipcRenderer.sendSync('account-setup-save-lock', false);
+         this.trigger();
+         AppEnv.showErrorDialog({
+           title: '无法保存邮箱账号',
+-          message: '邮箱账号未能保存。请重试。',
++          message: '邮箱账号未能保存。请确认本机存储和系统钥匙串可用后重试。',
+         });
+         return;
+       }
+@@ -287,7 +307,8 @@ class OnboardingStore extends MailspringStore {
+     }
+ 
+     if (!stored) {
+-      this._accountSaveState = null;
++      this._accountSaveProgress = null;
++      if (paperReed) ipcRenderer.sendSync('account-setup-save-lock', false);
+       this.trigger();
+       AppEnv.showErrorDialog({
+         title: '无法保存邮箱账号',
+@@ -296,8 +317,21 @@ class OnboardingStore extends MailspringStore {
+       return;
+     }
+ 
++    if (original || isReconnect) {
++      try {
++        // The account's sync process is still running with its old settings.
++        Actions.restartAccountSync(stored);
++      } catch (error) {
++        console.error('Could not restart sync for the saved account:', error);
++      }
++    }
++
+     if (paperReed) {
+-      this._accountSaveState = 'opening';
++      this._accountSaveProgress = {
++        phase: 'opening',
++        emailAddress: stored.emailAddress,
++        firstAccount: isFirstAccount,
++      };
+       this.trigger();
+       this._onOnboardingComplete();
+       return;
+@@ -331,8 +365,8 @@ class OnboardingStore extends MailspringStore {
+     return this._pageVisit;
+   }
+ 
+-  accountSaveState() {
+-    return this._accountSaveState;
++  accountSaveProgress() {
++    return this._accountSaveProgress;
+   }
+ 
+   account() {
+@@ -356,7 +390,7 @@ class OnboardingStore extends MailspringStore {
+     if (matches.length > 1) return { ambiguous: true };
+     const [existing] = matches;
+     if (!existing || remembered.includes(existing)) return { account: existing };
+-    const original = iCloudReconnectSnapshot(existing);
++    const original = reconnectSnapshot(existing);
+     remembered.push(original);
+     return { account: original };
+   }
+diff --git a/app/internal_packages/onboarding/lib/page-account-onboarding-success.tsx b/app/internal_packages/onboarding/lib/page-account-onboarding-success.tsx
+index b62204d..4cd145b 100644
+--- a/app/internal_packages/onboarding/lib/page-account-onboarding-success.tsx
++++ b/app/internal_packages/onboarding/lib/page-account-onboarding-success.tsx
+@@ -1,23 +1,58 @@
+-import React, { Component } from 'react';
++import React, { Component, useLayoutEffect, useRef } from 'react';
+ import { localized, Account } from 'mailspring-exports';
+ import { RetinaImg } from 'mailspring-component-kit';
+ import AccountProviders from './account-providers';
++import type { AccountSaveProgress } from './onboarding-store';
+ 
+-class AccountOnboardingSuccess extends Component<{ account: Account; saving?: boolean }> {
++export function PaperReedAccountSave({
++  progress, onRetry,
++}: { progress: AccountSaveProgress; onRetry: () => void }) {
++  const heading = useRef<HTMLHeadingElement>(null);
++  const retry = useRef<HTMLButtonElement>(null);
++  const failed = progress.phase === 'open-failed';
++  useLayoutEffect(() => {
++    (failed ? retry.current : heading.current)?.focus({ preventScroll: true });
++  }, [failed]);
++
++  const saving = progress.phase === 'saving';
++  const handoff = failed
++    ? '邮箱已保存，主窗口暂未打开。'
++    : progress.firstAccount ? '正在打开收件箱…' : '正在返回 Paper Reed…';
++  return (
++    <div className="page pr-account-save">
++      <div className="pr-onboarding-brand">Paper Reed</div>
++      <div className="pr-account-save-status">
++        <div role="status" aria-atomic="true">
++          <span className={`pr-account-save-icon ${saving ? 'saving' : 'opening'}`} aria-hidden="true" />
++          <h2 ref={heading} tabIndex={-1}>{saving ? '正在保存邮箱账号…' : '邮箱已连接'}</h2>
++          <p className="pr-account-save-address"><bdi>{progress.emailAddress}</bdi></p>
++          <p className="pr-account-save-detail">{saving ? '保存完成后将自动继续。' : handoff}</p>
++        </div>
++        {failed && (
++          <div className="pr-account-save-actions">
++            <button
++              className="btn btn-add-account"
++              ref={retry}
++              onKeyDown={event => {
++                if (event.repeat && (event.key === 'Enter' || event.key === ' ')) event.preventDefault();
++              }}
++              onClick={onRetry}
++            >
++              重试打开主窗口
++            </button>
++            <button className="btn" onClick={() => AppEnv.close()}>关闭设置</button>
++          </div>
++        )}
++      </div>
++    </div>
++  );
++}
++
++class AccountOnboardingSuccess extends Component<{ account: Account }> {
+   // eslint-disable-line
+   static displayName = 'AccountOnboardingSuccess';
+ 
+   render() {
+-    if (AppEnv.config.get('core.paperReed.enabled'))
+-      return (
+-        <div className="page account-setup">
+-          <div className="pr-onboarding-brand">Paper Reed</div>
+-          <div role="status">
+-            <h2>{this.props.saving ? '正在保存邮箱账号…' : '邮箱已连接'}</h2>
+-            {!this.props.saving && <p>正在打开收件箱…</p>}
+-          </div>
+-        </div>
+-      );
+     const { account } = this.props;
+     const providerConfig = AccountProviders.find(({ provider }) => provider === account.provider);
+ 
+diff --git a/app/internal_packages/onboarding/styles/onboarding.less b/app/internal_packages/onboarding/styles/onboarding.less
+index baca7b9..e1b431d 100644
+--- a/app/internal_packages/onboarding/styles/onboarding.less
++++ b/app/internal_packages/onboarding/styles/onboarding.less
+@@ -9,6 +9,10 @@
+   }
+ }
+ 
++@keyframes pr-account-save-spin {
++  to { transform: rotate(360deg); }
++}
++
+ .alpha-fade-enter {
+   opacity: 0.01;
+   transition: all 0.15s ease-out;
+@@ -819,6 +823,77 @@ body.platform-win32 {
+   .account-setup {
+     padding: 54px 56px 30px;
+   }
++  .page.pr-account-save {
++    display: flex;
++    flex-direction: column;
++    min-width: 0;
++    padding: 54px 28px 28px;
++    .pr-onboarding-brand { margin: 0; }
++    .pr-account-save-status {
++      width: 100%;
++      max-width: 440px;
++      margin: auto;
++      padding: 28px 0 48px;
++    }
++    .pr-account-save-icon {
++      display: grid;
++      place-items: center;
++      width: 48px;
++      height: 48px;
++      margin: 0 auto 16px;
++      border-radius: 50%;
++      background: #edf0e8;
++      color: #4b634f;
++      &::before { content: ''; }
++      &.saving::before {
++        width: 20px;
++        height: 20px;
++        border: 2px solid #b9c4b6;
++        border-top-color: currentColor;
++        border-radius: 50%;
++      }
++      &.opening::before {
++        width: 16px;
++        height: 9px;
++        border-left: 2px solid;
++        border-bottom: 2px solid;
++        transform: translateY(-2px) rotate(-45deg);
++      }
++      @media (prefers-reduced-motion: no-preference) {
++        &.saving::before { animation: pr-account-save-spin 900ms linear infinite; }
++      }
++    }
++    h2 {
++      width: fit-content;
++      margin: 0 auto 6px;
++      &:focus-visible {
++        outline: 2px solid #4b634f;
++        outline-offset: 3px;
++        border-radius: 3px;
++      }
++    }
++    .pr-account-save-address {
++      margin: 0;
++      font-size: 14px;
++      line-height: 22px;
++      overflow-wrap: anywhere;
++    }
++    .pr-account-save-detail {
++      margin: 12px 0 0;
++      color: #626b60;
++      font-size: 13px;
++      line-height: 22px;
++    }
++    .pr-account-save-actions {
++      display: flex;
++      flex-wrap: wrap;
++      justify-content: center;
++      gap: 8px;
++      margin-top: 16px;
++      .btn { min-height: 36px; margin: 0; }
++      .btn:focus-visible { outline: 2px solid #4b634f; outline-offset: 2px; }
++    }
++  }
+   .pr-onboarding-brand {
+     font:
+       30px/40px 'Iowan Old Style',
+diff --git a/app/src/app-env.ts b/app/src/app-env.ts
+index a792aa0..c6000d7 100644
+--- a/app/src/app-env.ts
++++ b/app/src/app-env.ts
+@@ -537,6 +537,10 @@ export default class AppEnvConstructor {
+ 
+   // Extended: Reload the current window.
+   reload() {
++    if (this.getLoadSettings().windowType === 'onboarding') {
++      const application = require('@electron/remote').getGlobal('application');
++      if (application.isSavingAccount(this.getCurrentWindow())) return;
++    }
+     this.isReloading = true;
+     return ipcRenderer.send('call-webcontents-method', 'reload');
+   }
+@@ -719,24 +723,20 @@ export default class AppEnvConstructor {
+ 
+   async startWindow() {
+     const { windowType } = this.getLoadSettings();
++    const documentGeneration = ipcRenderer.sendSync('window-document-generation');
+ 
+     this.themes.loadStaticStylesheets();
+     this.initializeBasicSheet();
+     this.initializeReactRoot();
+     this.packages.activatePackages(windowType);
+ 
+-    window.requestAnimationFrame(() => {
+-      window.requestAnimationFrame(() => {
+-        window.requestAnimationFrame(() => {
+-          window.requestAnimationFrame(() => {
+-            this.keymaps.loadKeymaps();
+-            this.menu.update();
++    for (let frame = 0; frame < 4; frame++) {
++      await new Promise<void>(resolve => window.requestAnimationFrame(() => resolve()));
++    }
++    this.keymaps.loadKeymaps();
++    this.menu.update();
+ 
+-            ipcRenderer.send('window-command', 'window:loaded');
+-          });
+-        });
+-      });
+-    });
++    ipcRenderer.send('window-command', 'window:loaded', documentGeneration);
+   }
+ 
+   // Call this method when establishing a real application window.
+@@ -751,7 +751,7 @@ export default class AppEnvConstructor {
+   // hot windows), the packages won't be loaded until `populateHotWindow`
+   // gets fired.
+   async startSecondaryWindow() {
+-    await this.startWindow();
++    const ready = this.startWindow();
+     ipcRenderer.on('load-settings-changed', (event, loadSettings) => {
+       let url = window.location.href.substr(0, window.location.href.indexOf('loadSettings='));
+       url += `loadSettings=${encodeURIComponent(JSON.stringify(loadSettings))}`;
+@@ -759,6 +759,7 @@ export default class AppEnvConstructor {
+ 
+       this.populateHotWindow(loadSettings);
+     });
++    await ready;
+   }
+ 
+   // We setup the initial Sheet for hot windows. This is the default title
+diff --git a/app/src/browser/application.ts b/app/src/browser/application.ts
+index 4806251..ee30e4b 100644
+--- a/app/src/browser/application.ts
++++ b/app/src/browser/application.ts
+@@ -1,4 +1,4 @@
+-import { CredentialStore, type AccountReconnect } from './credential-store';
++import { CredentialStore, type AccountAdd, type AccountReconnect } from './credential-store';
+ /* eslint global-require: "off" */
+ 
+ import '../safe-shell';
+@@ -23,6 +23,7 @@ import { EventEmitter } from 'events';
+ 
+ import { localized, initializeLocalization } from '../intl';
+ import WindowManager from './window-manager';
++import { replacesWindowDocument, type default as MailspringWindow } from './mailspring-window';
+ import FileListCache from './file-list-cache';
+ import ConfigMigrator from './config-migrator';
+ import ApplicationMenu from './application-menu';
+@@ -62,6 +63,14 @@ const RENDERER_WINDOW_OPTIONS = [
+   'height',
+   'bounds',
+ ];
++const ACCOUNT_HANDOFF_TIMEOUT_MS = 12000;
++
++type AccountSaveLock = {
++  window: BrowserWindow;
++  write?: Promise<unknown>;
++  cancelHandoff?: () => void;
++  release: () => void;
++};
+ 
+ function rendererWindowOptions(options: Record<string, unknown>) {
+   const safe: Record<string, unknown> = {};
+@@ -82,6 +91,7 @@ export default class Application extends EventEmitter {
+   specMode: boolean;
+   safeMode: boolean;
+   quitting: boolean;
++  private _accountSaveLock?: AccountSaveLock;
+ 
+   configMigrator: ConfigMigrator;
+   configPersistenceManager: ConfigPersistenceManager;
+@@ -242,6 +252,114 @@ export default class Application extends EventEmitter {
+     return this.quitting;
+   }
+ 
++  isSavingAccount(window = this._accountSaveLock?.window) {
++    return !!window && this._accountSaveLock?.window === window;
++  }
++
++  private _lockAccountSave(window: BrowserWindow) {
++    const contents = window.webContents;
++    const lock: AccountSaveLock = {
++      window,
++      release: () => {
++        if (this._accountSaveLock !== lock) return;
++        this._accountSaveLock = undefined;
++        if (!contents.isDestroyed()) {
++          contents.removeListener('render-process-gone', abandon);
++          contents.removeListener('did-start-navigation', navigate);
++          contents.removeListener('did-frame-navigate', committed);
++        }
++        if (!window.isDestroyed()) window.removeListener('closed', abandon);
++        lock.cancelHandoff?.();
++      },
++    };
++    const abandon = () => {
++      const write = lock.write;
++      if (write) void write.then(lock.release, lock.release);
++      else lock.release();
++    };
++    const navigate = (navigation: Electron.WebContentsDidStartNavigationEventParams) => {
++      if (replacesWindowDocument(navigation)) abandon();
++    };
++    const committed = (_event, _url, _status, _text, isMainFrame: boolean) => {
++      if (isMainFrame) abandon();
++    };
++    contents.prependOnceListener('render-process-gone', abandon);
++    contents.on('did-start-navigation', navigate);
++    contents.on('did-frame-navigate', committed);
++    window.once('closed', abandon);
++    this._accountSaveLock = lock;
++  }
++
++  private _trackAccountSave<T>(window: BrowserWindow | null, write: () => Promise<T>) {
++    const lock = this._accountSaveLock;
++    if (!lock || lock.window !== window) return write();
++    if (lock.write || lock.cancelHandoff) throw new Error('Account setup is already in progress.');
++    const pending = write();
++    lock.write = pending;
++    return pending.finally(() => {
++      lock.write = undefined;
++    });
++  }
++
++  private _openSavedAccount(onboarding: MailspringWindow, lock: AccountSaveLock) {
++    if (lock.write || lock.cancelHandoff) return;
++
++    const source = onboarding.browserWindow;
++    const finish = (opened: boolean) => {
++      if (this._accountSaveLock !== lock) return;
++      lock.release();
++      if (source.isDestroyed()) return;
++      if (opened) onboarding.close();
++      else if (!source.webContents.isCrashed()) source.webContents.send('account-setup-open-failed');
++    };
++
++    try {
++      const previous = this.windowManager.get(WindowManager.MAIN_WINDOW);
++      if (previous && !previous.browserWindow.isDestroyed() &&
++          (previous.hasLoadFailed() || previous.browserWindow.webContents.isCrashed())) {
++        previous.browserWindow.destroy();
++      }
++      this.windowManager.ensureWindow(WindowManager.MAIN_WINDOW);
++    } catch (error) {
++      console.error('Could not open the main window after saving an account:', error);
++      finish(false);
++      return;
++    }
++    const main = this.windowManager.get(WindowManager.MAIN_WINDOW);
++    if (!main || main.browserWindow.isDestroyed() || main.hasLoadFailed()) {
++      finish(false);
++      return;
++    }
++    if (main.isLoaded()) {
++      finish(!main.browserWindow.webContents.isCrashed());
++      return;
++    }
++
++    // Keep the onboarding window as the activation context on Wayland until the workspace loads.
++    const target = main.browserWindow;
++    const contents = target.webContents;
++    const ready = () => finish(true);
++    const failed = () => {
++      finish(false);
++      if (!main.isLoaded() && !target.isDestroyed()) target.destroy();
++    };
++    const targetGone = () => finish(false);
++    const timeout = setTimeout(() => finish(false), ACCOUNT_HANDOFF_TIMEOUT_MS);
++    lock.cancelHandoff = () => {
++      clearTimeout(timeout);
++      main.removeListener('window:loaded', ready);
++      main.removeListener('window:load-failed', failed);
++      if (!target.isDestroyed()) target.removeListener('closed', failed);
++      if (!contents.isDestroyed()) {
++        contents.removeListener('render-process-gone', targetGone);
++      }
++    };
++    target.once('closed', failed);
++    main.once('window:load-failed', failed);
++    contents.prependOnceListener('render-process-gone', targetGone);
++    main.waitForLoad(ready);
++  }
++
+   // Opens a new window based on the options provided.
+   handleLaunchOptions(options) {
+     // If start() hasn't finished initializing yet (e.g. a second-instance event
+@@ -612,7 +730,11 @@ export default class Application extends EventEmitter {
+     });
+ 
+     // Called before the app tries to close any windows.
+-    app.on('before-quit', () => {
++    app.on('before-quit', (event) => {
++      if (this.isSavingAccount()) {
++        event.preventDefault();
++        return;
++      }
+       // Allow the main window to be closed.
+       this.quitting = true;
+       // Destroy hot windows so that they can't block the app from quitting.
+@@ -788,9 +910,23 @@ export default class Application extends EventEmitter {
+     onFromMailspringWindows(ipcMain, 'window-command', (event, command, ...args) => {
+       const win = BrowserWindow.fromWebContents(event.sender);
+       if (!win) return;
++      if (
++        (command === 'window:loaded' || command === 'window:setup-failed') &&
++        event.senderFrame !== event.sender.mainFrame
++      ) return;
+       win.emit(command, ...args);
+     });
+ 
++    onFromMailspringWindows(ipcMain, 'window-document-generation', (event) => {
++      const win = BrowserWindow.fromWebContents(event.sender);
++      if (
++        event.senderFrame !== event.sender.mainFrame ||
++        !win?.emit('window:document-generation', event)
++      ) {
++        event.returnValue = null;
++      }
++    });
++
+     const ALLOWED_WINDOW_METHODS = new Set([
+       'setPosition',
+       'center',
+@@ -845,6 +981,7 @@ export default class Application extends EventEmitter {
+         console.error(`Method ${method} is not permitted on WebContents!`);
+         return;
+       }
++      if (method === 'reload' && this.isSavingAccount(BrowserWindow.fromWebContents(event.sender))) return;
+       if (!event.sender[method]) {
+         console.error(`Method ${method} does not exist on WebContents!`);
+         return;
+@@ -883,22 +1020,45 @@ export default class Application extends EventEmitter {
+       if (clipboard.selection) clipboard.selection.writeText(selectedText);
+     });
+ 
+-    onFromMailspringWindows(ipcMain, 'account-setup-successful', () => {
++    onFromMailspringWindows(ipcMain, 'account-setup-save-lock', (event, locked: boolean) => {
++      const onboarding = this.windowManager.get(WindowManager.ONBOARDING_WINDOW);
++      const window = onboarding?.browserWindow;
++      if (window?.webContents !== event.sender) {
++        event.returnValue = false;
++        return;
++      }
++      if (locked) {
++        const allowed = !this.quitting && !this._accountSaveLock && this.config.get('core.paperReed.enabled');
++        if (allowed) this._lockAccountSave(window);
++        event.returnValue = !!allowed;
++      } else {
++        const lock = this._accountSaveLock;
++        if (lock?.window === window && !lock.write) lock.release();
++        event.returnValue = true;
++      }
++    });
++
++    onFromMailspringWindows(ipcMain, 'account-setup-successful', (event) => {
++      const onboarding = this.windowManager.get(WindowManager.ONBOARDING_WINDOW);
++      if (onboarding?.browserWindow.webContents !== event.sender) return;
++
++      const lock = this._accountSaveLock;
++      if (lock?.window === onboarding.browserWindow) {
++        this._openSavedAccount(onboarding, lock);
++        return;
++      }
++      if (this.config.get('core.paperReed.enabled')) return;
+       this.windowManager.ensureWindow(WindowManager.MAIN_WINDOW);
+       const mainWindow = this.windowManager.get(WindowManager.MAIN_WINDOW);
+-      const onboarding = this.windowManager.get(WindowManager.ONBOARDING_WINDOW);
+-      if (onboarding) {
+-        if (mainWindow) {
+-          // Wait for the main window to finish loading before closing onboarding.
+-          // On Wayland, closing the onboarding window (which holds the activation
+-          // context) before the main window is visible causes show() to fail
+-          // silently because the activation context is lost.
+-          mainWindow.waitForLoad(() => {
+-            onboarding.close();
+-          });
+-        } else {
+-          onboarding.close();
+-        }
++      const closeOnboarding = () => onboarding.close();
++      if (mainWindow) {
++        // Wait for the main window to finish loading before closing onboarding.
++        // On Wayland, closing the onboarding window (which holds the activation
++        // context) before the main window is visible causes show() to fail
++        // silently because the activation context is lost.
++        mainWindow.waitForLoad(closeOnboarding);
++      } else {
++        closeOnboarding();
+       }
+     });
+ 
+@@ -988,40 +1148,76 @@ export default class Application extends EventEmitter {
+     });
+ 
+     const credentials = new CredentialStore(this.config);
++    const commitAccounts = (accounts, encrypted: Buffer) => {
++      this.configPersistenceManager.commitSettings({
++        ...this.configPersistenceManager.settings,
++        accounts,
++        accountsVersion: (this.config.get('accountsVersion') || 0) + 1,
++        credentials: encrypted.toJSON(),
++      });
++    };
+     handleFromMailspringWindows(ipcMain, 'credentials:read', () => credentials.read());
+     handleFromMailspringWindows(ipcMain, 'credentials:update', (_event, change) =>
+       credentials.update(change)
+     );
++    handleFromMailspringWindows(ipcMain, 'credentials:add-account', (event, request: AccountAdd) => {
++      const window = BrowserWindow.fromWebContents(event.sender);
++      if (!this.isSavingAccount(window)) {
++        throw new Error('Account setup is not saving.');
++      }
++      return this._trackAccountSave(window, () => credentials.update({ set: request.secrets }, encrypted => {
++        const accounts = this.config.get('accounts') || [];
++        const { account } = request;
++        const index = accounts.findIndex(existing =>
++          existing.id === account.id || existing.emailAddress === account.emailAddress
++        );
++        let stored = account;
++        if (index === -1) {
++          accounts.push(stored);
++        } else {
++          stored = {
++            ...accounts[index],
++            name: account.name,
++            emailAddress: account.emailAddress,
++            provider: account.provider,
++            settings: account.settings,
++            authedAt: account.authedAt,
++            syncState: 'ok',
++          };
++          accounts[index] = stored;
++        }
++        delete stored.sync_error;
++        commitAccounts(accounts, encrypted);
++        return stored;
++      }));
++    });
+     handleFromMailspringWindows(
+       ipcMain,
+       'credentials:reconnect-account',
+-      (_event, request: AccountReconnect) => credentials.update({ set: request.secrets }, encrypted => {
+-        const accounts = this.config.get('accounts') || [];
+-        const { id, emailAddress, authedAt } = request.expected;
+-        const index = accounts.findIndex(account =>
+-          account.id === id && account.emailAddress === emailAddress &&
+-          Number(account.authedAt ?? 0) === (authedAt ?? 0)
+-        );
+-        if (index === -1) return false;
+-
+-        accounts[index] = {
+-          ...accounts[index],
+-          name: request.name ?? accounts[index].name,
+-          provider: request.provider,
+-          settings: request.settings,
+-          authedAt: request.authedAt,
+-          syncState: 'ok',
+-        };
+-        delete accounts[index].sync_error;
+-        // Publish the account and its encrypted credentials together, after the last await.
+-        this.configPersistenceManager.setSettings({
+-          ...this.configPersistenceManager.settings,
+-          accounts,
+-          accountsVersion: (this.config.get('accountsVersion') || 0) + 1,
+-          credentials: encrypted.toJSON(),
+-        }, undefined);
+-        return true;
+-      })
++      (event, request: AccountReconnect) => {
++        const window = BrowserWindow.fromWebContents(event.sender);
++        return this._trackAccountSave(window, () => credentials.update({ set: request.secrets }, encrypted => {
++          const accounts = this.config.get('accounts') || [];
++          const { id, emailAddress, authedAt } = request.expected;
++          const index = accounts.findIndex(account =>
++            account.id === id && account.emailAddress === emailAddress &&
++            Number(account.authedAt ?? 0) === (authedAt ?? 0)
++          );
++          if (index === -1) return false;
++
++          accounts[index] = {
++            ...accounts[index],
++            name: request.name ?? accounts[index].name,
++            provider: request.provider,
++            settings: request.settings,
++            authedAt: request.authedAt,
++            syncState: 'ok',
++          };
++          delete accounts[index].sync_error;
++          commitAccounts(accounts, encrypted);
++          return accounts[index];
++        }));
++      }
+     );
+     registerQuickpreviewIPCHandlers(ipcMain);
+     registerNotificationIPCHandlers(ipcMain);
+@@ -1066,7 +1262,7 @@ export default class Application extends EventEmitter {
+       if (focusedBrowserWindow) {
+         switch (command) {
+           case 'window:reload':
+-            focusedBrowserWindow.reload();
++            if (!this.isSavingAccount(focusedBrowserWindow)) focusedBrowserWindow.reload();
+             break;
+           case 'window:toggle-dev-tools':
+             if (developerToolsAvailable()) {
+diff --git a/app/src/browser/config-persistence-manager.ts b/app/src/browser/config-persistence-manager.ts
+index 19c4c20..cf71a16 100644
+--- a/app/src/browser/config-persistence-manager.ts
++++ b/app/src/browser/config-persistence-manager.ts
+@@ -169,6 +169,14 @@ export default class ConfigPersistenceManager {
+     this.save();
+   };
+ 
++  commitSettings(value: object) {
++    if (this.userWantsToPreserveErrors) throw new Error('Configuration writes are suspended.');
++    atomicWriteFileSync(this.configFilePath, JSON.stringify({ '*': value }, null, 2));
++    this.lastSaveTimestamp = Date.now();
++    this.settings = value;
++    this.emitChangeEvent();
++  }
++
+   setRawValue = (keyPath, value, sourceWebcontentsId) => {
+     if (!keyPath) {
+       throw new Error('keyPath must not be false-y!');
+@@ -179,11 +187,20 @@ export default class ConfigPersistenceManager {
+   };
+ 
+   emitChangeEvent = ({ sourceWebcontentsId }: { sourceWebcontentsId?: number } = {}) => {
+-    global.application.config.updateSettings(this.settings);
++    try {
++      global.application.config.updateSettings(this.settings);
++    } catch (error) {
++      console.error('A main-process configuration listener failed:', error);
++    }
+ 
+     BrowserWindow.getAllWindows().forEach((win) => {
+-      if (win.webContents && win.webContents.id !== sourceWebcontentsId) {
+-        win.webContents.send('on-config-reloaded', this.settings);
++      try {
++        const contents = win.webContents;
++        if (!contents.isDestroyed() && contents.id !== sourceWebcontentsId) {
++          contents.send('on-config-reloaded', this.settings);
++        }
++      } catch (error) {
++        console.error('Could not notify a window of the saved configuration:', error);
+       }
+     });
+   };
+diff --git a/app/src/browser/credential-store.ts b/app/src/browser/credential-store.ts
+index b9fd576..34a984c 100644
+--- a/app/src/browser/credential-store.ts
++++ b/app/src/browser/credential-store.ts
+@@ -1,7 +1,9 @@
+ import { safeStorage } from 'electron';
++import type { Account } from '../flux/models/account';
+ 
+ export type KeySet = Record<string, string>;
+ export type CredentialChange = { set?: KeySet; remove?: string[]; removePrefix?: string };
++export type AccountAdd = { account: ReturnType<Account['toJSON']>; secrets: KeySet };
+ export type AccountReconnect = {
+   expected: { id: string; emailAddress: string; authedAt: number | null };
+   name?: string;
+@@ -39,12 +41,12 @@ export class CredentialStore {
+   }
+ 
+   update(change: CredentialChange): Promise<void>;
+-  update(change: CredentialChange, commit: (encrypted: Buffer) => boolean): Promise<boolean>;
+-  update(change: CredentialChange, commit?: (encrypted: Buffer) => boolean): Promise<void | boolean> {
++  update<T>(change: CredentialChange, commit: (encrypted: Buffer) => T): Promise<T>;
++  update<T>(change: CredentialChange, commit?: (encrypted: Buffer) => T): Promise<void | T> {
+     return this.serial(async () => {
+       if (change.removePrefix !== undefined && !change.removePrefix)
+         throw new Error('Credential removal requires a non-empty prefix.');
+-      const keys = await this.readKeys();
++      const keys = await this.readKeys({ migrate: !commit });
+       Object.assign(keys, change.set);
+       for (const key of change.remove || []) delete keys[key];
+       if (change.removePrefix)
+@@ -56,7 +58,7 @@ export class CredentialStore {
+     });
+   }
+ 
+-  private async readKeys(): Promise<KeySet> {
++  private async readKeys({ migrate = true } = {}): Promise<KeySet> {
+     const value = this.config.get('credentials');
+     if (value === undefined || value === null || value === 'null') return {};
+     const bytes = Buffer.from(value, 'utf8');
+@@ -69,7 +71,7 @@ export class CredentialStore {
+       decoded = { result: this.storage.decryptLegacy(bytes), shouldReEncrypt: true };
+     }
+     const keys = JSON.parse(decoded.result) as KeySet;
+-    if (decoded.shouldReEncrypt && !this.reEncryptAttempted) {
++    if (decoded.shouldReEncrypt && migrate && !this.reEncryptAttempted) {
+       this.reEncryptAttempted = true;
+       try {
+         this.config.set('credentials', await this.encryptKeys(keys));
+diff --git a/app/src/browser/mailspring-window.ts b/app/src/browser/mailspring-window.ts
+index 27672be..90d5796 100644
+--- a/app/src/browser/mailspring-window.ts
++++ b/app/src/browser/mailspring-window.ts
+@@ -27,6 +27,13 @@ export function isMailspringWindowContents(contents: Electron.WebContents) {
+   return mailspringWebContents.has(contents);
+ }
+ 
++export function replacesWindowDocument({
++  isMainFrame, isSameDocument, initiator,
++}: Electron.WebContentsDidStartNavigationEventParams) {
++  // will-navigate blocks cross-document navigation initiated by the renderer.
++  return isMainFrame && !isSameDocument && !initiator;
++}
++
+ export interface MailspringWindowSettings {
+   frame?: boolean;
+   title?: string;
+@@ -67,6 +74,8 @@ export default class MailspringWindow extends EventEmitter {
+   public safeMode: boolean;
+ 
+   private loaded: boolean;
++  private hasLoaded = false;
++  private loadFailed = false;
+   private isSpec: boolean;
+   public windowKey: string;
+   private neverClose: boolean;
+@@ -234,8 +243,43 @@ export default class MailspringWindow extends EventEmitter {
+ 
+     this.browserWindow.loadSettings = loadSettings;
+ 
+-    (this.browserWindow.once as any)('window:loaded', () => {
++    const contents = this.browserWindow.webContents;
++    let documentGeneration = 0;
++    let documentCommitted = false;
++    const resetReadiness = () => {
++      this.loaded = false;
++      this.loadFailed = false;
++      documentCommitted = false;
++      documentGeneration++;
++    };
++    contents.on('did-start-navigation', (navigation) => {
++      if (replacesWindowDocument(navigation)) resetReadiness();
++    });
++    contents.on('did-frame-navigate', (_event, _url, _status, _text, isMainFrame) => {
++      if (!isMainFrame) return;
++      if (documentCommitted) resetReadiness();
++      documentCommitted = true;
++    });
++    const markLoadFailed = () => {
++      if (this.loadFailed) return;
++      this.loaded = false;
++      this.loadFailed = true;
++      this.emit('window:load-failed');
++    };
++    contents.on('did-fail-load', (_event, code, _message, _url, isMainFrame) => {
++      if (isMainFrame && code !== -3) markLoadFailed();
++    });
++    contents.on('render-process-gone', resetReadiness);
++    (this.browserWindow.on as any)('window:document-generation', (event: Electron.IpcMainEvent) => {
++      event.returnValue = documentCommitted ? documentGeneration : null;
++    });
++    (this.browserWindow.on as any)('window:setup-failed', (generation: number) => {
++      if (documentCommitted && generation === documentGeneration && !this.loaded) markLoadFailed();
++    });
++    (this.browserWindow.on as any)('window:loaded', (generation: number) => {
++      if (!documentCommitted || generation !== documentGeneration || this.loaded || this.loadFailed) return;
+       this.loaded = true;
++      this.hasLoaded = true;
+       if (this.browserWindow.loadSettingsChangedSinceGetURL) {
+         this.browserWindow.webContents.send(
+           'load-settings-changed',
+@@ -319,6 +363,10 @@ export default class MailspringWindow extends EventEmitter {
+     //
+     // This uses the DOM's `beforeunload` event.
+     this.browserWindow.on('close', (event: Electron.Event) => {
++      if (global.application.isSavingAccount(this.browserWindow)) {
++        event.preventDefault();
++        return;
++      }
+       if (global.application.isQuitting()) {
+         return;
+       }
+@@ -415,7 +463,7 @@ export default class MailspringWindow extends EventEmitter {
+         attemptEarlyRendererCrashRecovery({
+           app,
+           configDirPath: this.configDirPath,
+-          loaded: this.loaded,
++          loaded: this.hasLoaded,
+           primaryWindow: isPrimaryWindow({
+             mainWindow: this.mainWindow,
+             windowType: this.windowType,
+@@ -433,7 +481,7 @@ export default class MailspringWindow extends EventEmitter {
+ 
+       // A renderer that died before its first load would die the same way on an
+       // automatic reload, so the main window falls back to the dialog until it has loaded.
+-      if (this.neverClose && this.loaded) {
++      if (this.neverClose && this.hasLoaded) {
+         this.browserWindow.reload();
+       } else {
+         const chosen = dialog.showMessageBoxSync({
+@@ -564,6 +612,10 @@ export default class MailspringWindow extends EventEmitter {
+     return this.loaded;
+   }
+ 
++  hasLoadFailed() {
++    return this.loadFailed;
++  }
++
+   isWebViewFocused() {
+     return this.browserWindow.webContents.isFocused();
+   }
+@@ -573,7 +625,7 @@ export default class MailspringWindow extends EventEmitter {
+   }
+ 
+   reload() {
+-    this.browserWindow.reload();
++    if (!global.application.isSavingAccount(this.browserWindow)) this.browserWindow.reload();
+   }
+ 
+   toggleDevTools() {
+diff --git a/app/src/flux/stores/account-store.ts b/app/src/flux/stores/account-store.ts
+index 52b69af..414dc74 100644
+--- a/app/src/flux/stores/account-store.ts
++++ b/app/src/flux/stores/account-store.ts
+@@ -240,17 +240,30 @@ class _AccountStore extends MailspringStore {
+   };
+ 
+   reconnectAccount = async (account: Account, existing: Account): Promise<Account | null> => {
+-    if (!(await KeyManager.reconnectAccount(account, existing))) return null;
+-    AppEnv.config.load();
+-    return this.accountForId(existing.id) || null;
++    const saved = await KeyManager.commitReconnectedAccount(account, existing);
++    return saved ? this._accountAfterCommit(saved) : null;
+   };
+ 
++  private _accountAfterCommit(json: ReturnType<Account['toJSON']>) {
++    try {
++      AppEnv.config.load();
++    } catch (error) {
++      console.error('Could not refresh the account list after saving:', error);
++    }
++    return new Account({}).fromJSON(json);
++  }
++
+   // Returns the stored account: an account reconnected under a new id keeps its existing one.
+-  addAccount = async (account: Account) => {
++  addAccount = async (account: Account, { requirePersistence = false } = {}) => {
+     if (!account.emailAddress || !account.provider || !(account instanceof Account)) {
+       throw new Error(`Returned account data is invalid: ${JSON.stringify(account)}`);
+     }
+ 
++    if (requirePersistence) {
++      const saved = await KeyManager.addOnboardingAccount(account);
++      return this._accountAfterCommit(saved);
++    }
++
+     // send the account JSON and cloud token to the KeyManager,
+     // which gives us back a version with no secrets.
+     const cleanAccount = await KeyManager.extractAndStoreAccountSecrets(account);
+diff --git a/app/src/fs-utils.ts b/app/src/fs-utils.ts
+index 40b6f2b..648a061 100644
+--- a/app/src/fs-utils.ts
++++ b/app/src/fs-utils.ts
+@@ -4,6 +4,15 @@ import * as Utils from './flux/models/utils';
+ export function atomicWriteFileSync(filepath: string, content: string) {
+   const randomId = Utils.generateTempId();
+   const backupPath = `${filepath}.${randomId}.bak`;
+-  fs.writeFileSync(backupPath, content);
+-  fs.renameSync(backupPath, filepath);
++  try {
++    fs.writeFileSync(backupPath, content);
++    fs.renameSync(backupPath, filepath);
++  } catch (error) {
++    try {
++      fs.rmSync(backupPath, { force: true });
++    } catch {
++      // Preserve the original failure if the temporary file cannot be removed.
++    }
++    throw error;
++  }
+ }
+diff --git a/app/src/key-manager.ts b/app/src/key-manager.ts
+index d55073a..7eb7b5e 100644
+--- a/app/src/key-manager.ts
++++ b/app/src/key-manager.ts
+@@ -1,7 +1,7 @@
+ import { localized } from './intl';
+ import { Account } from 'mailspring-exports';
+ import { ipcRenderer } from 'electron';
+-import type { AccountReconnect, KeySet, CredentialChange } from './browser/credential-store';
++import type { AccountAdd, AccountReconnect, KeySet, CredentialChange } from './browser/credential-store';
+ 
+ const accountKeys = (email: string) =>
+   ['imap', 'smtp', 'refresh-token', 'gmail-refresh-token', 'gmail-client-secret'].map(
+@@ -44,7 +44,21 @@ class KeyManager {
+     return clean;
+   }
+ 
++  addOnboardingAccount(account: Account): Promise<AccountAdd['account']> {
++    const { clean, set } = splitAccountSecrets(account);
++    const request: AccountAdd = { account: clean.toJSON(), secrets: set };
++    return ipcRenderer.invoke('credentials:add-account', request);
++  }
++
+   async reconnectAccount(account: Account, existing: Account): Promise<boolean> {
++    try {
++      return !!(await this.commitReconnectedAccount(account, existing));
++    } catch (error) {
++      this._reportFatalError(error);
++    }
++  }
++
++  commitReconnectedAccount(account: Account, existing: Account): Promise<AccountAdd['account'] | false> {
+     const { clean, set } = splitAccountSecrets(account);
+     const { id, emailAddress, authedAt } = existing.toJSON();
+     const next = clean.toJSON();
+@@ -56,11 +70,7 @@ class KeyManager {
+       authedAt: next.authedAt,
+       secrets: set,
+     };
+-    try {
+-      return await ipcRenderer.invoke('credentials:reconnect-account', request);
+-    } catch (err) {
+-      this._reportFatalError(err);
+-    }
++    return ipcRenderer.invoke('credentials:reconnect-account', request);
+   }
+ 
+   async insertAccountSecrets(account: Account, keys: KeySet = null) {
+diff --git a/app/src/window-bootstrap.ts b/app/src/window-bootstrap.ts
+index 4817b3b..5c0e4a8 100644
+--- a/app/src/window-bootstrap.ts
++++ b/app/src/window-bootstrap.ts
+@@ -7,7 +7,7 @@ import './safe-shell';
+ 
+ import AppEnvClass from './app-env';
+ window.AppEnv = new AppEnvClass();
+-AppEnv.startRootWindow();
++module.exports = AppEnv.startRootWindow();
+ 
+ // Workaround for focus getting cleared upon window creation
+ const windowFocused = () => {
+diff --git a/app/static/index.js b/app/static/index.js
+index b6ce24e..9a5a151 100644
+--- a/app/static/index.js
++++ b/app/static/index.js
+@@ -89,10 +89,12 @@ function setupWindow(loadSettings) {
+     require('../src/compile-cache-ts-unsupported');
+   }
+ 
+-  require(loadSettings.bootstrapScript);
++  return require(loadSettings.bootstrapScript);
+ }
+ 
+-window.onload = function () {
++window.onload = async function () {
++  var ipcRenderer = require('electron').ipcRenderer;
++  var documentGeneration = ipcRenderer.sendSync('window-document-generation');
+   try {
+     var startTime = Date.now();
+ 
+@@ -110,9 +112,10 @@ window.onload = function () {
+     var path = require('path');
+     process.resourcesPath = path.normalize(process.resourcesPath);
+ 
+-    setupWindow(loadSettings);
++    await setupWindow(loadSettings);
+     setLoadTime(Date.now() - startTime);
+   } catch (error) {
++    ipcRenderer.send('window-command', 'window:setup-failed', documentGeneration);
+     handleSetupError(error);
+   }
+ };
