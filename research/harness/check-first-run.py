@@ -29,7 +29,8 @@ try:
         time.sleep(0.1)
     if run.returncode: raise RuntimeError(f'UI check failed: {run.returncode}')
     sent=server.sent_messages()
-    scoped_phase=os.environ.get('PAPER_REED_PROVIDER_PICKER_CHECK') or os.environ.get('PAPER_REED_GOOGLE_PAGE_CHECK')
+    scoped_phase=(os.environ.get('PAPER_REED_PROVIDER_PICKER_CHECK') or os.environ.get('PAPER_REED_GOOGLE_PAGE_CHECK')
+                  or os.environ.get('PAPER_REED_ICLOUD_PAGE_CHECK'))
     assert len(sent)==(0 if scoped_phase else 1), len(sent)
     if not scoped_phase:
         assert b'Paper Reed first run reply' in sent[0].raw

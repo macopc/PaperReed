@@ -148,7 +148,7 @@ async function checkAbandonedSetup(store) {
     const store=${store};
     return {page:store.page(),provider:store.account().provider,saved:probe.saved,completed:probe.completed};
    })()`);
-   assert.deepEqual(outcome,{page:'account-settings',provider:'icloud',saved:0,completed:0},
+   assert.deepEqual(outcome,{page:'paper-reed-icloud',provider:'icloud',saved:0,completed:0},
     `abandoned ${request} (${succeed ? 'success' : 'failure'}) must not change the active setup`);
    assert.equal(await active.locator('#emailAddress').inputValue(),'current@icloud.com');
    await back.click();
@@ -287,7 +287,7 @@ async function checkProviderPicker(phase) {
  await main.mouse.click(oldGmail.x+oldGmail.width/2,oldGmail.y+oldGmail.height/2);
  assert.equal(await run(`${store}.account().provider`),'icloud','an exiting Gmail button cannot change the selected provider');
  assert.equal(exitInert,true,'exiting provider page is inert');
- await main.locator('.AccountBasicSettingsForm').getByText(/使用 Apple 账户生成的应用专用密码/).waitFor();
+ await main.locator('.pr-icloud-setup').getByRole('heading',{name:'连接 iCloud 邮件'}).waitFor();
  const back=main.getByRole('button',{name:'返回上一步',exact:true});
  await run(`window.prPickerCloseCalls=0;
   window.prOriginalPickerQuit=AppEnv.quit;window.prOriginalPickerClose=AppEnv.close;
@@ -662,6 +662,8 @@ async function checkGooglePage(phase) {
  if(googlePhase){await checkGooglePage(googlePhase);await stop();return;}
  const pickerPhase=process.env.PAPER_REED_PROVIDER_PICKER_CHECK;
  if(pickerPhase){await checkProviderPicker(pickerPhase);await stop();return;}
+ const icloudPhase=process.env.PAPER_REED_ICLOUD_PAGE_CHECK;
+ if(icloudPhase){await require('./check-icloud-onboarding.cjs')({phase:icloudPhase,app,main,run,until,shot,out,fixture,work});await stop();return;}
  const activePage=main.locator('.page-container:not([inert])');
  await activePage.locator('[data-provider=gmail]').click();
  await activePage.getByRole('button',{name:'使用 Google 登录',exact:true}).waitFor();
@@ -688,17 +690,18 @@ async function checkGooglePage(phase) {
  await activePage.locator('#name').fill('iCloud fixture');
  await activePage.locator('#emailAddress').fill('fixture@icloud.com');
  await activePage.locator('[id="settings.imap_password"]').fill('fixture-app-password');
- await activePage.getByRole('button',{name:'下一步',exact:true}).click();
+ await activePage.getByRole('button',{name:'服务器设置…',exact:true}).click();
  await activePage.locator('[id="settings.imap_host"]').waitFor();
  assert.equal(await activePage.locator('[id="settings.imap_host"]').inputValue(),'imap.mail.me.com');
  assert.equal(await activePage.locator('[id="settings.smtp_host"]').inputValue(),'smtp.mail.me.com');
  assert.equal(await activePage.locator('[id="settings.smtp_port"]').inputValue(),'587');
  assert.equal(await activePage.locator('[id="settings.smtp_security"]').inputValue(),'STARTTLS');
  await activePage.locator('.AccountIMAPSettingsForm').getByRole('button',{name:'返回',exact:true}).click();
+ const icloud=activePage.locator('.pr-icloud-setup');
+ assert.equal(await icloud.locator('#emailAddress').inputValue(),'fixture@icloud.com');
+ assert(await icloud.getByRole('button',{name:'连接邮箱',exact:true}).isEnabled(),'returning before the fade ends reopens an editable form');
+ await previous.click();
  const basic=activePage.locator('.AccountBasicSettingsForm');
- assert.equal(await basic.locator('#emailAddress').inputValue(),'fixture@icloud.com');
- assert(await basic.getByRole('button',{name:'返回',exact:true}).isEnabled(),'returning before the fade ends reopens an editable form');
- await basic.getByRole('button',{name:'返回',exact:true}).click();
  await activePage.locator('[data-provider=imap]').click();
  await basic.locator('#name').waitFor();
  assert.equal(await basic.locator('#emailAddress').inputValue(),'','switching providers starts a fresh form');

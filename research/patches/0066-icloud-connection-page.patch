@@ -1,0 +1,567 @@
+diff --git a/app/internal_packages/onboarding/lib/onboarding-helpers.ts b/app/internal_packages/onboarding/lib/onboarding-helpers.ts
+index 127c75f..e942832 100644
+--- a/app/internal_packages/onboarding/lib/onboarding-helpers.ts
++++ b/app/internal_packages/onboarding/lib/onboarding-helpers.ts
+@@ -149,6 +149,16 @@ function mailspringTemplateFor(domain: string, provider: string) {
+   return match.alias ? MailspringProviderSettings[match.alias] : match;
+ }
+ 
++export function isICloudAccount(account: Account) {
++  return account.provider === 'icloud' ||
++    account.settings?.imap_host?.toLowerCase() === MailspringProviderSettings.icloud.imap_host;
++}
++
++export function addressWithLowercaseDomain(address: string) {
++  const domainStart = address.lastIndexOf('@') + 1;
++  return address.slice(0, domainStart) + address.slice(domainStart).toLowerCase();
++}
++
+ // Proton does not support nested folders outside its Folders/ and Labels/ namespaces, so
+ // Proton accounts pin container_folder to "Folders" via the provider table.
+ // https://protonmail.com/support/knowledge-base/creating-folders/#comment-10460
+diff --git a/app/internal_packages/onboarding/lib/onboarding-root.tsx b/app/internal_packages/onboarding/lib/onboarding-root.tsx
+index 35f5371..62ad0e6 100644
+--- a/app/internal_packages/onboarding/lib/onboarding-root.tsx
++++ b/app/internal_packages/onboarding/lib/onboarding-root.tsx
+@@ -18,6 +18,7 @@ import InitialSubscriptionPage from './page-initial-subscription';
+ import AccountSettingsPageOutlook from './page-account-settings-outlook';
+ import AccountCertificatePage from './page-account-certificate';
+ import PaperReedGooglePage from './paper-reed-google-page';
++import PaperReedICloudPage from './paper-reed-icloud-page';
+ import { RejectedCertificate } from './certificate-review';
+ 
+ const PageComponents = {
+@@ -26,6 +27,7 @@ const PageComponents = {
+   authenticate: AuthenticatePage,
+   'account-choose': AccountChoosePage,
+   'paper-reed-google': PaperReedGooglePage,
++  'paper-reed-icloud': PaperReedICloudPage,
+   'account-settings': AccountSettingsPage,
+   'account-settings-gmail': AccountSettingsPageGmail,
+   'account-settings-o365': AccountSettingsPageO365,
+diff --git a/app/internal_packages/onboarding/lib/onboarding-store.ts b/app/internal_packages/onboarding/lib/onboarding-store.ts
+index 4729288..214a8de 100644
+--- a/app/internal_packages/onboarding/lib/onboarding-store.ts
++++ b/app/internal_packages/onboarding/lib/onboarding-store.ts
+@@ -11,6 +11,7 @@ import MailspringStore from 'mailspring-store';
+ 
+ import * as OnboardingActions from './onboarding-actions';
+ import { RejectedCertificate } from './certificate-review';
++import { addressWithLowercaseDomain, isICloudAccount } from './onboarding-helpers';
+ 
+ export function isGmail(account: Account) {
+   return account.provider === 'gmail' || account.settings.imap_host === 'imap.gmail.com' || account.settings.gmail_api_send;
+@@ -18,11 +19,25 @@ export function isGmail(account: Account) {
+ 
+ export type AccountSaveState = 'saving' | 'opening' | null;
+ 
++function iCloudReconnectSnapshot(account: Account) {
++  const { id, emailAddress, name, authedAt, provider, settings } = account;
++  return new Account({
++    id, emailAddress, name, authedAt, provider,
++    settings: {
++      imap_host: settings?.imap_host,
++      container_folder: settings?.container_folder,
++      create_helper_folders: settings?.create_helper_folders,
++    },
++  });
++}
++
+ class OnboardingStore extends MailspringStore {
+   _account: Account;
+   _pageStack: string[];
+   _pageVisit = 0;
+   _accountSaveState: AccountSaveState = null;
++  _icloudServerAccount?: Account;
++  _matchedICloudAccounts: Account[] = [];
+   // Cleared by any later setAccount, such as submitting the form or going back.
+   _confirmServers = false;
+   _rejectedCertificates: RejectedCertificate[] = [];
+@@ -52,9 +67,14 @@ class OnboardingStore extends MailspringStore {
+       this._account = existingAccountJSON
+         ? new Account({}).fromJSON(existingAccountJSON)
+         : new Account({ name: '', emailAddress: '', provider: 'imap', settings: {} });
+-      this._pageStack = existingAccountJSON
+-        ? ['account-choose', isGmail(this._account) ? 'paper-reed-google' : 'account-settings-imap']
+-        : ['account-choose'];
++      this._pageStack = ['account-choose'];
++      if (existingAccountJSON) {
++        const page = isGmail(this._account) ? 'paper-reed-google' : 'account-settings-imap';
++        this._pageStack.push(page);
++        if (page === 'account-settings-imap' && isICloudAccount(this._account)) {
++          this._icloudServerAccount = iCloudReconnectSnapshot(this._account);
++        }
++      }
+       return;
+     }
+ 
+@@ -109,13 +129,16 @@ class OnboardingStore extends MailspringStore {
+ 
+   _onChooseAccountProvider = (provider: string) => {
+     if (this._accountSaveState) return;
++    this._icloudServerAccount = undefined;
++    this._matchedICloudAccounts = [];
+     if (AppEnv.config.get('core.paperReed.enabled')) {
+       this._pageStack = ['account-choose'];
+       this._onSetAccount(new Account({
+         name: '', emailAddress: '',
+         provider, settings: {},
+       }));
+-      this._onMoveToPage(provider === 'gmail' ? 'paper-reed-google' : 'account-settings');
++      const page = { gmail: 'paper-reed-google', icloud: 'paper-reed-icloud' }[provider] || 'account-settings';
++      this._onMoveToPage(page);
+       return;
+     }
+     const nextPage =
+@@ -160,15 +183,25 @@ class OnboardingStore extends MailspringStore {
+   _onMoveToPreviousPage = () => {
+     if (this._accountSaveState || this._pageStack.length <= 1) return;
+     this._pageStack.pop();
++    if (this.page() === 'paper-reed-icloud' || this.page() === 'account-choose') {
++      this._icloudServerAccount = undefined;
++    }
++    if (this.page() === 'account-choose') this._matchedICloudAccounts = [];
+     this._pageVisit++;
+     this.trigger();
+   };
+ 
+-  _onMoveToPage = (page: string) => {
++  _onMoveToPage = (page: string, existing?: Account) => {
+     if (this._accountSaveState) return;
+     if (AppEnv.config.get('core.paperReed.enabled') && page === 'account-settings-imap' && isGmail(this._account)) {
+       page = 'paper-reed-google';
+     }
++    if (this.page() === 'paper-reed-icloud' && page === 'account-settings-imap') {
++      this._icloudServerAccount = existing;
++    } else if (page !== 'account-certificate') {
++      this._icloudServerAccount = undefined;
++    }
++    if (page === 'account-choose') this._matchedICloudAccounts = [];
+     this._pageStack.push(page);
+     this._pageVisit++;
+     this.trigger();
+@@ -199,6 +232,12 @@ class OnboardingStore extends MailspringStore {
+ 
+   _onFinishAndAddAccount = async (account: Account, existing?: Account) => {
+     if (this._accountSaveState) return;
++    const page = this.page();
++    const original = existing ?? (
++      page === 'account-settings-imap' || page === 'account-certificate'
++        ? this._icloudServerAccount
++        : undefined
++    );
+     const paperReed = AppEnv.config.get('core.paperReed.enabled');
+     if (paperReed) {
+       this._accountSaveState = 'saving';
+@@ -215,10 +254,10 @@ class OnboardingStore extends MailspringStore {
+ 
+     let stored: Account | null;
+     try {
+-      stored = existing
+-        ? await AccountStore.reconnectAccount(account, existing)
++      stored = original
++        ? await AccountStore.reconnectAccount(account, original)
+         : await AccountStore.addAccount(account);
+-      if (stored && (existing || isReconnect)) {
++      if (stored && (original || isReconnect)) {
+         // The account's sync process is still running with its old settings.
+         Actions.restartAccountSync(stored);
+       }
+@@ -297,6 +336,28 @@ class OnboardingStore extends MailspringStore {
+     return this._account;
+   }
+ 
++  rememberICloudAccount(typedAddress: string): { account?: Account; ambiguous?: boolean } {
++    if (this.page() !== 'paper-reed-icloud' || !typedAddress) return {};
++    const remembered = this._matchedICloudAccounts;
++    // Keep each remembered snapshot, including removed records, while ranking all spellings together.
++    const accounts = [...remembered, ...AccountStore.accounts().filter(saved =>
++      !remembered.some(original => original.id === saved.id && original.emailAddress === saved.emailAddress)
++    )];
++    const exact = accounts.find(saved => saved.emailAddress === typedAddress);
++    const address = addressWithLowercaseDomain(typedAddress);
++    let matches = exact ? [exact] : accounts.filter(saved => addressWithLowercaseDomain(saved.emailAddress) === address);
++    if (!matches.length) {
++      const key = typedAddress.toLowerCase();
++      matches = accounts.filter(saved => isICloudAccount(saved) && saved.emailAddress.toLowerCase() === key);
++    }
++    if (matches.length > 1) return { ambiguous: true };
++    const [existing] = matches;
++    if (!existing || remembered.includes(existing)) return { account: existing };
++    const original = iCloudReconnectSnapshot(existing);
++    remembered.push(original);
++    return { account: original };
++  }
++
+   confirmServers() {
+     return this._confirmServers;
+   }
+diff --git a/app/internal_packages/onboarding/lib/page-account-settings.tsx b/app/internal_packages/onboarding/lib/page-account-settings.tsx
+index e02b003..8f7b49b 100644
+--- a/app/internal_packages/onboarding/lib/page-account-settings.tsx
++++ b/app/internal_packages/onboarding/lib/page-account-settings.tsx
+@@ -126,8 +126,6 @@ export class AccountBasicSettingsForm extends React.Component<AccountBasicSettin
+       this.props.account.provider === 'imap' && /@(gmail|googlemail)\.com$/i.test(this.props.account.emailAddress.trim());
+     return (
+       <form className="settings">
+-        {AppEnv.config.get('core.paperReed.enabled') && this.props.account.provider === 'icloud' &&
+-          <p>使用 Apple 账户生成的应用专用密码。服务器设置会自动填写。</p>}
+         <FormField
+           field="name"
+           title={AppEnv.config.get('core.paperReed.enabled') ? '发件人姓名' : localized('Name')}
+diff --git a/app/internal_packages/onboarding/lib/paper-reed-icloud-page.tsx b/app/internal_packages/onboarding/lib/paper-reed-icloud-page.tsx
+new file mode 100644
+index 0000000..dafd4cf
+--- /dev/null
++++ b/app/internal_packages/onboarding/lib/paper-reed-icloud-page.tsx
+@@ -0,0 +1,238 @@
++import { shell } from 'electron';
++import React, { useEffect, useRef, useState } from 'react';
++import { Account, AccountStore, RegExpUtils } from 'mailspring-exports';
++import * as OnboardingActions from './onboarding-actions';
++import { addressWithLowercaseDomain, expandAccountForSetup, finalizeAndValidateAccount } from './onboarding-helpers';
++import OnboardingStore from './onboarding-store';
++
++const appleAccountURL = 'https://account.apple.com/';
++const fields = [
++  { key: 'name', id: 'name', title: '发件人姓名', autoComplete: 'name' },
++  { key: 'email', id: 'emailAddress', title: 'iCloud 邮件地址', inputMode: 'email', autoComplete: 'email' },
++  { key: 'password', id: 'settings.imap_password', title: '应用专用密码', type: 'password' },
++] as const;
++
++type Field = typeof fields[number]['key'];
++type Problem = { message: string; field?: Field };
++
++function connectionProblem(error: {
++  errorCode?: string;
++  errorService?: string;
++  errorAdvice?: string;
++  isNetworkError?: boolean;
++  certificates?: unknown[];
++}): Problem {
++  if (error.errorAdvice || error.certificates?.length || error.errorCode === 'ErrorCertificate' ||
++      ['ErrorTLSNotAvailable', 'ErrorStartTLSNotAvailable'].includes(error.errorCode)) {
++    return { message: '无法建立安全连接。请检查系统时间和网络设置后重试。' };
++  }
++  if (error.isNetworkError) return { message: '网络连接中断。请检查网络后重试。' };
++  switch (error.errorCode) {
++    case 'ErrorAuthentication':
++    case 'ErrorAuthenticationRequired':
++      return {
++        field: 'password',
++        message: error.errorService === 'smtp'
++          ? 'iCloud 发信服务器拒绝了登录。请核对邮件地址，并生成新的应用专用密码后重试。'
++          : 'iCloud 拒绝了登录。请核对邮件地址，并生成新的应用专用密码后重试。',
++      };
++    case 'ErrorNeedsConnectToWebmail':
++      return { message: '请先在 iCloud 网页版确认邮件已开通，再回来连接。' };
++    case 'ErrorInvalidAccount':
++      return { message: '无法读取 iCloud 收件箱。请在 iCloud 网页版确认收件箱可用，再回来重试。' };
++    case 'ErrorConnection':
++      return { message: '暂时无法连接 iCloud 邮件服务器。请检查网络，或稍后重试。' };
++    default:
++      return { message: '未能连接 iCloud 邮件。请重试。' };
++  }
++}
++
++export default function PaperReedICloudPage({ account, isCurrentVisit }: {
++  account: Account;
++  isCurrentVisit?: () => boolean;
++}) {
++  const [values, setValues] = useState({
++    name: account.name || '',
++    email: account.emailAddress || '',
++    password: account.settings.imap_password || '',
++  });
++  const [problem, setProblem] = useState<Problem>();
++  const [guideFailed, setGuideFailed] = useState(false);
++  const [busy, setBusy] = useState(false);
++  const form = useRef<HTMLFormElement>(null);
++  const submitButton = useRef<HTMLButtonElement>(null);
++  const errorMessage = useRef<HTMLParagraphElement>(null);
++  const submitting = useRef(false);
++  const guideRequest = useRef(0);
++  const current = () => isCurrentVisit?.() !== false;
++  const focusField = (field: Field) => {
++    (form.current?.elements.namedItem(field) as HTMLInputElement | null)?.focus();
++  };
++
++  useEffect(() => {
++    const firstEmpty = fields.find(({ key }) => !values[key]);
++    focusField(firstEmpty?.key || 'name');
++  }, []);
++
++  useEffect(() => {
++    const message = errorMessage.current;
++    if (problem && message && message.getBoundingClientRect().bottom > window.innerHeight) {
++      message.scrollIntoView({ block: 'nearest' });
++    }
++  }, [problem]);
++
++  const openPasswordGuide = async (event: React.MouseEvent<HTMLAnchorElement>) => {
++    event.preventDefault();
++    const request = ++guideRequest.current;
++    setGuideFailed(false);
++    try {
++      await shell.openExternal(appleAccountURL);
++    } catch {
++      if (current() && request === guideRequest.current) setGuideFailed(true);
++    }
++  };
++
++  const connect = async (advanced = false) => {
++    if (submitting.current || !current()) return;
++    guideRequest.current++;
++    setGuideFailed(false);
++    const name = values.name.trim();
++    const typedAddress = values.email.trim();
++    const password = values.password.trim();
++    const invalid = ([
++      { field: 'name', valid: !!name, message: '请填写发件人姓名。' },
++      { field: 'email', valid: RegExpUtils.emailRegex({ matchTailOfString: true }).exec(typedAddress)?.[0] === typedAddress,
++        message: '请填写完整的 iCloud 邮件地址。' },
++      { field: 'password', valid: !!password, message: '请填写 Apple 账户的应用专用密码。' },
++    ] as const).find(candidate => !candidate.valid);
++    if (invalid) {
++      setProblem(invalid);
++      focusField(invalid.field);
++      return;
++    }
++
++    const { account: existing, ambiguous } = OnboardingStore.rememberICloudAccount(typedAddress);
++    if (ambiguous) {
++      setProblem({ field: 'email', message: '此地址匹配到多个账号。请按邮箱账号设置中显示的大小写填写。' });
++      focusField('email');
++      return;
++    }
++    if (existing && !AccountStore.accountForId(existing.id)) {
++      setProblem({ field: 'email', message: '此邮箱账号已移除。请返回邮箱选择后重新添加，或填写另一个邮箱。' });
++      focusField('email');
++      return;
++    }
++    setProblem(undefined);
++    submitting.current = true;
++    setBusy(true);
++    if (!advanced) submitButton.current?.focus();
++    try {
++      const entered = new Account({
++        name, emailAddress: existing?.emailAddress ?? addressWithLowercaseDomain(typedAddress), provider: 'icloud',
++        settings: {
++          imap_password: password,
++          smtp_verification: 'login',
++          create_helper_folders: existing?.settings.create_helper_folders ?? false,
++        },
++      });
++      const { account: expanded } = await expandAccountForSetup(entered);
++      if (!current()) return;
++      if (existing?.settings.container_folder !== undefined) {
++        expanded.settings.container_folder = existing.settings.container_folder;
++      }
++
++      let draft = expanded;
++      if (account.emailAddress === expanded.emailAddress) {
++        const { imap_password, smtp_password, ...serverSettings } = account.settings;
++        draft = expanded.clone();
++        draft.settings = {
++          ...expanded.settings,
++          ...serverSettings,
++          smtp_password: smtp_password === imap_password ? password : smtp_password,
++        };
++      }
++      // Keep the same mailbox's server draft available while direct validation uses Apple's preset.
++      OnboardingActions.setAccount(draft);
++      if (advanced) {
++        OnboardingActions.moveToPage('account-settings-imap', existing);
++        return;
++      }
++      const validated = await finalizeAndValidateAccount(expanded, existing?.id);
++      if (current()) OnboardingActions.finishAndAddAccount(validated, existing);
++    } catch (error) {
++      if (!current()) return;
++      const next = connectionProblem(error || {});
++      setProblem(next);
++      if (next.field && document.activeElement === submitButton.current) focusField(next.field);
++    } finally {
++      if (current()) {
++        submitting.current = false;
++        setBusy(false);
++      }
++    }
++  };
++
++  return (
++    <div className="page account-setup pr-icloud-setup">
++      <div className="pr-onboarding-brand">Paper Reed</div>
++      <section className="pr-icloud-content" aria-labelledby="pr-icloud-heading">
++        <h2 id="pr-icloud-heading">连接 iCloud 邮件</h2>
++        <form ref={form} noValidate onSubmit={event => { event.preventDefault(); void connect(); }}
++          onKeyDown={event => {
++            if (event.repeat && event.key === 'Enter') event.preventDefault();
++          }}>
++          {fields.map(({ key, id, title, ...attrs }) => (
++            <div className="pr-icloud-field" key={key}>
++              <label htmlFor={id}>{title}</label>
++              <input
++                {...attrs}
++                id={id}
++                name={key}
++                value={values[key]}
++                required
++                readOnly={busy}
++                spellCheck={false}
++                autoCapitalize={key === 'name' ? 'words' : 'none'}
++                aria-invalid={problem?.field === key || undefined}
++                aria-describedby={key === 'password'
++                  ? `pr-icloud-password-help${problem?.field === key ? ' pr-icloud-error' : ''}`
++                  : problem?.field === key ? 'pr-icloud-error' : undefined}
++                onChange={e => {
++                  const { value } = e.currentTarget;
++                  if (key === 'email' && current()) OnboardingStore.rememberICloudAccount(value.trim());
++                  setValues(previous => ({ ...previous, [key]: value }));
++                  if (problem?.field === key || (key === 'email' && problem?.field === 'password')) {
++                    setProblem(undefined);
++                  }
++                }}
++              />
++            </div>
++          ))}
++          <p id="pr-icloud-password-help">
++            在 Apple 账户的「登录与安全」中生成应用专用密码，需开启双重认证。
++            <a className="no-open-link-events" href={appleAccountURL} onKeyDown={event => {
++              if (event.key === 'Enter') {
++                if (event.repeat) event.preventDefault();
++                event.stopPropagation();
++              }
++            }} onClick={openPasswordGuide}>前往 Apple 账户<span aria-hidden="true"> ↗</span></a>
++            <span className="pr-icloud-guide-error" role="alert">
++              {guideFailed && '无法打开浏览器。请在浏览器中访问 account.apple.com。'}
++            </span>
++          </p>
++          <div className="pr-icloud-actions">
++            <button className="btn btn-add-account" type="submit" ref={submitButton} aria-disabled={busy}>
++              连接邮箱
++            </button>
++            <button className="btn pr-icloud-advanced" type="button" aria-disabled={busy}
++              onClick={() => void connect(true)}>
++              服务器设置…
++            </button>
++          </div>
++          <div role="status" className="pr-icloud-status">{busy && '正在验证 iCloud 邮件连接…'}</div>
++          <p id="pr-icloud-error" role="alert" ref={errorMessage}>{problem?.message}</p>
++        </form>
++      </section>
++    </div>
++  );
++}
+diff --git a/app/internal_packages/onboarding/styles/onboarding.less b/app/internal_packages/onboarding/styles/onboarding.less
+index d6d1426..3a7ac46 100644
+--- a/app/internal_packages/onboarding/styles/onboarding.less
++++ b/app/internal_packages/onboarding/styles/onboarding.less
+@@ -934,6 +934,71 @@ body.platform-win32 {
+     font-size: 11px;
+     margin-top: 25px;
+   }
++  .pr-icloud-setup {
++    padding-inline: 24px;
++    .pr-onboarding-brand { margin-bottom: 12px; }
++    .pr-icloud-content { max-width: 360px; margin: 0 auto; }
++    h2 { margin-bottom: 12px; }
++    form { width: 100%; margin: 0; padding: 0; text-align: left; }
++    .pr-icloud-field { margin-bottom: 8px; }
++    label { display: block; color: #626b60; margin-bottom: 4px; }
++    input {
++      box-sizing: border-box;
++      display: block;
++      width: 100%;
++      height: 34px;
++      margin: 0;
++      background: #fffefa;
++      color: #353a36;
++    }
++    input[aria-invalid='true'] { border-color: #a56a60; }
++    #pr-icloud-password-help {
++      margin: 0 0 12px;
++      color: #626b60;
++      font-size: 12px;
++      line-height: 20px;
++    }
++    .pr-icloud-guide-error:not(:empty) { display: block; color: #813f36; }
++    a {
++      display: inline-block;
++      margin-left: 4px;
++      color: #4b634f;
++      text-decoration: underline;
++      text-underline-offset: 2px;
++    }
++    .pr-icloud-actions { display: flex; flex-wrap: wrap; gap: 12px; }
++    .btn { min-height: 36px; margin: 0; padding: 0 12px; }
++    .btn-add-account { min-width: 132px; }
++    .pr-icloud-advanced { border-color: transparent; }
++    .pr-icloud-advanced:hover:not([aria-disabled='true']) { background: #edf0e8; }
++    .btn[aria-disabled='true'] { color: #586650; background: transparent; cursor: default; }
++    .btn-add-account[aria-disabled='true'] { background: #edf0e8; border-color: #d9ddd4; }
++    a:focus-visible, .btn:focus-visible, input:focus-visible {
++      outline: 2px solid #4b634f;
++      outline-offset: 2px;
++    }
++    .pr-icloud-status:not(:empty), #pr-icloud-error:not(:empty) {
++      margin: 12px 0 0;
++      line-height: 20px;
++    }
++    .pr-icloud-status { color: #586650; }
++    #pr-icloud-error:empty { margin: 0; }
++    #pr-icloud-error:not(:empty) {
++      padding: 8px 12px;
++      border-left: 2px solid #a56a60;
++      background: #f5ede8;
++      color: #813f36;
++    }
++    @media (max-height: 540px) {
++      padding-bottom: 16px;
++      .pr-onboarding-brand, h2 { margin-bottom: 8px; }
++      .pr-icloud-field { margin-bottom: 4px; }
++      label { margin-bottom: 2px; line-height: 18px; }
++      #pr-icloud-password-help { margin-bottom: 6px; }
++      .pr-icloud-status:not(:empty), #pr-icloud-error:not(:empty) { margin-top: 8px; }
++      #pr-icloud-error:not(:empty) { padding-block: 6px; }
++    }
++  }
+   .pr-google-setup {
+     padding-inline: 24px;
+     .pr-onboarding-brand { margin-bottom: 12px; }
+diff --git a/app/src/browser/application.ts b/app/src/browser/application.ts
+index cfbb732..4806251 100644
+--- a/app/src/browser/application.ts
++++ b/app/src/browser/application.ts
+@@ -1006,6 +1006,7 @@ export default class Application extends EventEmitter {
+ 
+         accounts[index] = {
+           ...accounts[index],
++          name: request.name ?? accounts[index].name,
+           provider: request.provider,
+           settings: request.settings,
+           authedAt: request.authedAt,
+diff --git a/app/src/browser/credential-store.ts b/app/src/browser/credential-store.ts
+index 387adcd..b9fd576 100644
+--- a/app/src/browser/credential-store.ts
++++ b/app/src/browser/credential-store.ts
+@@ -4,6 +4,7 @@ export type KeySet = Record<string, string>;
+ export type CredentialChange = { set?: KeySet; remove?: string[]; removePrefix?: string };
+ export type AccountReconnect = {
+   expected: { id: string; emailAddress: string; authedAt: number | null };
++  name?: string;
+   settings: Record<string, unknown>;
+   provider: string;
+   authedAt: number;
+diff --git a/app/src/key-manager.ts b/app/src/key-manager.ts
+index c9ad6c2..d55073a 100644
+--- a/app/src/key-manager.ts
++++ b/app/src/key-manager.ts
+@@ -50,6 +50,7 @@ class KeyManager {
+     const next = clean.toJSON();
+     const request: AccountReconnect = {
+       expected: { id, emailAddress, authedAt: authedAt ?? null },
++      name: next.name === existing.name ? undefined : next.name,
+       provider: next.provider,
+       settings: next.settings,
+       authedAt: next.authedAt,
