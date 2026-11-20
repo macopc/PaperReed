@@ -1,0 +1,419 @@
+diff --git a/app/internal_packages/paper-reed/lib/workspace.tsx b/app/internal_packages/paper-reed/lib/workspace.tsx
+index 16362b0..32f9657 100644
+--- a/app/internal_packages/paper-reed/lib/workspace.tsx
++++ b/app/internal_packages/paper-reed/lib/workspace.tsx
+@@ -22,6 +22,7 @@ import {
+ import { desktopDraftRecoveryInfo, DraftRecoveryInfo } from '../../../src/services/mail-core';
+ import React from 'react';
+ import { formatShortcut } from '../../../src/keymap-manager';
++import { Folder } from '../../../src/flux/models/folder';
+ import MailSearch from './mail-search';
+ import CommandPanel, { MailCommand } from './command-panel';
+ import { agentHandoff, cliStatus } from '../../mcp-server/lib/paper-reed-cli';
+@@ -67,6 +68,39 @@ const sendLabel = (op: { phase: string; sentCopy: string }) =>
+         ? '未发送，请检查草稿'
+         : '正在发送';
+ const colors = ['#688177', '#a18265', '#78849a', '#957789'];
++const mailReadError = '邮件暂时无法读取，请重试。';
++const emptyInboxCopy = {
++  reading: { title: '正在读取收件箱', detail: '' },
++  syncing: { title: '正在同步收件箱', detail: '同步到的邮件会自动显示在这里。' },
++  interrupted: { title: '本机暂无收件箱邮件', detail: '同步恢复后，邮件会自动显示在这里。' },
++  unverified: { title: '暂时无法确认收件箱内容', detail: '' },
++  'no-account': { title: '暂无已连接的邮箱', detail: '可在设置中添加邮箱。' },
++  unread: { title: '没有未读邮件', detail: '' },
++  empty: { title: '收件箱为空', detail: '新邮件会自动显示在这里。' },
++};
++type EmptyInboxState = keyof typeof emptyInboxCopy;
++const unreadInboxCopy: Partial<Record<EmptyInboxState, { title: string; detail: string }>> = {
++  reading: { title: '正在读取未读邮件', detail: '' },
++  syncing: { title: '正在同步收件箱', detail: '同步到的未读邮件会自动显示在这里。' },
++  interrupted: { title: '本机暂无未读邮件', detail: '' },
++};
++type InboxScanState =
++  | { state: 'pending' | 'unverified' }
++  | { state: 'complete'; revision: string };
++
++function completedInboxScan(scans: InboxScanState[], mappingRevision: number) {
++  const revisions = scans.flatMap((scan) => scan.state === 'complete' ? [scan.revision] : []);
++  return revisions.length === scans.length
++    ? JSON.stringify([mappingRevision, ...revisions.sort()])
++    : null;
++}
++
++function keepNativeButtonActivation(event: React.KeyboardEvent<HTMLButtonElement>) {
++  if (event.key !== 'Enter' && event.key !== ' ') return;
++  // The workspace keymap binds Enter to opening a conversation.
++  event.stopPropagation();
++  if (event.repeat) event.preventDefault();
++}
+ 
+ interface State {
+   palette?: boolean;
+@@ -81,6 +115,7 @@ interface State {
+   recovery: DraftRecoveryInfo[];
+   snippets: Record<string, string>;
+   loading: boolean;
++  listRead: { scope: string; inboxScan: string | null; failed: boolean } | null;
+   limit: number;
+   more: boolean;
+   notice: string;
+@@ -124,6 +159,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     recovery: [],
+     snippets: {},
+     loading: true,
++    listRead: null,
+     limit: 50,
+     more: false,
+     notice: '',
+@@ -142,6 +178,8 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   };
+   unlisten: (() => void)[] = [];
+   generation = 0;
++  private inboxMapping = '';
++  private inboxMappingRevision = 0;
+   mounted = false;
+   refreshTimer: ReturnType<typeof setTimeout>;
+   operationTimer: ReturnType<typeof setInterval>;
+@@ -157,9 +195,15 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+           this.scheduleRefresh();
+       }),
+       onLocalTriageChanged(this.scheduleRefresh),
+-      CategoryStore.listen(this.scheduleRefresh),
++      CategoryStore.listen(() => {
++        if (this.updateInboxMapping() && !this.state.rows.length) this.forceUpdate();
++        this.scheduleRefresh();
++      }),
+       FolderSyncProgressStore.listen(() => this.forceUpdate()),
+-      AccountStore.listen(this.scheduleRefresh),
++      AccountStore.listen(() => {
++        this.forceUpdate();
++        this.scheduleRefresh();
++      }),
+       OnlineStatusStore.listen(() => this.forceUpdate()),
+       WorkspaceStore.setSectionLeaveGuard(() => {
+         if (!this.dirtySessions().length) return true;
+@@ -242,10 +286,37 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     clearTimeout(this.refreshTimer);
+     this.refreshTimer = setTimeout(this.refresh, 100);
+   };
++  listReadScope(ids = this.accountIds()) {
++    const { folder, query, unreadOnly } = this.state;
++    return JSON.stringify([folder, query, unreadOnly, [...ids].sort()]);
++  }
++  private updateInboxMapping(ids = this.accountIds()) {
++    // Match the Inbox categories used by the production list query.
++    const categories = ids.flatMap((id) => CategoryStore.categories(id)
++      .filter((category) => category.role === 'inbox')
++      .map((category) => category.id));
++    const mapping = JSON.stringify(categories.sort());
++    if (mapping === this.inboxMapping) return false;
++    this.inboxMapping = mapping;
++    this.inboxMappingRevision++;
++    return true;
++  }
+   refresh = async () => {
+     const generation = ++this.generation;
+     const { folder, limit, query, unreadOnly } = this.state;
+     const ids = this.accountIds();
++    const scope = this.listReadScope(ids);
++    const readingInbox = folder === 'inbox' && !query;
++    if (readingInbox) this.updateInboxMapping(ids);
++    const mappingRevision = this.inboxMappingRevision;
++    const inboxScan = readingInbox
++      ? completedInboxScan(
++          this.visibleAccounts(ids).map((account) => this.inboxScanState(account)), mappingRevision
++        )
++      : null;
++    const current = () =>
++      this.mounted && generation === this.generation && scope === this.listReadScope() &&
++      (!readingInbox || mappingRevision === this.inboxMappingRevision);
+     try {
+       let rows: (Thread | Message)[] = [];
+       if (folder === 'drafts' && !query) {
+@@ -306,8 +377,8 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+         );
+         for (const row of latest) snippets[row.threadId] = JSON.parse(row.data).snippet || '';
+       }
+-      if (this.mounted && generation === this.generation)
+-        this.setState({
++      if (current())
++        this.setState((previous) => ({
+           rows: rows.slice(0, limit),
+           labels,
+           local,
+@@ -315,13 +386,14 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+           snippets,
+           more: rows.length > limit,
+           loading: false,
+-          checked: this.state.checked.filter((id) =>
++          listRead: { scope, inboxScan, failed: false },
++          checked: previous.checked.filter((id) =>
+             rows.slice(0, limit).some((row) => row.id === id)
+           ),
+-        });
++        }));
+     } catch {
+-      if (this.mounted && generation === this.generation)
+-        this.setState({ loading: false, notice: '邮件暂时无法读取，请重试。' });
++      if (current())
++        this.setState({ loading: false, listRead: { scope, inboxScan: null, failed: true } });
+     }
+   };
+   refreshOperations = async () => {
+@@ -639,7 +711,10 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       : this.state.folder.startsWith('label:')
+         ? this.state.labels.find((l) => l.id === this.state.folder.slice(6))?.name || '标签已删除'
+         : folders.find((f) => f[0] === this.state.folder)?.[1];
+-  renderListTools() {
++  setUnreadOnly = (unreadOnly: boolean) => {
++    this.setState({ unreadOnly, checked: [], loading: true }, this.refresh);
++  };
++  renderListTools(showCount: boolean) {
+     const rows = this.state.rows.filter((r) => r instanceof Thread);
+     const selected = this.selectedTargets();
+     const actions: [MailAction, string][] = [
+@@ -674,7 +749,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+               <span>{selected.length ? `已选 ${selected.length} 个会话` : '选择当前列表'}</span>
+             </label>
+           )}
+-          {this.state.loading ? (
++          {this.state.loading && this.state.rows.length ? (
+             <span className="pr-search-scope" role="status">正在更新 · 暂显示上次列表</span>
+           ) : !selected.length && this.state.query && (
+             <span className="pr-search-scope">仅搜索本机已同步邮件</span>
+@@ -684,25 +759,22 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+               <input
+                 type="checkbox"
+                 checked={this.state.unreadOnly}
+-                onChange={(e) =>
+-                  this.setState(
+-                    { unreadOnly: e.target.checked, checked: [], loading: true },
+-                    this.refresh
+-                  )
+-                }
++                onChange={(e) => this.setUnreadOnly(e.target.checked)}
+               />
+               仅未读
+             </label>
+           )}
+-          <p className="pr-list-caption">
+-            <span className="sr-only">
+-              {this.state.accountId
+-                ? AccountStore.accountForId(this.state.accountId)?.emailAddress
+-                : '所有已连接邮箱'}
+-            </span>
+-            {this.state.rows.length}{this.state.more ? '+' : ''} 个
+-            {this.state.folder === 'drafts' && !this.state.query ? '草稿' : '会话'}
+-          </p>
++          {showCount && (
++            <p className="pr-list-caption">
++              <span className="sr-only">
++                {this.state.accountId
++                  ? AccountStore.accountForId(this.state.accountId)?.emailAddress
++                  : '所有已连接邮箱'}
++              </span>
++              {this.state.rows.length}{this.state.more ? '+' : ''} 个
++              {this.state.folder === 'drafts' && !this.state.query ? '草稿' : '会话'}
++            </p>
++          )}
+         </div>
+         {this.renderLocalControls()}
+         {!!selected.length && (
+@@ -928,13 +1000,70 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       this.setState({ notice: error.message });
+     }
+   };
+-  renderSyncStatus() {
++  visibleAccounts(accountIds = this.accountIds()) {
++    return AccountStore.accounts().filter((account) => accountIds.includes(account.id));
++  }
++  inboxScanState(account: Account): InboxScanState {
++    const inbox = CategoryStore.getInboxCategory(account.id);
++    // Inbox labels are populated by All Mail, even for Gmail reached through manual setup.
++    const folder = inbox instanceof Folder ? inbox : CategoryStore.getAllMailCategory(account.id);
++    const progress = folder?.localStatus;
++    if (progress?.busy !== false) return { state: 'pending' };
++    // An Inbox query with no category would also return zero rows.
++    if (!inbox || !Number.isFinite(progress.syncedMinUID) || progress.syncedMinUID > 1) {
++      return { state: 'unverified' };
++    }
++    return {
++      state: 'complete',
++      revision: JSON.stringify([account.id, inbox.id, folder.id, folder.version]),
++    };
++  }
++  emptyInboxState(
++    scans: InboxScanState[],
++    failed: Account[],
++    scanAtRead: string | null
++  ): EmptyInboxState {
++    if (this.state.loading) return 'reading';
++    if (!scans.length) return 'no-account';
++    if (!navigator.onLine || failed.length) return 'interrupted';
++    if (scans.some((scan) => scan.state === 'unverified')) return 'unverified';
++    const currentScan = completedInboxScan(scans, this.inboxMappingRevision);
++    if (!currentScan) return 'syncing';
++    if (currentScan !== scanAtRead) return 'reading';
++    return this.state.unreadOnly ? 'unread' : 'empty';
++  }
++  renderEmptyInbox(state: EmptyInboxState, accounts: Account[]) {
++    const { unreadOnly } = this.state;
++    const { title, detail } = (unreadOnly && unreadInboxCopy[state]) || emptyInboxCopy[state];
++    return (
++      <div className="pr-inbox-empty" data-state={state}>
++        <span className="pr-inbox-empty-icon" aria-hidden="true" />
++        <div role="status">
++          <p className="pr-inbox-empty-title">{title}</p>
++          {detail && <p className="pr-inbox-empty-detail">{detail}</p>}
++        </div>
++        {unreadOnly && state !== 'no-account' && (
++          <button onKeyDown={keepNativeButtonActivation} onClick={() => {
++            document.querySelector<HTMLInputElement>('.pr-unread-filter input')?.focus();
++            this.setUnreadOnly(false);
++          }}>显示全部邮件</button>
++        )}
++        {state === 'unverified' && (
++          <button onKeyDown={keepNativeButtonActivation} onClick={() => {
++            this.focusSearch();
++            for (const account of accounts) {
++              if (this.inboxScanState(account).state === 'unverified') Actions.restartAccountSync(account);
++            }
++          }}>重试同步</button>
++        )}
++      </div>
++    );
++  }
++  renderSyncStatus(accounts: Account[], failed: Account[], emptyInbox: boolean) {
+     if (!navigator.onLine)
+       return <p className="pr-sync-status" role="status">
+         当前离线，仍可阅读已缓存邮件、保存草稿。恢复联网后，请再点击发送。
+       </p>;
+-    const accounts = AccountStore.accounts().filter((a) => this.accountIds().includes(a.id));
+-    const failed = accounts.filter((a) => a.hasSyncStateError() || !OnlineStatusStore.isAccountOnline(a.id));
+     if (failed.length)
+       return (
+         <div className="pr-sync-status" role="status">
+@@ -954,6 +1083,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+           ))}
+         </div>
+       );
++    if (emptyInbox) return null;
+     const pending = accounts.some((a) => CategoryStore.categories(a.id).length === 0);
+     const active = FolderSyncProgressStore.getSummary().phrase;
+     return (
+@@ -969,6 +1099,16 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   render() {
+     const [commandShortcut] = AppEnv.keymaps.getBindingsForCommand('paper-reed:commands');
+     const { route, folder, selected, rows, loading, agent } = this.state;
++    const accounts = this.visibleAccounts();
++    const failed = accounts.filter((a) => a.hasSyncStateError() || !OnlineStatusStore.isAccountOnline(a.id));
++    const listRead = this.state.listRead?.scope === this.listReadScope() ? this.state.listRead : null;
++    const readFailed = listRead?.failed;
++    const emptyInbox = route === 'list' && folder === 'inbox' && !this.state.query && !rows.length;
++    const inboxState = emptyInbox && !readFailed
++      ? this.emptyInboxState(
++          accounts.map((account) => this.inboxScanState(account)), failed, listRead?.inboxScan ?? null
++        )
++      : null;
+     const title =
+       route === 'compose' ? '写一封信' : this.state.query ? '搜索结果' : this.locationTitle();
+     const editingDraft = route === 'compose' && selected instanceof Message &&
+@@ -1082,7 +1222,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                 </button>
+               )}
+             </div>}
+-            {this.renderSyncStatus()}
++            {this.renderSyncStatus(accounts, failed, emptyInbox)}
+             {this.state.labelManager && (
+               <LabelManager
+                 labels={this.state.labels}
+@@ -1097,6 +1237,12 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                 <button onClick={this.refresh}>重新读取</button>
+               </div>
+             )}
++            {readFailed && (
++              <div className="pr-notice" role="alert">
++                {mailReadError}
++                <button onKeyDown={keepNativeButtonActivation} onClick={this.refresh}>重新读取</button>
++              </div>
++            )}
+             {agent && (
+               <section className="pr-agent-panel" aria-label="Agent 交接">
+                 <strong>{cliStatus().ready ? '交给你的 Agent' : '先连接 CLI'}</strong>
+@@ -1120,10 +1266,11 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+             )}
+             {route === 'list' ? (
+               <>
+-                {this.renderListTools()}
++                {this.renderListTools(!emptyInbox || inboxState === 'empty' || inboxState === 'unread')}
+                 <div className="pr-mail-list" aria-label={title} aria-busy={loading}>
+                   {rows.map(this.renderRow)}
+-                  {!rows.length && (
++                  {inboxState && this.renderEmptyInbox(inboxState, accounts)}
++                  {!rows.length && !emptyInbox && !readFailed && (
+                     <p className="pr-empty" role="status">
+                       {loading
+                         ? '正在读取邮件…'
+diff --git a/app/internal_packages/paper-reed/styles/paper-reed.less b/app/internal_packages/paper-reed/styles/paper-reed.less
+index 080b54f..8484768 100644
+--- a/app/internal_packages/paper-reed/styles/paper-reed.less
++++ b/app/internal_packages/paper-reed/styles/paper-reed.less
+@@ -42,6 +42,46 @@
+   .pr-unread { display: inline-block; width: 5px; height: 5px; background: var(--pr-reed); border-radius: 50%; margin-right: 7px; vertical-align: middle; }
+   .unread .pr-sender, .unread .pr-subject { font-weight: 600; }
+   .pr-empty { margin: 72px 0; text-align: center; color: var(--pr-muted); }
++  .pr-inbox-empty {
++    max-width: 320px;
++    padding: 0 16px;
++    margin: clamp(42px, 11vh, 96px) auto 40px;
++    text-align: center;
++    color: var(--pr-muted);
++  }
++  .pr-inbox-empty-title { margin: 0; color: var(--pr-ink); font-size: 16px; font-weight: 600; line-height: 24px; }
++  .pr-inbox-empty-detail { margin: 6px 0 0; }
++  .pr-inbox-empty-icon {
++    display: grid;
++    place-items: center;
++    width: 36px;
++    height: 36px;
++    margin: 0 auto 14px;
++    border-radius: 50%;
++    background: #e9eee5;
++    color: var(--pr-reed);
++  }
++  .pr-inbox-empty-icon::before { content: ''; width: 12px; border-top: 1.5px solid currentColor; }
++  .pr-inbox-empty[data-state='empty'] .pr-inbox-empty-icon::before,
++  .pr-inbox-empty[data-state='unread'] .pr-inbox-empty-icon::before {
++    width: 11px;
++    height: 6px;
++    border: solid currentColor;
++    border-width: 0 0 1.5px 1.5px;
++    transform: translateY(-2px) rotate(-45deg);
++  }
++  .pr-inbox-empty[data-state='reading'] .pr-inbox-empty-icon::before,
++  .pr-inbox-empty[data-state='syncing'] .pr-inbox-empty-icon::before {
++    width: 14px;
++    height: 14px;
++    border: 1.5px solid rgba(75, 99, 79, .26);
++    border-top-color: currentColor;
++    border-radius: 50%;
++    @media (prefers-reduced-motion: no-preference) {
++      animation: pr-inbox-spin 1s linear infinite;
++    }
++  }
++  .pr-inbox-empty button { margin-top: 8px; color: var(--pr-reed); text-decoration: underline; }
+   .pr-load-more { display: block; margin: 20px auto; }
+   .pr-notice, .pr-agent-panel { border-left: 2px solid var(--pr-reed); padding: 12px 16px; background: var(--pr-inset); margin: 12px 0 20px; }
+   .pr-notice button { margin-left: 12px; }
+@@ -100,6 +140,10 @@
+     .pr-summary { grid-area: summary; }
+   }
+ }
++
++@keyframes pr-inbox-spin {
++  to { transform: rotate(360deg); }
++}
+ .paper-reed-enabled {
+   .pr-reader #message-list .message-subject-wrap { padding: 0; margin: 0 0 24px; align-items: flex-start; }
+   .pr-reader #message-list .message-subject { font-size: 26px; line-height: 38px; color: var(--pr-ink); }
