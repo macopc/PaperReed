@@ -69,7 +69,7 @@ module.exports=async({app,main,cdp,work,account,cli,click,evaluate,until,restart
  await until(()=>evaluate(cdp,'document.querySelectorAll(".pr-mail-row").length===8'),'cleared live search');
  await action('.pr-mail-row');
  await until(()=>evaluate(cdp,'!!document.querySelector(".pr-reader .messages-wrap.ready .message-item-wrap")'),'reader');
- assert.equal(await main.locator('.pr-reader > .pr-local-controls').count(),1);
+ assert.equal(await main.locator('.pr-reader .pr-local-controls').count(),1);
  await until(()=>evaluate(cdp,'Array.from(document.querySelectorAll("iframe")).some(e=>e.contentDocument?.body?.innerText.includes("Does the row"))'),'isolated message body');
  const readerWidth=await evaluate(cdp,'document.querySelector(".pr-reader").getBoundingClientRect().width');
  assert.equal(readerWidth,640);

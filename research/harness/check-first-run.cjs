@@ -682,6 +682,8 @@ async function checkGooglePage(phase) {
  if(savePhase){await require('./check-account-save.cjs')({phase:savePhase,app,currentWindow:()=>main,selectWindow,run,until,shot,out,fixture,checkAccountSaveLocked});await stop();return;}
  const inboxPhase=process.env.PAPER_REED_INBOX_ARRIVAL_CHECK;
  if(inboxPhase){await require('./check-inbox-arrival.cjs')({phase:inboxPhase,app,currentWindow:()=>main,selectWindow,run,until,shot,out,fixture,work});await stop();return;}
+ const readerPhase=process.env.PAPER_REED_READER_CHECK;
+ if(readerPhase){await require('./check-reader.cjs')({phase:readerPhase,app,currentWindow:()=>main,selectWindow,run,until,shot,out,fixture});await stop();return;}
  const activePage=main.locator('.page-container:not([inert])');
  await activePage.locator('[data-provider=gmail]').click();
  await activePage.getByRole('button',{name:'使用 Google 登录',exact:true}).waitFor();

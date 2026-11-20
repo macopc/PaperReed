@@ -10,6 +10,7 @@ parser.add_argument('--certificate-fixture',type=Path,help='Untrusted fixture di
 args=parser.parse_args(); upstream=args.upstream.resolve()
 certificate_phase=os.environ.get('PAPER_REED_CERTIFICATE_PAGE_CHECK')
 inbox_phase=os.environ.get('PAPER_REED_INBOX_ARRIVAL_CHECK')
+reader_phase=os.environ.get('PAPER_REED_READER_CHECK')
 certificate_service={'native-imap':'imap','native-smtp':'smtp'}.get(certificate_phase)
 if bool(certificate_service) != bool(args.certificate_fixture):
     parser.error('native-imap and native-smtp require --certificate-fixture')
@@ -39,6 +40,15 @@ try:
                 (work/'inbox-scan-held').touch()
                 release_inbox.wait(40)
         server.imap.add_hook('before_command', hold_first_inbox_scan)
+    elif reader_phase:
+        server.append('INBOX', message(1, sender=('Maya Chen', 'maya@example.test'),
+            subject='Design review', body='The revised reading layout is ready.\r\n\r\nPlease review the notes before Thursday.'))
+        subject = 'Conversation reference ' + ('ABCD1234' * 13)
+        server.append('INBOX', message(2, sender=('Alex Morgan', 'alex@example.test'),
+            subject=subject, body='This is the second conversation.\r\n\r\nThe earlier message is a separate thread.'))
+        if reader_phase == 'after' or reader_phase.startswith('pop-in-'):
+            server.append('Trash', message(3, sender=('Maya Chen', 'maya@example.test'),
+                subject='Trashed conversation', body='This message only exists in Trash.'))
     else:
         server.append('INBOX',message(1,sender=('Maya','maya@example.test'),subject='First run review',body='Please review the draft.'))
         server.append('INBOX',message(2,sender=('Alex','alex@example.test'),subject='Archive this note',body='This note can be archived.'))
@@ -76,7 +86,7 @@ try:
     scoped_phase=(os.environ.get('PAPER_REED_PROVIDER_PICKER_CHECK') or os.environ.get('PAPER_REED_GOOGLE_PAGE_CHECK')
                   or os.environ.get('PAPER_REED_ICLOUD_PAGE_CHECK') or os.environ.get('PAPER_REED_IMAP_PAGE_CHECK')
                   or os.environ.get('PAPER_REED_SERVER_PAGE_CHECK') or os.environ.get('PAPER_REED_CERTIFICATE_PAGE_CHECK')
-                  or os.environ.get('PAPER_REED_ACCOUNT_SAVE_CHECK') or inbox_phase)
+                  or os.environ.get('PAPER_REED_ACCOUNT_SAVE_CHECK') or inbox_phase or reader_phase)
     assert len(sent)==(0 if scoped_phase else 1), len(sent)
     if not scoped_phase:
         assert b'Paper Reed first run reply' in sent[0].raw

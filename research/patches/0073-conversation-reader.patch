@@ -1,0 +1,689 @@
+diff --git a/app/internal_packages/message-list/lib/email-frame.tsx b/app/internal_packages/message-list/lib/email-frame.tsx
+index e2fc688fa4a760c833933571e0a161c6354eb4ce..2e5eddc62086e11b96658175f894a0b4c59194e9 100644
+--- a/app/internal_packages/message-list/lib/email-frame.tsx
++++ b/app/internal_packages/message-list/lib/email-frame.tsx
+@@ -35,6 +35,8 @@ export function setColorSchemeFromTheme(doc: Document, iframeEl: HTMLIFrameEleme
+   doc.documentElement.style.setProperty('color-scheme', scheme, 'important');
+ }
+ 
++export const EMAIL_BODY_READY_EVENT = 'mailspring:email-body-ready';
++
+ interface EmailFrameProps {
+   content: string;
+   showQuotedText: boolean;
+@@ -95,6 +97,7 @@ export default class EmailFrame extends React.Component<EmailFrameProps> {
+     if (this._iframeDocObserver) this._iframeDocObserver.disconnect();
+ 
+     const iframeEl = ReactDOM.findDOMNode(this._iframeComponent) as HTMLIFrameElement;
++    delete iframeEl.dataset.renderedMessageId;
+     const doc = iframeEl.contentDocument;
+     if (!doc) return;
+ 
+@@ -179,6 +182,10 @@ export default class EmailFrame extends React.Component<EmailFrameProps> {
+     iframeEl.contentWindow.addEventListener('beforeunload', () => {
+       this._iframeDocObserver.disconnect();
+     });
++    if (doc.body) {
++      iframeEl.dataset.renderedMessageId = message.id;
++      iframeEl.dispatchEvent(new Event(EMAIL_BODY_READY_EVENT, { bubbles: true }));
++    }
+ 
+     window.requestAnimationFrame(() => {
+       // Guard: component may have unmounted or _writeContent called again (calling
+diff --git a/app/internal_packages/message-list/lib/message-list.tsx b/app/internal_packages/message-list/lib/message-list.tsx
+index dbada4c97a74227f0ab4f5ab196cafbc32d12531..d427a141fdbdb8fd258d4f236b666ee20a2568c2 100644
+--- a/app/internal_packages/message-list/lib/message-list.tsx
++++ b/app/internal_packages/message-list/lib/message-list.tsx
+@@ -1,4 +1,5 @@
+ import classNames from 'classnames';
++import { randomUUID } from 'crypto';
+ import React from 'react';
+ import ReactDOM from 'react-dom';
+ import {
+@@ -6,6 +7,7 @@ import {
+   Utils,
+   Actions,
+   MessageStore,
++  FocusedPerspectiveStore,
+   Message,
+   Thread,
+   TaskQueue,
+@@ -35,6 +37,7 @@ import FindInThread from './find-in-thread';
+ import MessageItemContainer from './message-item-container';
+ import { MessageListScrollTooltip } from './message-list-scroll-tooltip';
+ import { SubjectLineIcons } from './subject-line-icons';
++import { EMAIL_BODY_READY_EVENT } from './email-frame';
+ 
+ type MinifiedBundle = { type: 'minifiedBundle'; messages: Message[] };
+ type MessageOrBundle = Message | MinifiedBundle;
+@@ -43,6 +46,18 @@ function isMinifiedBundle(item: MessageOrBundle): item is MinifiedBundle {
+   return 'type' in item && item.type === 'minifiedBundle';
+ }
+ 
++export interface PopInRequest {
++  requestId: string;
++  deadline: number;
++}
++
++interface MessageListProps {
++  expectedThreadId?: string;
++  threadActions?: React.ReactNode;
++  paperReedLocation?: { folder: string; accountId: string };
++  popInRequest?: PopInRequest;
++}
++
+ interface MessageListState {
+   messages: Message[];
+   messagesExpandedState: {
+@@ -61,7 +76,7 @@ const PREF_REPLY_TYPE = 'core.sending.defaultReplyType';
+ const PREF_RESTRICT_WIDTH = 'core.reading.restrictMaxWidth';
+ const PREF_DESCENDING_ORDER = 'core.reading.descendingOrderMessageList';
+ 
+-class MessageList extends React.Component<Record<string, unknown>, MessageListState> {
++class MessageList extends React.Component<MessageListProps, MessageListState> {
+   static displayName = 'MessageList';
+   static containerStyles = {
+     minWidth: 480,
+@@ -71,6 +86,8 @@ class MessageList extends React.Component<Record<string, unknown>, MessageListSt
+   _unsubscribers = [];
+   _messageWrapEl: ScrollRegion;
+   _draftScrollInProgress = false;
++  private cancelPopIn?: () => void;
++  private reportedPopIn?: string;
+   MINIFY_THRESHOLD = 3;
+ 
+   _messageListEl: HTMLElement;
+@@ -86,17 +103,57 @@ class MessageList extends React.Component<Record<string, unknown>, MessageListSt
+   componentDidMount() {
+     this._unsubscribers = [];
+     this._unsubscribers.push(MessageStore.listen(this._onChange));
++    this.reportPopIn();
+   }
+ 
+-  shouldComponentUpdate(nextProps: Record<string, unknown>, nextState: MessageListState) {
++  shouldComponentUpdate(nextProps: MessageListProps, nextState: MessageListState) {
+     return !Utils.isEqualReact(nextProps, this.props) || !Utils.isEqualReact(nextState, this.state);
+   }
+ 
+   componentDidUpdate() {
+-    // cannot remove
++    this.reportPopIn();
+   }
+ 
++  private reportPopIn = () => {
++    const { expectedThreadId, popInRequest } = this.props;
++    const { currentThread, loading, messages, messagesExpandedState } = this.state;
++    if (!popInRequest || this.reportedPopIn === popInRequest.requestId ||
++        Date.now() >= popInRequest.deadline || loading ||
++        currentThread?.id !== expectedThreadId || !this._messageListEl) return;
++
++    const received = messages.filter(message => !message.draft);
++    if (received.length) {
++      const renderedIds = new Set(
++        Array.from(this._messageListEl.querySelectorAll<HTMLIFrameElement>('iframe[data-rendered-message-id]'),
++          frame => frame.dataset.renderedMessageId)
++      );
++      if (!received.some(message => renderedIds.has(message.id))) {
++        // An inline reply can be the only expanded item when reopening a thread.
++        if (!received.some(message => messagesExpandedState[message.id])) {
++          Actions.toggleMessageIdExpanded(received[received.length - 1].id);
++        }
++        return;
++      }
++    }
++
++    this.reportedPopIn = popInRequest.requestId;
++    const opened = received.length > 0;
++    if (opened) {
++      AppEnv.show();
++      AppEnv.focus();
++    }
++    Actions.popInThreadResult(popInRequest.requestId, opened);
++  };
++
++  private setMessageListEl = (el: HTMLElement) => {
++    this._messageListEl?.removeEventListener(EMAIL_BODY_READY_EVENT, this.reportPopIn);
++    this._messageListEl = el;
++    el?.addEventListener(EMAIL_BODY_READY_EVENT, this.reportPopIn);
++  };
++
+   componentWillUnmount() {
++    this.setMessageListEl(null);
++    this.cancelPopIn?.();
+     for (const unsubscribe of this._unsubscribers) {
+       unsubscribe();
+     }
+@@ -237,15 +294,42 @@ class MessageList extends React.Component<Record<string, unknown>, MessageListSt
+     if (!this.state.currentThread) {
+       return;
+     }
+-    Actions.focusThreadMainWindow(this.state.currentThread);
+-    AppEnv.close();
++    if (!AppEnv.config.get('core.paperReed.enabled')) {
++      Actions.focusThreadMainWindow(this.state.currentThread);
++      AppEnv.close();
++      return;
++    }
++    if (this.cancelPopIn) return;
++
++    const request: PopInRequest = { requestId: randomUUID(), deadline: Date.now() + 10000 };
++    const complete = (opened: boolean) => {
++      this.cancelPopIn?.();
++      if (opened && Date.now() < request.deadline) AppEnv.close();
++      else AppEnv.showErrorDialog('暂时无法在主窗口打开会话。请在主窗口完成当前操作后重试。');
++    };
++    const unlisten = Actions.popInThreadResult.listen((id: string, opened: boolean) => {
++      if (id === request.requestId) complete(opened);
++    });
++    const timeout = setTimeout(() => complete(false), request.deadline - Date.now());
++    this.cancelPopIn = () => {
++      clearTimeout(timeout);
++      unlisten();
++      this.cancelPopIn = undefined;
++    };
++    Actions.focusThreadMainWindow(this.state.currentThread, {
++      popIn: {
++        ...request,
++        perspectiveJSON: FocusedPerspectiveStore.current().toJSON(),
++        location: AppEnv.getWindowProps().paperReedLocation,
++      },
++    });
+   };
+ 
+   _onPopoutThread = () => {
+     if (!this.state.currentThread) {
+       return;
+     }
+-    Actions.popoutThread(this.state.currentThread);
++    Actions.popoutThread(this.state.currentThread, this.props.paperReedLocation);
+     // This returns the single-pane view to the inbox, and does nothing for
+     // double-pane view because we're at the root sheet.
+     Actions.popSheet();
+@@ -383,6 +467,7 @@ class MessageList extends React.Component<Record<string, unknown>, MessageListSt
+             key="reply-area"
+             onClick={this._onClickReplyArea}
+             replyType={this._replyType()}
++            paperReed={Boolean(this.props.expectedThreadId)}
+           />
+         );
+       }
+@@ -517,6 +602,7 @@ class MessageList extends React.Component<Record<string, unknown>, MessageListSt
+   };
+ 
+   _renderSubject() {
++    const Subject = this.props.expectedThreadId ? 'h1' : 'span';
+     let subject = this.state.currentThread.subject;
+     if (!subject || subject.length === 0) {
+       subject = localized('(No Subject)');
+@@ -526,14 +612,14 @@ class MessageList extends React.Component<Record<string, unknown>, MessageListSt
+       <header className="message-subject-wrap">
+         <MailImportantIcon thread={this.state.currentThread} />
+         <div style={{ flex: 1 }}>
+-          <span
++          <Subject
+             className="message-subject"
+             draggable
+             onDragStart={this._onSubjectDragStart}
+             onContextMenu={() => _onSubjectContextMenu()}
+           >
+             {subject}
+-          </span>
++          </Subject>
+           <MailLabelSet
+             removable
+             includeCurrentCategories
+@@ -597,6 +683,10 @@ class MessageList extends React.Component<Record<string, unknown>, MessageListSt
+   }
+ 
+   render() {
++    const { expectedThreadId, threadActions } = this.props;
++    if (expectedThreadId && (this.state.currentThread?.id !== expectedThreadId || this.state.loading)) {
++      return <p className="pr-reader-loading" role="status">正在读取会话…</p>;
++    }
+     if (!this.state.currentThread) {
+       return <span />;
+     }
+@@ -628,6 +718,7 @@ class MessageList extends React.Component<Record<string, unknown>, MessageListSt
+             }}
+           >
+             {this._renderSubject()}
++            {threadActions}
+             <div className="headers" style={{ position: 'relative' }}>
+               <InjectedComponentSet
+                 className="message-list-headers"
+@@ -644,9 +735,7 @@ class MessageList extends React.Component<Record<string, unknown>, MessageListSt
+               data-usesarrowkeys={true}
+               aria-label={localized('Messages')}
+               onKeyDown={this._onMessageListKeyDown}
+-              ref={(el) => {
+-                this._messageListEl = el;
+-              }}
++              ref={this.setMessageListEl}
+             >
+               {this._messageElements()}
+             </div>
+@@ -658,7 +747,11 @@ class MessageList extends React.Component<Record<string, unknown>, MessageListSt
+   }
+ }
+ 
+-class MessageListReplyArea extends React.Component<{ onClick: () => void; replyType: string }> {
++class MessageListReplyArea extends React.Component<{
++  onClick: () => void;
++  replyType: string;
++  paperReed: boolean;
++}> {
+   state = {
+     forcePlaintext: AppEnv.keymaps.getIsAltKeyDown(),
+   };
+@@ -690,6 +783,10 @@ class MessageListReplyArea extends React.Component<{ onClick: () => void; replyT
+   };
+ 
+   render() {
++    const { paperReed } = this.props;
++    const replyLabel = this.state.forcePlaintext
++      ? paperReed ? '撰写纯文本回复…' : localized('Write a plain text reply…')
++      : paperReed ? '撰写回复…' : localized('Write a reply…');
+     return (
+       <div
+         className="footer-reply-area-wrap"
+@@ -704,11 +801,7 @@ class MessageListReplyArea extends React.Component<{ onClick: () => void; replyT
+             name={`${this.props.replyType}-footer.png`}
+             mode={RetinaImg.Mode.ContentIsMask}
+           />
+-          <span className="reply-text">
+-            {this.state.forcePlaintext
+-              ? localized('Write a plain text reply…')
+-              : localized('Write a reply…')}
+-          </span>
++          <span className="reply-text">{replyLabel}</span>
+         </div>
+       </div>
+     );
+diff --git a/app/internal_packages/paper-reed/lib/main.tsx b/app/internal_packages/paper-reed/lib/main.tsx
+index de3a08db2a5263af017cbf69a98a6efebe54f4cb..648ce7e30a9bd1d09f4d8b92d7ee14cd11ce4f1b 100644
+--- a/app/internal_packages/paper-reed/lib/main.tsx
++++ b/app/internal_packages/paper-reed/lib/main.tsx
+@@ -6,12 +6,13 @@ import {
+ let timer: ReturnType<typeof setInterval>;
+ let databaseTimer: ReturnType<typeof setTimeout>;
+ let unlisten: () => void;
++let unlistenExternalThread: () => void;
+ const reconcile = () =>
+   reconcileLocalSnoozes()
+     .then(() => processLocalRules())
+     .catch((error) => console.error('Paper Reed local organization:', error.message));
+-import { ComponentRegistry, WorkspaceStore, DatabaseStore } from 'mailspring-exports';
+-import PaperReedWorkspace from './workspace';
++import { Actions, ComponentRegistry, WorkspaceStore, DatabaseStore } from 'mailspring-exports';
++import PaperReedWorkspace, { openThreadInWorkspace } from './workspace';
+ export function activate() {
+   if (!AppEnv.config.get('core.paperReed.enabled')) return;
+   if (AppEnv.isMainWindow()) {
+@@ -25,13 +26,16 @@ export function activate() {
+     reconcile();
+   }
+   document.body.classList.add('paper-reed-enabled');
+-  if (AppEnv.isMainWindow())
++  if (AppEnv.isMainWindow()) {
++    unlistenExternalThread = Actions.focusThreadMainWindow.listen(openThreadInWorkspace);
+     ComponentRegistry.register(PaperReedWorkspace, { location: WorkspaceStore.Location.PaperReed });
++  }
+ }
+ export function deactivate() {
+   clearInterval(timer);
+   clearTimeout(databaseTimer);
+   unlisten?.();
++  unlistenExternalThread?.();
+   window.removeEventListener('focus', reconcile);
+   ComponentRegistry.unregister(PaperReedWorkspace);
+   document.body.classList.remove('paper-reed-enabled');
+diff --git a/app/internal_packages/paper-reed/lib/workspace.tsx b/app/internal_packages/paper-reed/lib/workspace.tsx
+index 32f9657f801b2bf456827be4b061715eebd7b30b..08861bddd3c159b5de7487d3f04def51da4c8c79 100644
+--- a/app/internal_packages/paper-reed/lib/workspace.tsx
++++ b/app/internal_packages/paper-reed/lib/workspace.tsx
+@@ -43,7 +43,7 @@ import {
+   MailboxPerspective,
+   WorkspaceStore,
+ } from 'mailspring-exports';
+-import MessageList from '../../message-list/lib/message-list';
++import MessageList, { PopInRequest } from '../../message-list/lib/message-list';
+ import ComposerView from '../../composer/lib/composer-view';
+ import InflatesDraftClientId from '../../../src/decorators/inflates-draft-client-id';
+ import DraftFactory from '../../../src/flux/stores/draft-factory';
+@@ -112,6 +112,7 @@ interface State {
+   route: 'list' | 'thread' | 'compose';
+   rows: (Thread | Message)[];
+   selected: Thread | Message | null;
++  popInRequest?: PopInRequest;
+   recovery: DraftRecoveryInfo[];
+   snippets: Record<string, string>;
+   loading: boolean;
+@@ -144,6 +145,40 @@ let lastLocation:
+     >
+   | undefined;
+ 
++interface ThreadOpenOptions {
++  inbox?: boolean;
++  popIn?: PopInRequest & {
++    perspectiveJSON: ReturnType<MailboxPerspective['toJSON']>;
++    location?: Pick<State, 'folder' | 'accountId'>;
++  };
++}
++
++let activeWorkspace: PaperReedWorkspace | null = null;
++let pendingThread: { thread: Thread; options: ThreadOpenOptions } | null = null;
++
++export function openThreadInWorkspace(thread: Thread, options: ThreadOpenOptions = {}) {
++  if (options.popIn) {
++    if (Date.now() >= options.popIn.deadline) return;
++    if (activeWorkspace?.moving) {
++      Actions.popInThreadResult(options.popIn.requestId, false);
++      return;
++    }
++  }
++  if (pendingThread?.options.popIn) {
++    Actions.popInThreadResult(pendingThread.options.popIn.requestId, false);
++  }
++  pendingThread = { thread, options };
++  if (WorkspaceStore.topSheet() !== WorkspaceStore.Sheet.Threads) {
++    Actions.selectRootSheet(WorkspaceStore.Sheet.Threads);
++    if (WorkspaceStore.topSheet() !== WorkspaceStore.Sheet.Threads) {
++      pendingThread = null;
++      if (options.popIn) Actions.popInThreadResult(options.popIn.requestId, false);
++      return;
++    }
++  }
++  activeWorkspace?.openPendingThread();
++}
++
+ export default class PaperReedWorkspace extends React.Component<Record<string, never>, State> {
+   static displayName = 'PaperReedWorkspace';
+   static containerStyles = { minWidth: 700, flex: 1 };
+@@ -180,6 +215,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   generation = 0;
+   private inboxMapping = '';
+   private inboxMappingRevision = 0;
++  private reader = React.createRef<HTMLElement>();
+   mounted = false;
+   refreshTimer: ReturnType<typeof setTimeout>;
+   operationTimer: ReturnType<typeof setInterval>;
+@@ -188,6 +224,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   operationGeneration = 0;
+   componentDidMount() {
+     this.mounted = true;
++    activeWorkspace = this;
+     this.unlisten = [
+       DatabaseStore.listen((change) => {
+         if (['Thread', 'Message', 'Folder', 'Label'].includes(change.objectClass) &&
+@@ -264,12 +301,14 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     this.refresh();
+     this.operationTimer = setInterval(this.refreshOperations, 2000);
+     this.refreshOperations();
++    this.openPendingThread();
+   }
+   componentWillUnmount() {
+     const { folder, accountId, route, selected, query, searchText, unreadOnly } = this.state;
+     lastLocation = { folder, accountId, route, selected, query, searchText, unreadOnly };
+ 
+     this.mounted = false;
++    if (activeWorkspace === this) activeWorkspace = null;
+     this.generation++;
+     this.unlisten.forEach((fn) => fn());
+     clearTimeout(this.refreshTimer);
+@@ -422,8 +461,8 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+         this.setState({ operations: [], operationsError: '发送结果暂时无法读取。' });
+     }
+   };
+-  move = async (next: () => void | Promise<void>) => {
+-    if (this.moving) return;
++  move = async (next: () => void | boolean | Promise<void | boolean>) => {
++    if (this.moving) return false;
+     this.moving = true;
+     let saved = false;
+     try {
+@@ -433,11 +472,11 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       }
+       if (this.dirtySessions().length) {
+         this.setState({ notice: '保存期间又有新编辑，请完成编辑后再切换。' });
+-        return;
++        return false;
+       }
+       this.setState({ notice: '', agent: false, copied: false });
+       saved = true;
+-      await next();
++      return (await next()) !== false;
+     } catch (error) {
+       const visibleEditor =
+         this.state.route !== 'list' && document.querySelector('.pr-draft-status.needs-attention');
+@@ -448,8 +487,10 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+             ? ''
+             : '当前编辑尚未保存。请在编辑区处理后再切换。',
+       });
++      return false;
+     } finally {
+       this.moving = false;
++      if (this.mounted && pendingThread?.options.inbox) void this.openPendingThread();
+     }
+   };
+   navigate = (folder: string, accountId = this.state.accountId) =>
+@@ -471,21 +512,59 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+         this.refresh
+       );
+     });
+-  open = (row: Thread | Message) =>
++  async openPendingThread() {
++    if (!pendingThread || (this.moving && pendingThread.options.inbox)) return;
++    const { thread, options } = pendingThread;
++    pendingThread = null;
++    const opened = await this.open(thread, options);
++    if (!opened && options.popIn) Actions.popInThreadResult(options.popIn.requestId, false);
++  }
++
++  open = (row: Thread | Message, { inbox = false, popIn }: ThreadOpenOptions = {}) =>
+     this.move(() => {
+-      if (row instanceof Message) this.setState({ route: 'compose', selected: row });
+-      else {
+-        Actions.focusMailboxPerspective(
+-          MailboxPerspective.forStandardCategories(
+-            this.accountIds(),
+-            folders.slice(3).some((f) => f[0] === this.state.folder) ||
+-              this.state.folder === 'inbox'
+-              ? this.state.folder
+-              : 'all'
+-          )
+-        );
+-        Actions.setFocus({ collection: 'thread', item: row });
+-        this.setState({ route: 'thread', selected: row });
++      if (popIn && (!this.mounted || Date.now() >= popIn.deadline)) return false;
++      if (row instanceof Message) {
++        this.setState({ route: 'compose', selected: row, popInRequest: undefined });
++        return;
++      }
++      const source = popIn ? MailboxPerspective.fromJSON(popIn.perspectiveJSON) : null;
++      if (popIn && (!source || !AccountStore.accountForId(row.accountId))) {
++        throw new Error('The original mailbox is unavailable');
++      }
++
++      const role = source?.categoriesSharedRole();
++      const sourceFolder = role === 'all' ? 'archive' : role;
++      const folder = popIn
++        ? popIn.location?.folder || (folders.some(([id]) => id === sourceFolder) ? sourceFolder : 'inbox')
++        : inbox ? 'inbox' : this.state.folder;
++      const accountId = popIn
++        ? popIn.location?.accountId ?? (source.accountIds.length === AccountStore.accountIds().length ? '' : row.accountId)
++        : row.accountId;
++      const accountIds = inbox ? [accountId] : this.accountIds();
++      const perspective = source || MailboxPerspective.forStandardCategories(
++        accountIds,
++        folders.slice(3).some(([id]) => id === folder) || folder === 'inbox' ? folder : 'all'
++      );
++
++      Actions.focusMailboxPerspective(perspective);
++      Actions.setFocus({ collection: 'thread', item: row });
++      const focusReader = () => {
++        if (popIn && Date.now() >= popIn.deadline) return;
++        const reader = this.reader.current;
++        reader?.closest('.pr-main')?.scrollTo(0, 0);
++        reader?.focus({ preventScroll: true });
++      };
++      const popInRequest = popIn && { requestId: popIn.requestId, deadline: popIn.deadline };
++      if (inbox || popIn) {
++        this.setState({
++          route: 'thread', selected: row, popInRequest, folder, accountId, rows: [],
++          query: '', searchText: '', unreadOnly: false, checked: [], loading: true, limit: 50,
++        }, () => {
++          focusReader();
++          this.refresh();
++        });
++      } else {
++        this.setState({ route: 'thread', selected: row, popInRequest }, focusReader);
+       }
+     });
+   backToList = () =>
+@@ -904,6 +983,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+         type="button"
+         className={`pr-mail-row ${row.unread ? 'unread' : ''}`}
+         key={row.id}
++        onKeyDown={keepNativeButtonActivation}
+         onClick={() => this.open(row)}
+         data-draft-id={draft ? row.headerMessageId : undefined}
+         data-thread-id={!draft ? row.id : undefined}
+@@ -1114,7 +1194,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     const editingDraft = route === 'compose' && selected instanceof Message &&
+       !DraftStore.isSendingDraft(selected.headerMessageId);
+     const back = (
+-      <button className="pr-back" onClick={this.backToList}>
++      <button className="pr-back" onKeyDown={keepNativeButtonActivation} onClick={this.backToList}>
+         ‹ 返回{this.state.query ? '搜索结果' : this.locationTitle()}
+       </button>
+     );
+@@ -1291,11 +1371,17 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                 </div>
+               </>
+             ) : route === 'thread' ? (
+-              <div className="pr-reader">
+-                {selected &&
+-                  this.renderLocalControls([{ accountId: selected.accountId, threadId: selected.id }])}
+-                <MessageList />
+-              </div>
++              <section className="pr-reader" ref={this.reader} tabIndex={-1}
++                aria-label={selected?.subject || '无主题会话'}>
++                {selected && <MessageList
++                  expectedThreadId={selected.id}
++                  popInRequest={this.state.popInRequest}
++                  paperReedLocation={{folder: this.state.folder, accountId: this.state.accountId}}
++                  threadActions={this.renderLocalControls([
++                    { accountId: selected.accountId, threadId: selected.id },
++                  ])}
++                />}
++              </section>
+             ) : (
+               selected instanceof Message && (
+                 <div className="pr-editor">
+diff --git a/app/internal_packages/paper-reed/styles/paper-reed.less b/app/internal_packages/paper-reed/styles/paper-reed.less
+index 84847680da54715c6181790730bf8a8d80bbce0d..84fb8871a7478c49200105fa59bf08fe77ac05b0 100644
+--- a/app/internal_packages/paper-reed/styles/paper-reed.less
++++ b/app/internal_packages/paper-reed/styles/paper-reed.less
+@@ -91,11 +91,23 @@
+   .pr-agent-panel small { display: block; margin-top: 8px; color: var(--pr-muted); }
+   .pr-editor, .pr-reader { max-width: 640px; margin: 28px auto 0; }
+   .pr-editor h1 { margin-bottom: 24px; }
+-  .pr-reader { min-height: 400px; }
+-  .pr-reader > .pr-local-controls { margin-bottom: 20px; padding-bottom: 8px; border-bottom: 1px solid var(--pr-line); }
+-  .pr-reader > .pr-local-controls .pr-local-buttons button:first-child { padding-inline: 6px; }
+-  .pr-reader > .pr-local-controls .pr-category-select select { width: 72px; }
+-  .pr-reader > .pr-local-controls .pr-classification-status { margin-left: 0; }
++  .pr-reader { position: relative; min-height: 400px; }
++  .pr-route-thread .pr-page-head { max-width: 640px; margin-inline: auto; }
++  .pr-reader:focus-visible { outline: none; }
++  .pr-reader:focus-visible::before {
++    content: '';
++    position: absolute;
++    top: 4px;
++    inset-inline-start: -12px;
++    width: 2px;
++    height: 24px;
++    background: var(--pr-reed);
++  }
++  .pr-reader .pr-local-controls { margin-bottom: 20px; padding-bottom: 8px; border-bottom: 1px solid var(--pr-line); }
++  .pr-reader .pr-local-controls .pr-local-buttons button:first-child { padding-inline: 6px; }
++  .pr-reader .pr-local-controls .pr-category-select select { width: 72px; }
++  .pr-reader .pr-local-controls .pr-classification-status { margin-left: 0; }
++  .pr-reader-loading { margin: 24px 0; color: var(--pr-muted); }
+   .pr-reader #message-list { height: auto; min-height: 400px; background: transparent; }
+   .pr-reader #message-list .messages-wrap { position: static; overflow: visible; height: auto; padding: 0; background: transparent; }
+   .pr-reader #message-list .message-item-wrap { padding: 0; margin-bottom: 24px; }
+@@ -145,8 +157,16 @@
+   to { transform: rotate(360deg); }
+ }
+ .paper-reed-enabled {
+-  .pr-reader #message-list .message-subject-wrap { padding: 0; margin: 0 0 24px; align-items: flex-start; }
+-  .pr-reader #message-list .message-subject { font-size: 26px; line-height: 38px; color: var(--pr-ink); }
++  .pr-reader #message-list .message-subject-wrap { padding: 0; margin: 0 0 12px; align-items: flex-start; }
++  .pr-reader #message-list .message-subject {
++    margin: 0;
++    color: var(--pr-ink);
++    font-size: 26px;
++    font-weight: 500;
++    line-height: 38px;
++    overflow-wrap: anywhere;
++  }
++  .pr-reader #message-list .thread-injected-mail-labels:empty { display: none; }
+   .pr-reader #message-list .messages-wrap > .scroll-region-content { position: relative; height: auto; overflow: visible; }
+   .pr-reader #message-list .messages-wrap .scroll-region-content-inner { padding: 0; transform: none; }
+   .pr-reader #message-list .messages-wrap > .scrollbar-track { display: none; }
+diff --git a/app/internal_packages/unread-notifications/lib/main.ts b/app/internal_packages/unread-notifications/lib/main.ts
+index 260dad9eb0884a86180645fe154cfad0d594f478..5fd6041c469f6e28f92bd261bc6647da744a6d37 100644
+--- a/app/internal_packages/unread-notifications/lib/main.ts
++++ b/app/internal_packages/unread-notifications/lib/main.ts
+@@ -184,6 +184,10 @@ export class Notifier {
+             AppEnv.showErrorDialog(`Can't find that thread`);
+             return;
+           }
++          if (AppEnv.config.get('core.paperReed.enabled')) {
++            Actions.focusThreadMainWindow(thread, { inbox: true });
++            return;
++          }
+           Actions.ensureCategoryIsFocused('inbox', thread.accountId);
+           Actions.setFocus({ collection: 'thread', item: thread });
+         }
+diff --git a/app/src/flux/actions.ts b/app/src/flux/actions.ts
+index 34a4f559c74df6f53e6c75c692999f9658d26689..6714c004a96f27b570c8aa1ee745e0d28bdfe7db 100644
+--- a/app/src/flux/actions.ts
++++ b/app/src/flux/actions.ts
+@@ -351,6 +351,7 @@ export const popoutThread = create('popoutThread', ActionScopeWindow);
+   ```
+   */
+ export const focusThreadMainWindow = create('focusThreadMainWindow', ActionScopeGlobal);
++export const popInThreadResult = create('popInThreadResult', ActionScopeGlobal);
+ 
+ /*
+   Public: Create a new reply to the provided threadId and messageId and populate
+diff --git a/app/src/flux/stores/message-store.ts b/app/src/flux/stores/message-store.ts
+index 23ea706fecaddfaebfd2a8568d33386f08fafcf6..57ad4a83b2255f1758eb29afe71fc4378ca89855 100644
+--- a/app/src/flux/stores/message-store.ts
++++ b/app/src/flux/stores/message-store.ts
+@@ -381,7 +381,7 @@ class _MessageStore extends MailspringStore {
+     return items;
+   }
+ 
+-  _onPopoutThread(thread: Thread) {
++  _onPopoutThread(thread: Thread, paperReedLocation?: { folder: string; accountId: string }) {
+     return AppEnv.newWindow({
+       title: false, // MessageList already displays the thread subject
+       hidden: false,
+@@ -390,12 +390,13 @@ class _MessageStore extends MailspringStore {
+       windowProps: {
+         threadId: thread.id,
+         perspectiveJSON: FocusedPerspectiveStore.current().toJSON(),
++        paperReedLocation,
+       },
+     });
+   }
+ 
+   _onFocusThreadMainWindow(thread: Thread) {
+-    if (AppEnv.isMainWindow()) {
++    if (AppEnv.isMainWindow() && !AppEnv.config.get('core.paperReed.enabled')) {
+       FocusedPerspectiveStore.showMail();
+       Actions.setFocus({ collection: 'thread', item: thread });
+       return AppEnv.focus();
