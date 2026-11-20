@@ -1,0 +1,824 @@
+diff --git a/MailSync/MailMutationGuard.hpp b/MailSync/MailMutationGuard.hpp
+index 42e7bc371ffae21d3cda10ef3670d7e0f6be0a51..8d5c35446fd26822d5e7896b56d13ea4a14b533a 100644
+--- a/MailSync/MailMutationGuard.hpp
++++ b/MailSync/MailMutationGuard.hpp
+@@ -5,6 +5,8 @@
+ #include <stdexcept>
+ #include <string>
+ #include <chrono>
++#include <algorithm>
++#include <limits>
+ 
+ // Paper Reed experiment. Uses the engine database and caller's write transaction;
+ // it does not own a queue, connection, or network retry policy.
+@@ -41,6 +43,445 @@ public:
+                 "ON PaperReedSend(accountId, draftId) WHERE phase != 'rejected'");
+     }
+ 
++    // Called after the Message schema is ready, in the engine's upgrade transaction.
++    static void migrateDraftMoves(SQLite::Database & db) {
++        bool hasSourceAccount = false;
++        {
++            SQLite::Statement columns(db, "PRAGMA table_info(PaperReedDraftRecovery)");
++            while (columns.executeStep()) hasSourceAccount = hasSourceAccount || columns.getColumn(1).getString() == "sourceAccountId";
++        }
++        if (!hasSourceAccount) {
++            db.exec("ALTER TABLE PaperReedDraftRecovery ADD COLUMN sourceAccountId TEXT NOT NULL DEFAULT ''");
++        }
++        db.exec("UPDATE PaperReedDraftRecovery SET sourceAccountId = accountId WHERE sourceAccountId = ''");
++        db.exec("CREATE INDEX IF NOT EXISTS PaperReedDraftRecoverySource "
++                "ON PaperReedDraftRecovery(sourceAccountId, sourceDraftId, copyNumber)");
++        db.exec("CREATE TABLE IF NOT EXISTS PaperReedRetiredDraftRevision ("
++                "accountId TEXT NOT NULL, headerMessageId TEXT NOT NULL, version INTEGER NOT NULL, "
++                "PRIMARY KEY (accountId, headerMessageId))");
++
++        // A retired identity can be reused by a move or a later sync. Persist the
++        // last revision even if retirement did not use the draft task entry point.
++        const std::string rememberRevision =
++            "BEGIN INSERT INTO PaperReedRetiredDraftRevision(accountId, headerMessageId, version) "
++            "VALUES (OLD.accountId, OLD.headerMessageId, OLD.version) "
++            "ON CONFLICT(accountId, headerMessageId) DO UPDATE SET version = max(version, excluded.version); END";
++        db.exec("CREATE TRIGGER IF NOT EXISTS PaperReedRememberRemovedDraft AFTER DELETE ON Message "
++                "WHEN OLD.draft = 1 AND length(OLD.headerMessageId) > 0 " + rememberRevision);
++        db.exec("CREATE TRIGGER IF NOT EXISTS PaperReedRememberRetiredDraft AFTER UPDATE OF draft, accountId, headerMessageId ON Message "
++                "WHEN OLD.draft = 1 AND length(OLD.headerMessageId) > 0 AND "
++                "(NEW.draft IS NOT 1 OR NEW.accountId IS NOT OLD.accountId OR NEW.headerMessageId IS NOT OLD.headerMessageId) "
++                + rememberRevision);
++    }
++
++    static void migrateDraftLineage(SQLite::Database & db) {
++        db.exec("CREATE TABLE IF NOT EXISTS PaperReedDraftLineage ("
++                "accountId TEXT NOT NULL, headerMessageId TEXT NOT NULL, firstRevision INTEGER NOT NULL, lineageId TEXT NOT NULL, "
++                "PRIMARY KEY (accountId, headerMessageId, firstRevision))");
++        db.exec("CREATE INDEX IF NOT EXISTS PaperReedDraftLineageId ON PaperReedDraftLineage(lineageId)");
++        db.exec("INSERT OR IGNORE INTO PaperReedDraftLineage "
++                "SELECT m.accountId,m.headerMessageId,min(m.version,COALESCE(r.version+1,1)),lower(hex(randomblob(16))) "
++                "FROM Message m LEFT JOIN PaperReedRetiredDraftRevision r ON r.accountId=m.accountId "
++                "AND r.headerMessageId=m.headerMessageId WHERE m.draft=1 AND length(m.headerMessageId)>0");
++        const std::string startLineage =
++            "BEGIN INSERT OR IGNORE INTO PaperReedDraftLineage VALUES "
++            "(NEW.accountId,NEW.headerMessageId,NEW.version,lower(hex(randomblob(16)))); END";
++        db.exec("CREATE TRIGGER IF NOT EXISTS PaperReedNewDraftLineage AFTER INSERT ON Message "
++                "WHEN NEW.draft=1 AND length(NEW.headerMessageId)>0 " + startLineage);
++        db.exec("CREATE TRIGGER IF NOT EXISTS PaperReedActivatedDraftLineage AFTER UPDATE OF draft,accountId,headerMessageId ON Message "
++                "WHEN NEW.draft=1 AND length(NEW.headerMessageId)>0 AND "
++                "(OLD.draft IS NOT 1 OR OLD.accountId IS NOT NEW.accountId OR OLD.headerMessageId IS NOT NEW.headerMessageId) "
++                + startLineage);
++        bool hasLineage = false;
++        {
++            SQLite::Statement columns(db, "PRAGMA table_info(PaperReedDraftRecovery)");
++            while (columns.executeStep()) hasLineage = hasLineage || columns.getColumn(1).getString() == "sourceLineageId";
++        }
++        if (!hasLineage) {
++            db.exec("ALTER TABLE PaperReedDraftRecovery ADD COLUMN sourceLineageId TEXT NOT NULL DEFAULT ''");
++        }
++        db.exec("UPDATE PaperReedDraftRecovery SET sourceAccountId=accountId WHERE sourceAccountId=''");
++        db.exec("UPDATE PaperReedDraftRecovery SET sourceLineageId=COALESCE("
++                "(SELECT l.lineageId FROM PaperReedDraftLineage l WHERE l.accountId=sourceAccountId "
++                "AND l.headerMessageId=sourceDraftId AND l.firstRevision<=sourceRevision ORDER BY l.firstRevision DESC LIMIT 1),"
++                "'legacy:'||length(sourceAccountId)||':'||sourceAccountId||sourceDraftId) WHERE sourceLineageId=''");
++        db.exec("CREATE INDEX IF NOT EXISTS PaperReedRecoveryLineage "
++                "ON PaperReedDraftRecovery(sourceLineageId,copyNumber)");
++    }
++
++    // Reconcile each copy with the original's revision segments. Older engines
++    // reused row IDs after deletion and may have guessed at a copy's origin.
++    // Task cleanup also removes valid receipts, so a missing receipt alone
++    // does not invalidate an existing link.
++    static void restoreDraftLineageFromReceipts(SQLite::Database & db) {
++        SQLite::Statement recovery(db, "SELECT 1 FROM PaperReedDraftRecovery LIMIT 1");
++        if (!recovery.executeStep()) return;
++        recovery.reset();
++
++        db.exec(R"sql(
++            WITH RECURSIVE
++            taskData AS (
++                SELECT rowid AS sequence, accountId, status, CASE WHEN json_valid(data) THEN data ELSE '{}' END AS receipt
++                FROM Task WHERE status IN ('complete', 'remote')
++            ),
++            successful AS (
++                SELECT * FROM taskData
++                WHERE json_extract(receipt, '$.aid') = accountId
++                  AND json_extract(receipt, '$.status') = status
++                  AND json_extract(receipt, '$.error') IS NULL
++            ),
++            receipts AS (
++                SELECT sequence, accountId, status,
++                    json_extract(receipt, '$.__cls') AS operation,
++                    json_extract(receipt, '$.draft.hMsgId') AS header,
++                    json_extract(receipt, '$.draft.id') AS reviewedId,
++                    json_extract(receipt, '$.draft.v') AS reviewedRevision,
++                    json_extract(receipt, '$.savedDraftId') AS savedId,
++                    json_extract(receipt, '$.savedDraftRevision') AS savedRevision,
++                    json_extract(receipt, '$.recoverySource.sourceDraftId') AS recoveryHeader,
++                    json_extract(receipt, '$.recoverySource.sourceRevision') AS recoveryRevision,
++                    json_extract(receipt, '$.moveSource.accountId') AS previousAccount,
++                    json_extract(receipt, '$.moveSource.headerMessageId') AS previousHeader,
++                    json_extract(receipt, '$.moveSource.messageId') AS previousId,
++                    json_extract(receipt, '$.moveSource.revision') AS previousRevision
++                FROM successful
++                WHERE json_extract(receipt, '$.draft.aid') = accountId
++            ),
++            births AS (
++                SELECT sequence, accountId, header, savedId, savedRevision, recoveryHeader, recoveryRevision
++                FROM receipts
++                WHERE operation = 'SyncbackDraftTask' AND reviewedRevision = 0
++                  AND typeof(header) = 'text' AND length(header) > 0
++                  AND typeof(savedId) = 'text' AND length(savedId) > 0
++                  AND typeof(savedRevision) = 'integer' AND savedRevision > 0
++            ),
++            retirements AS (
++                SELECT sequence, accountId, ids.value AS messageId,
++                    json_extract(receipt, '$.destroyedDraftRevision') AS revision
++                FROM successful, json_each(receipt, '$.messageIds') AS ids
++                WHERE json_extract(receipt, '$.__cls') IN ('DestroyDraftTask', 'DestroyDraftRevisionTask')
++                  AND json_type(receipt, '$.messageIds') = 'array'
++                  AND json_type(receipt, '$.stubIds') = 'array'
++                  AND json_array_length(receipt, '$.messageIds') = json_array_length(receipt, '$.stubIds')
++                  AND ids.type = 'text'
++            ),
++            edges AS (
++                SELECT DISTINCT accountId, header, savedId, savedRevision,
++                    CASE operation WHEN 'MoveDraftTask' THEN previousAccount ELSE accountId END AS sourceAccount,
++                    CASE operation WHEN 'MoveDraftTask' THEN previousId ELSE reviewedId END AS sourceId,
++                    CASE operation WHEN 'MoveDraftTask' THEN previousRevision ELSE reviewedRevision END AS sourceRevision
++                FROM receipts
++                WHERE typeof(header) = 'text' AND length(header) > 0
++                  AND typeof(savedId) = 'text' AND length(savedId) > 0
++                  AND typeof(savedRevision) = 'integer'
++                  AND (
++                    (operation = 'MoveDraftTask' AND status = 'complete'
++                       AND previousHeader = header AND reviewedRevision = 0
++                       AND typeof(previousAccount) = 'text' AND length(previousAccount) > 0
++                       AND previousAccount != accountId AND typeof(previousId) = 'text' AND length(previousId) > 0
++                       AND typeof(previousRevision) = 'integer' AND previousRevision > 0
++                       AND savedRevision > previousRevision)
++                    OR
++                    (operation = 'SyncbackDraftTask' AND reviewedId = savedId
++                       AND typeof(reviewedRevision) = 'integer' AND reviewedRevision > 0
++                       AND savedRevision > reviewedRevision)
++                  )
++            ),
++            arrivals AS (
++                SELECT r.sequence, e.accountId, e.header, e.savedId, e.savedRevision
++                FROM receipts r JOIN edges e ON e.accountId = r.accountId AND e.header = r.header
++                    AND e.savedId = r.savedId AND e.savedRevision = r.savedRevision
++                    AND e.sourceAccount = r.previousAccount AND e.sourceId = r.previousId
++                    AND e.sourceRevision = r.previousRevision
++                WHERE r.operation = 'MoveDraftTask' AND r.status = 'complete' AND e.sourceAccount != e.accountId
++            ),
++            draftStarts AS (
++                SELECT sequence, accountId, header, savedId, savedRevision FROM births
++                UNION ALL
++                SELECT sequence, accountId, header, savedId, savedRevision FROM arrivals
++            ),
++            receiptRows(accountId, header, revision, messageId) AS (
++                -- A first save observes a row even though it has no predecessor.
++                SELECT accountId, header, savedRevision, savedId FROM receipts
++                WHERE (operation = 'SyncbackDraftTask' OR (operation = 'MoveDraftTask' AND status = 'complete'))
++                  AND typeof(header) = 'text' AND typeof(savedRevision) = 'integer' AND savedRevision > 0
++                  AND typeof(savedId) = 'text' AND length(savedId) > 0
++                UNION
++                -- A save in place observed its input row. A move cannot confirm its own source claim.
++                SELECT sourceAccount, header, sourceRevision, sourceId FROM edges WHERE sourceAccount = accountId
++            ),
++            observedRows AS (
++                SELECT * FROM receiptRows
++                UNION
++                SELECT accountId, headerMessageId, version, id FROM Message WHERE draft = 1
++            ),
++            unambiguous AS (
++                SELECT accountId, header, savedId, savedRevision,
++                    min(sourceAccount) AS sourceAccount, min(sourceId) AS sourceId, min(sourceRevision) AS sourceRevision
++                FROM edges GROUP BY accountId, header, savedId, savedRevision HAVING count(*) = 1
++            ),
++            confirmed AS (
++                SELECT e.* FROM unambiguous e
++                WHERE EXISTS (
++                    SELECT 1 FROM observedRows observed
++                    WHERE observed.accountId = e.sourceAccount AND observed.header = e.header
++                      AND observed.revision = e.sourceRevision AND observed.messageId = e.sourceId
++                )
++                AND NOT EXISTS (
++                    SELECT 1 FROM observedRows observed
++                    WHERE observed.header = e.header AND (
++                        (observed.accountId = e.sourceAccount AND observed.revision = e.sourceRevision
++                            AND observed.messageId != e.sourceId)
++                        OR
++                        (observed.accountId = e.accountId AND observed.revision = e.savedRevision
++                            AND observed.messageId != e.savedId)
++                    )
++                )
++            ),
++            moveCleanups AS (
++                -- The move transaction inserts the source cleanup immediately
++                -- before its committed receipt.
++                SELECT d.sequence, d.accountId, d.messageId
++                FROM retirements d JOIN receipts r ON r.sequence = d.sequence + 1
++                JOIN confirmed e ON e.accountId = r.accountId AND e.header = r.header
++                    AND e.savedId = r.savedId AND e.savedRevision = r.savedRevision
++                    AND e.sourceAccount = r.previousAccount AND e.sourceId = r.previousId
++                    AND e.sourceRevision = r.previousRevision
++                WHERE r.operation = 'MoveDraftTask' AND r.status = 'complete'
++                  AND d.accountId = e.sourceAccount AND d.messageId = e.sourceId
++            ),
++            liveDrafts(liveAccount, lineageId, header, messageId, recordedFirst, firstRevision, revision) AS (
++                SELECT m.accountId, l.lineageId, m.headerMessageId, m.id,
++                    l.firstRevision,
++                    max(l.firstRevision, coalesce((
++                        SELECT max(e.savedRevision) FROM arrivals e
++                        WHERE e.accountId = m.accountId AND e.header = m.headerMessageId AND e.savedId = m.id
++                          AND e.savedRevision <= m.version
++                    ), l.firstRevision)), m.version
++                FROM Message m
++                JOIN PaperReedDraftLineage l ON l.accountId = m.accountId AND l.headerMessageId = m.headerMessageId
++                    AND l.firstRevision = (SELECT max(firstRevision) FROM PaperReedDraftLineage
++                        WHERE accountId = m.accountId AND headerMessageId = m.headerMessageId AND firstRevision <= m.version)
++                WHERE m.draft = 1
++            ),
++            recordedSegments AS (
++                SELECT live.liveAccount, live.lineageId, l.accountId, live.header,
++                    CASE WHEN l.accountId = live.liveAccount AND l.firstRevision = live.recordedFirst
++                        THEN live.messageId END AS activeMessageId,
++                    l.firstRevision,
++                    min(live.revision, coalesce((
++                        SELECT min(next.firstRevision) - 1 FROM PaperReedDraftLineage next
++                        WHERE next.headerMessageId = l.headerMessageId AND next.firstRevision > l.firstRevision
++                          AND (next.accountId = l.accountId OR next.lineageId = l.lineageId)
++                    ), live.revision)) AS lastRevision
++                FROM liveDrafts live JOIN PaperReedDraftLineage l ON l.lineageId = live.lineageId
++                    AND l.headerMessageId = live.header AND l.firstRevision <= live.revision
++            ),
++            segments AS (
++                -- v15 could also infer the wrong floor for a segment that
++                -- subsequently became historical. Use its confirmed arrival.
++                SELECT s.liveAccount, s.lineageId, s.accountId, s.header, s.activeMessageId,
++                    max(s.firstRevision, coalesce((
++                        SELECT max(e.savedRevision) FROM arrivals e
++                        WHERE e.accountId = s.accountId AND e.header = s.header
++                          AND e.savedRevision BETWEEN s.firstRevision AND s.lastRevision
++                          AND (s.activeMessageId IS NULL OR e.savedId = s.activeMessageId)
++                    ), s.firstRevision)) AS firstRevision, s.lastRevision
++                FROM recordedSegments s
++            ),
++            history(liveAccount, lineageId, accountId, header, messageId, revision) AS (
++                SELECT live.liveAccount, live.lineageId, e.sourceAccount, e.header, e.sourceId, e.sourceRevision
++                FROM liveDrafts live JOIN confirmed e
++                    ON e.accountId = live.liveAccount AND e.header = live.header AND e.savedId = live.messageId
++                    AND e.savedRevision BETWEEN live.firstRevision AND live.revision
++                UNION
++                SELECT h.liveAccount, h.lineageId, e.sourceAccount, e.header, e.sourceId, e.sourceRevision
++                FROM history h JOIN confirmed e
++                    ON e.accountId = h.accountId AND e.header = h.header AND e.savedId = h.messageId
++                    AND e.savedRevision = h.revision
++            ),
++            endpoints AS (
++                SELECT * FROM history
++                UNION
++                -- v15 persisted the segments of moves whose receipts may have
++                -- been cleaned up. Each still needs a local revision observation.
++                SELECT s.liveAccount, s.lineageId, r.accountId, r.header, r.messageId, r.revision
++                FROM segments s JOIN receiptRows r ON r.accountId = s.accountId AND r.header = s.header
++                    AND r.revision BETWEEN s.firstRevision AND s.lastRevision
++                    AND (s.activeMessageId IS NULL OR r.messageId = s.activeMessageId)
++            ),
++            copyReceipts AS (
++                SELECT r.accountId, r.copyDraftId, min(b.accountId) AS originAccount,
++                    min(b.recoveryHeader) AS originHeader, min(b.recoveryRevision) AS originRevision,
++                    min(b.sequence) AS sequence
++                FROM PaperReedDraftRecovery r JOIN births b
++                    ON b.header = r.copyDraftId AND b.recoveryHeader = r.sourceDraftId AND b.recoveryRevision = r.sourceRevision
++                WHERE b.accountId = r.accountId OR EXISTS (
++                    SELECT 1 FROM endpoints e
++                    WHERE e.liveAccount = r.accountId AND e.accountId = b.accountId AND e.header = b.header
++                      AND e.messageId = b.savedId AND e.revision = b.savedRevision
++                )
++                GROUP BY r.accountId, r.copyDraftId HAVING count(*) = 1
++            ),
++            copyEndpoints AS (
++                SELECT c.accountId, c.copyDraftId, c.sequence, c.originAccount,
++                    e.liveAccount, e.lineageId, e.header, e.messageId, e.revision
++                FROM copyReceipts c JOIN endpoints e
++                    ON e.accountId = c.originAccount AND e.header = c.originHeader AND e.revision = c.originRevision
++            ),
++            rejected AS (
++                SELECT c.accountId, c.copyDraftId, c.liveAccount, c.lineageId
++                FROM copyEndpoints c
++                WHERE EXISTS (
++                    SELECT 1 FROM births b
++                    WHERE b.accountId = c.originAccount AND b.header = c.header
++                      AND b.savedRevision <= c.revision AND b.sequence > c.sequence
++                )
++                OR (
++                    SELECT count(*) FROM retirements d
++                    WHERE d.accountId = c.originAccount AND d.messageId = c.messageId AND d.sequence > c.sequence
++                      AND NOT EXISTS (SELECT 1 FROM moveCleanups m WHERE m.sequence = d.sequence AND m.messageId = d.messageId)
++                      AND NOT EXISTS (
++                          -- A conditional deletion identifies its revision even
++                          -- after the unrelated draft's arrival receipt is gone.
++                          SELECT 1 FROM segments s WHERE s.lineageId = c.lineageId AND s.liveAccount = c.liveAccount
++                            AND s.accountId = c.originAccount AND s.header = c.header AND s.activeMessageId IS NULL
++                            AND c.revision BETWEEN s.firstRevision AND s.lastRevision
++                            AND d.revision NOT BETWEEN s.firstRevision AND s.lastRevision
++                      )
++                      AND NOT EXISTS (
++                          -- Once a new draft starts here, its later retirement
++                          -- cannot end a previous incarnation of this row.
++                          SELECT 1 FROM draftStarts start
++                          WHERE start.accountId = c.originAccount AND start.header = c.header
++                            AND start.savedId = d.messageId AND start.savedRevision > c.revision
++                            AND start.sequence < d.sequence
++                            AND (d.revision IS NULL OR d.revision >= start.savedRevision)
++                      )
++                ) > CASE WHEN EXISTS (
++                    -- If only the persisted v15 departure remains, one terminal
++                    -- retirement can be its source cleanup.
++                    SELECT 1 FROM segments s
++                    WHERE s.lineageId = c.lineageId AND s.liveAccount = c.liveAccount
++                      AND s.accountId = c.originAccount AND s.header = c.header
++                      AND c.revision BETWEEN s.firstRevision AND s.lastRevision
++                      AND EXISTS (
++                          SELECT 1 FROM segments next
++                          WHERE next.lineageId = s.lineageId AND next.liveAccount = s.liveAccount
++                            AND next.header = s.header AND next.accountId != s.accountId
++                            AND next.firstRevision = s.lastRevision + 1
++                      )
++                      AND NOT EXISTS (
++                          SELECT 1 FROM confirmed e WHERE e.sourceAccount = s.accountId
++                            AND e.header = s.header AND e.sourceId = c.messageId AND e.accountId != e.sourceAccount
++                            AND e.sourceRevision BETWEEN s.firstRevision AND s.lastRevision
++                      )
++                ) THEN 1 ELSE 0 END
++            ),
++            provenLinks AS (
++                SELECT c.accountId, c.copyDraftId, min(c.liveAccount) AS sourceAccountId, min(c.lineageId) AS lineageId
++                FROM copyEndpoints c
++                WHERE NOT EXISTS (
++                    SELECT 1 FROM rejected r WHERE r.accountId = c.accountId AND r.copyDraftId = c.copyDraftId
++                        AND r.lineageId = c.lineageId AND r.liveAccount = c.liveAccount
++                )
++                GROUP BY c.accountId, c.copyDraftId
++                HAVING count(DISTINCT c.messageId) = 1 AND count(DISTINCT c.lineageId) = 1
++                    AND count(DISTINCT c.liveAccount) = 1
++            ),
++            invalidLinks AS (
++                SELECT r.accountId, r.copyDraftId
++                FROM PaperReedDraftRecovery r LEFT JOIN copyReceipts c
++                    ON c.accountId = r.accountId AND c.copyDraftId = r.copyDraftId
++                WHERE EXISTS (
++                    SELECT 1 FROM rejected bad
++                    WHERE bad.accountId = r.accountId AND bad.copyDraftId = r.copyDraftId
++                       AND bad.lineageId = r.sourceLineageId AND bad.liveAccount = r.sourceAccountId
++                )
++                OR (
++                    -- An origin birth in this revision segment can outlive an
++                    -- older copy receipt. A moved copy can still have a later
++                    -- receipt in its former account, so rule that out first.
++                    c.sequence IS NULL AND EXISTS (
++                        SELECT 1 FROM births b WHERE b.header = r.sourceDraftId AND b.savedRevision <= r.sourceRevision
++                            AND EXISTS (
++                                SELECT 1 FROM segments s WHERE s.lineageId = r.sourceLineageId
++                                    AND s.liveAccount = r.sourceAccountId AND s.accountId = b.accountId
++                                    AND s.header = r.sourceDraftId AND r.sourceRevision BETWEEN s.firstRevision AND s.lastRevision
++                                    AND b.savedRevision >= s.firstRevision
++                            )
++                            AND NOT EXISTS (
++                                SELECT 1 FROM births copy WHERE copy.accountId = b.accountId AND copy.header = r.copyDraftId
++                                    AND copy.recoveryHeader = r.sourceDraftId AND copy.recoveryRevision = r.sourceRevision
++                                    AND copy.sequence > b.sequence
++                            )
++                    )
++                )
++                OR EXISTS (
++                    -- An arrival can reuse the row ID while starting a new revision segment.
++                    SELECT 1 FROM segments arrival WHERE arrival.lineageId = r.sourceLineageId
++                      AND arrival.liveAccount = r.sourceAccountId AND arrival.header = r.sourceDraftId
++                      AND (c.originAccount IS NULL OR arrival.accountId = c.originAccount)
++                      AND r.sourceRevision < arrival.firstRevision
++                      AND NOT EXISTS (
++                          SELECT 1 FROM segments s WHERE s.lineageId = arrival.lineageId AND s.liveAccount = arrival.liveAccount
++                            AND (c.originAccount IS NULL OR s.accountId = c.originAccount) AND s.header = arrival.header
++                            AND r.sourceRevision BETWEEN s.firstRevision AND s.lastRevision
++                      )
++                )
++            )
++            UPDATE PaperReedDraftRecovery AS recovery
++            SET sourceAccountId = COALESCE(link.sourceAccountId, recovery.sourceAccountId),
++                sourceLineageId = CASE WHEN link.lineageId IS NOT NULL THEN link.lineageId
++                    WHEN bad.copyDraftId IS NOT NULL THEN 'legacy:' || length(recovery.sourceAccountId) || ':'
++                        || recovery.sourceAccountId || recovery.sourceDraftId
++                    ELSE recovery.sourceLineageId END
++            FROM PaperReedDraftRecovery r LEFT JOIN provenLinks link
++                ON link.accountId = r.accountId AND link.copyDraftId = r.copyDraftId
++            LEFT JOIN invalidLinks bad ON bad.accountId = r.accountId AND bad.copyDraftId = r.copyDraftId
++            WHERE recovery.accountId = r.accountId AND recovery.copyDraftId = r.copyDraftId
++              AND (link.copyDraftId IS NOT NULL OR bad.copyDraftId IS NOT NULL)
++        )sql");
++    }
++
++    int nextDraftRevision(const std::string & account, const std::string & header, int sourceRevision) {
++        SQLite::Statement read(db, "SELECT version FROM PaperReedRetiredDraftRevision WHERE accountId = ? AND headerMessageId = ?");
++        read.bind(1, account);
++        read.bind(2, header);
++        const auto retiredRevision = read.executeStep() ? read.getColumn(0).getInt64() : 0;
++        const auto floor = std::max<int64_t>(retiredRevision, sourceRevision);
++        if (floor >= std::numeric_limits<int>::max() - 2) {
++            throw Conflict("draft-revision-exhausted", "The draft revision cannot be advanced safely.");
++        }
++        return static_cast<int>(floor + 1);
++    }
++
++    std::string draftLineageAt(const std::string & account, const std::string & header, int revision) {
++        SQLite::Statement q(db, "SELECT lineageId FROM PaperReedDraftLineage "
++                                "WHERE accountId=? AND headerMessageId=? AND firstRevision<=? "
++                                "ORDER BY firstRevision DESC LIMIT 1");
++        q.bind(1, account); q.bind(2, header); q.bind(3, revision);
++        return q.executeStep() ? q.getColumn(0).getString() : "";
++    }
++
++    void moveDraftRecovery(const std::string & from, const std::string & to, const std::string & header,
++                           int sourceRevision, int targetRevision) {
++        const auto lineage = draftLineageAt(from, header, sourceRevision);
++        if (lineage.empty()) throw Conflict("draft-conflict", "The source draft lineage is unavailable.");
++        SQLite::Statement continueLineage(db, "UPDATE PaperReedDraftLineage SET lineageId=? "
++                                             "WHERE accountId=? AND headerMessageId=? AND firstRevision=?");
++        continueLineage.bind(1, lineage); continueLineage.bind(2, to);
++        continueLineage.bind(3, header); continueLineage.bind(4, targetRevision);
++        continueLineage.exec();
++
++        // A draft can be both a recovery copy and the source of another copy.
++        SQLite::Statement copy(db, "UPDATE PaperReedDraftRecovery SET accountId=? "
++                                   "WHERE accountId=? AND copyDraftId=?");
++        copy.bind(1, to); copy.bind(2, from); copy.bind(3, header); copy.exec();
++        SQLite::Statement source(db, "UPDATE PaperReedDraftRecovery SET sourceAccountId=? WHERE sourceLineageId=?");
++        source.bind(1, to); source.bind(2, lineage); source.exec();
++    }
++
+     void recordDraftRecovery(const std::string & account, const std::string & copy,
+                              const json & origin, bool existing) {
+         if (existing || !origin.is_object() || !origin.count("sourceDraftId") ||
+@@ -49,15 +490,34 @@ public:
+             !origin["sourceRevision"].is_number_integer() || origin["sourceRevision"].get<int>() < 1) {
+             throw Conflict("invalid-recovery-source", "Recovery provenance requires a new copy and a saved source revision.");
+         }
++        const auto header = origin["sourceDraftId"].get<std::string>();
++        const auto revision = origin["sourceRevision"].get<int>();
++        auto lineage = draftLineageAt(account, header, revision);
++        auto sourceAccount = account;
++        if (lineage.empty()) {
++            lineage = "legacy:" + std::to_string(account.size()) + ":" + account + header;
++        } else {
++            // A retained editor can save a recovery copy after the original has moved again.
++            SQLite::Statement live(db, "SELECT l.accountId FROM PaperReedDraftLineage l "
++                "JOIN Message m ON m.accountId=l.accountId AND m.headerMessageId=l.headerMessageId AND m.draft=1 "
++                "WHERE l.lineageId=? AND l.firstRevision=(SELECT max(firstRevision) FROM PaperReedDraftLineage "
++                "WHERE accountId=m.accountId AND headerMessageId=m.headerMessageId AND firstRevision<=m.version)");
++            live.bind(1, lineage);
++            if (live.executeStep()) sourceAccount = live.getColumn(0).getString();
++        }
++
+         auto now = std::chrono::duration_cast<std::chrono::milliseconds>(
+             std::chrono::system_clock::now().time_since_epoch()).count();
+-        SQLite::Statement next(db, "SELECT COALESCE(MAX(copyNumber), 0) + 1 FROM PaperReedDraftRecovery WHERE accountId = ? AND sourceDraftId = ?");
+-        next.bind(1, account); next.bind(2, origin["sourceDraftId"].get<std::string>()); next.executeStep();
++        SQLite::Statement next(db, "SELECT COALESCE(MAX(copyNumber), 0) + 1 FROM PaperReedDraftRecovery "
++                                 "WHERE sourceLineageId=?");
++        next.bind(1, lineage); next.executeStep();
+         int number = next.getColumn(0).getInt();
+         SQLite::Statement q(db, "INSERT INTO PaperReedDraftRecovery "
+-            "(accountId, copyDraftId, sourceDraftId, sourceRevision, createdAt, copyNumber) VALUES (?, ?, ?, ?, ?, ?)");
+-        q.bind(1, account); q.bind(2, copy); q.bind(3, origin["sourceDraftId"].get<std::string>());
+-        q.bind(4, origin["sourceRevision"].get<int>()); q.bind(5, static_cast<int64_t>(now)); q.bind(6, number); q.exec();
++            "(accountId,copyDraftId,sourceDraftId,sourceRevision,createdAt,copyNumber,sourceAccountId,sourceLineageId) "
++            "VALUES (?,?,?,?,?,?,?,?)");
++        q.bind(1, account); q.bind(2, copy); q.bind(3, header); q.bind(4, revision);
++        q.bind(5, static_cast<int64_t>(now)); q.bind(6, number);
++        q.bind(7, sourceAccount); q.bind(8, lineage); q.exec();
+     }
+ 
+     json request(const std::string & account, const std::string & id) {
+diff --git a/MailSync/MailStore.cpp b/MailSync/MailStore.cpp
+index 7ede1c0a2d762c2c3238729250b4a9ef08d5891d..830b9666626c36d73b1490d7480103ec36954569 100644
+--- a/MailSync/MailStore.cpp
++++ b/MailSync/MailStore.cpp
+@@ -115,7 +115,7 @@ MailStore::MailStore() :
+     SQLite::Statement(_db, "PRAGMA main.synchronous = NORMAL").exec();
+ }
+ 
+-static int CURRENT_VERSION = 13;
++static int CURRENT_VERSION = 16;
+ static string VACUUM_TIME_KEY = "VACUUM_TIME";
+ static time_t VACUUM_INTERVAL = 30 * 24 * 60 * 60; // 30 days
+ 
+@@ -269,6 +269,23 @@ void MailStore::migrate() {
+     if (version < 13) {
+         _migrateToV13();
+     }
++    if (version < 14) {
++        MailStoreTransaction transaction{this, "draft move revisions and provenance"};
++        PaperReed::MailMutationGuard::migrateDraftMoves(_db);
++        transaction.commit();
++    }
++
++    if (version < 15) {
++        MailStoreTransaction transaction{this, "recovery draft lineage"};
++        PaperReed::MailMutationGuard::migrateDraftLineage(_db);
++        transaction.commit();
++    }
++
++    if (version < 16) {
++        MailStoreTransaction transaction{this, "recover draft provenance from retained receipts"};
++        PaperReed::MailMutationGuard::restoreDraftLineageFromReceipts(_db);
++        transaction.commit();
++    }
+ 
+     // Update the version flag. Note that we don't want to go from v3 back to v2
+     // if the user re-opens an older version of the app.
+@@ -718,15 +735,24 @@ void MailStore::commitTransaction() {
+     _transactionOpen = false;
+ }
+ 
+-void MailStore::save(MailModel * model) {
++void MailStore::save(MailModel * model, int draftSourceRevision) {
+     assertCorrectThread();
+ 
+     model->incrementVersion();
++    const bool inserting = model->version() == 1;
+     model->beforeSave(this);
+ 
+     auto tableName = model->tableName();
+-    
+-    if (model->version() > 1) {
++    if (inserting && tableName == Message::TABLE_NAME) {
++        auto message = static_cast<Message *>(model);
++        if (message->isDraft() && !message->headerMessageId().empty()) {
++            // Preserve first-save hooks while assigning a revision never used by this identity.
++            model->_data["v"] = PaperReed::MailMutationGuard(_db).nextDraftRevision(
++                message->accountId(), message->headerMessageId(), draftSourceRevision);
++        }
++    }
++
++    if (!inserting) {
+         if (!_saveUpdateQueries.count(tableName)) {
+             string pairs{""};
+             for (const auto col : model->columnsForQuery()) {
+diff --git a/MailSync/MailStore.hpp b/MailSync/MailStore.hpp
+index d07077f864b4210eac9a91fa0b77aee0aa7fab13..987e15b81c4c43799336f0f55e432a4d19b715c3 100644
+--- a/MailSync/MailStore.hpp
++++ b/MailSync/MailStore.hpp
+@@ -113,7 +113,7 @@ public:
+ 
+     void commitTransaction();
+ 
+-    void save(MailModel * model);
++    void save(MailModel * model, int draftSourceRevision = 0);
+ 
+     void saveFolderStatus(Folder * folder, json & initialLocalStatus);
+ 
+diff --git a/MailSync/TaskProcessor.cpp b/MailSync/TaskProcessor.cpp
+index 299d931af5cabfcba50e443676867e1c45532f62..bc558780f4a132d27b6d30815019b8277cc471da 100644
+--- a/MailSync/TaskProcessor.cpp
++++ b/MailSync/TaskProcessor.cpp
+@@ -827,7 +827,9 @@ void TaskProcessor::performLocal(Task * task) {
+ 
+     // An ingress retry must not overwrite a queued/completed operation. The
+     // durable send ledger also survives the normal Task history cleanup.
+-    if (cname == "SendDraftTask") {
++    const auto writesTaskReceipt = cname == "SendDraftTask" || cname == "MoveDraftTask" ||
++        cname == "DestroyDraftRevisionTask";
++    if (writesTaskReceipt) {
+         auto prior = store->find<Task>(Query().equal("id", task->id()));
+         if (prior) {
+             logger->info("[{}] Send request already exists; retaining original task", task->id());
+@@ -835,7 +837,7 @@ void TaskProcessor::performLocal(Task * task) {
+         }
+     }
+     try {
+-        if (cname != "SendDraftTask") store->save(task);
++        if (!writesTaskReceipt) store->save(task);
+     } catch (SQLite::Exception & ex) {
+         logger->error("[{}] -- Exception: Task could not be saved to the database. {}", task->id(), ex.what());
+         return;
+@@ -863,8 +865,16 @@ void TaskProcessor::performLocal(Task * task) {
+         } else if (cname == "SyncbackDraftTask") {
+             performLocalSaveDraft(task);
+             
++        } else if (cname == "MoveDraftTask") {
++            performLocalSaveDraft(task, true);
++            return; // The move and its receipt are already committed together.
++
+         } else if (cname == "DestroyDraftTask") {
+             performLocalDestroyDraft(task);
++
++        } else if (cname == "DestroyDraftRevisionTask") {
++            performLocalDestroyDraft(task, true);
++            return;
+             
+         } else if (cname == "SyncbackCategoryTask") {
+             performLocalSyncbackCategory(task);
+@@ -1001,7 +1011,7 @@ void TaskProcessor::performRemote(Task * task) {
+             } else if (cname == "SyncbackDraftTask") {
+                 // right now we don't syncback drafts
+                 
+-            } else if (cname == "DestroyDraftTask") {
++            } else if (cname == "DestroyDraftTask" || cname == "DestroyDraftRevisionTask") {
+                 performRemoteDestroyDraft(task);
+ 
+             } else if (cname == "SyncbackCategoryTask") {
+@@ -1418,7 +1428,7 @@ void TaskProcessor::performLocalSendDraft(Task * task) {
+     transaction.commit();
+ }
+ 
+-void TaskProcessor::performLocalSaveDraft(Task * task) {
++void TaskProcessor::performLocalSaveDraft(Task * task, bool moving) {
+     json & draftJSON = task->data()["draft"];
+     
+     {
+@@ -1427,7 +1437,29 @@ void TaskProcessor::performLocalSaveDraft(Task * task) {
+         // If the draft already exists, we need to visibly change it's attributes
+         // to trigger the correct didSave hooks, etc. Find and update it.
+         PaperReed::MailMutationGuard guard(store->db());
++        shared_ptr<Message> source;
++        if (moving) {
++            const auto & ref = task->data().at("moveSource");
++            const auto sourceAccountId = ref.at("accountId").get<string>();
++            const auto sourceHeader = ref.at("headerMessageId").get<string>();
++            const auto sourceMessageId = ref.at("messageId").get<string>();
++            if (sourceAccountId.empty() || sourceMessageId.empty() || sourceHeader.empty() ||
++                sourceAccountId == account->id() || draftJSON.at("hMsgId") != sourceHeader ||
++                draftJSON.at("v") != 0 || !ref.at("revision").is_number_integer() || ref.at("revision") < 1) {
++                throw PaperReed::Conflict("invalid-draft", "A move needs a saved source draft and a new destination.");
++            }
++            const auto sourceId = guard.checkRevision(sourceAccountId, {
++                {"aid", sourceAccountId}, {"hMsgId", sourceHeader},
++                {"id", sourceMessageId}, {"v", ref.at("revision")},
++            }, true);
++            guard.requireEditable(sourceAccountId, sourceHeader);
++            source = store->find<Message>(Query().equal("id", sourceId).equal("accountId", sourceAccountId));
++            if (!source) throw PaperReed::Conflict("draft-conflict", "The source draft no longer exists.");
++        }
+         string resolvedId = guard.checkRevision(account->id(), draftJSON, false);
++        if (moving && !resolvedId.empty()) {
++            throw PaperReed::Conflict("draft-conflict", "The destination already contains this draft.");
++        }
+         guard.requireEditable(account->id(), draftJSON["hMsgId"].get<string>());
+         shared_ptr<Message> existing = nullptr;
+         if (!resolvedId.empty()) {
+@@ -1455,7 +1487,7 @@ void TaskProcessor::performLocalSaveDraft(Task * task) {
+             store->save(existing.get());
+         } else {
+             ensureDraftPlacement(draft);
+-            store->save(&draft);
++            store->save(&draft, source ? source->version() : 0);
+         }
+ 
+         if (draftJSON.count("body")) {
+@@ -1466,6 +1498,21 @@ void TaskProcessor::performLocalSaveDraft(Task * task) {
+         }
+         task->data()["savedDraftRevision"] = existing ? existing->version() : draft.version();
+         task->data()["savedDraftId"] = draft.id();
++        if (moving) {
++            auto trash = store->find<Folder>(Query().equal("accountId", source->accountId()).equal("role", "trash"));
++            const auto stubId = retireDraft(source, trash);
++            guard.moveDraftRecovery(source->accountId(), account->id(), source->headerMessageId(),
++                                    source->version(), draft.version());
++            // The original account's worker owns remote cleanup and can resume it
++            // after a restart. Never use the destination account's IMAP session.
++            Task cleanup("DestroyDraftTask", source->accountId(), {
++                {"messageIds", json::array({source->id()})}, {"stubIds", json::array({stubId})},
++            });
++            cleanup.setStatus("remote");
++            store->save(&cleanup);
++            task->setStatus("complete");
++            store->save(task);
++        }
+         transaction.commit();
+     }
+ }
+@@ -1490,55 +1537,66 @@ void TaskProcessor::ensureDraftPlacement(Message & draft) {
+  is freed immediately because the user can switch a draft between accounts and re-create
+  one with the same accountId + headerMessageId.
+  */
+-void TaskProcessor::performLocalDestroyDraft(Task * task) {
++void TaskProcessor::performLocalDestroyDraft(Task * task, bool guarded) {
+     vector<string> messageIds = task->data()["messageIds"];
+-
+-    logger->info("-- Hiding / detatching drafts while they're deleted...");
+-
+     auto trash = store->find<Folder>(Query().equal("accountId", account->id()).equal("role", "trash"));
+-    auto stubIds = json::array();
+-    
+-    {
+-        MailStoreTransaction transaction{store, "performLocalDestroyDraft"};
+-
+-        auto drafts = store->findLargeSet<Message>("id", messageIds);
+-        for (auto & draft : drafts) {
+-            PaperReed::MailMutationGuard(store->db()).requireEditable(account->id(), draft->headerMessageId());
+-            auto placements = store->placementsForMessage(draft->id());
+-            store->remove(draft.get());
+-            
+-            auto stub = Message::messageWithDeletionPlaceholderFor(draft);
+-            for (auto & p : placements) {
+-                if (p.remoteUID == 0) {
+-                    continue;
+-                }
+-                auto folder = store->folderById(account->id(), p.folderId);
+-                if (folder == nullptr) {
+-                    continue;
+-                }
+-                MessageAttributes attrs{p.remoteUID, p.unread, p.starred, p.draft, _labelsOf(p)};
+-                store->upsertPlacement(*stub, *folder, p.remoteUID, attrs);
+-                if (trash != nullptr) {
+-                    store->beginPlacementMove(*stub, p.folderId, p.remoteUID, trash->id());
+-                }
+-            }
+-            // Rebuilt before the flags below so the save keeps them, and unconditionally so a
+-            // stub for a draft that was never on the server is recorded as an orphan.
+-            store->refreshMessageFromPlacements(*stub);
+-            // The placement keeps the draft's flags so the Drafts scan sees no change;
+-            // the placeholder itself must not appear in the draft list.
+-            stub->setDraft(false);
+-            stub->setUnread(false);
+-            stub->setStarred(false);
+-            store->save(stub.get());
+-            stubIds.push_back(stub->id());
+-
+-            logger->info("-- Replacing local ID {} with {}", draft->id(), stub->id());
++    MailStoreTransaction transaction{store, "performLocalDestroyDraft"};
++    PaperReed::MailMutationGuard guard(store->db());
++    if (guarded) {
++        const auto & expected = task->data().at("expectedDraft");
++        if (!expected.contains("id") || !expected["id"].is_string() ||
++            messageIds.size() != 1 || messageIds.front() != expected["id"]) {
++            throw PaperReed::Conflict("invalid-draft", "A deletion needs the id of the reviewed draft.");
+         }
++        guard.checkRevision(account->id(), expected, true);
++    }
+ 
+-        transaction.commit();
++    auto stubIds = json::array();
++    for (auto & draft : store->findLargeSet<Message>("id", messageIds)) {
++        if (draft->accountId() != account->id() || !draft->isDraft()) continue;
++        guard.requireEditable(account->id(), draft->headerMessageId());
++        stubIds.push_back(retireDraft(draft, trash));
+     }
++
+     task->data()["stubIds"] = stubIds;
++    if (guarded) {
++        task->data()["destroyedDraftRevision"] = task->data()["expectedDraft"]["v"];
++        task->setStatus("remote");
++        store->save(task);
++    }
++    transaction.commit();
++}
++
++string TaskProcessor::retireDraft(const shared_ptr<Message> & draft, const shared_ptr<Folder> & trash) {
++    auto placements = store->placementsForMessage(draft->id());
++    store->remove(draft.get());
++
++    auto stub = Message::messageWithDeletionPlaceholderFor(draft);
++    for (auto & p : placements) {
++        if (p.remoteUID == 0) {
++            continue;
++        }
++        auto folder = store->folderById(draft->accountId(), p.folderId);
++        if (folder == nullptr) {
++            continue;
++        }
++        MessageAttributes attrs{p.remoteUID, p.unread, p.starred, p.draft, _labelsOf(p)};
++        store->upsertPlacement(*stub, *folder, p.remoteUID, attrs);
++        if (trash != nullptr) {
++            store->beginPlacementMove(*stub, p.folderId, p.remoteUID, trash->id());
++        }
++    }
++    // Rebuilt before the flags below so the save keeps them, and unconditionally so a
++    // stub for a draft that was never on the server is recorded as an orphan.
++    store->refreshMessageFromPlacements(*stub);
++    // The placement keeps the draft's flags so the Drafts scan sees no change;
++    // the placeholder itself must not appear in the draft list.
++    stub->setDraft(false);
++    stub->setUnread(false);
++    stub->setStarred(false);
++    store->save(stub.get());
++    logger->info("-- Replacing local ID {} with {}", draft->id(), stub->id());
++    return stub->id();
+ }
+ 
+ // Placeholders with no placement (the draft was never on the server) are removed here
+diff --git a/MailSync/TaskProcessor.hpp b/MailSync/TaskProcessor.hpp
+index 757b921c5296478fc17b1931557eba04e7f0b641..4a75962788c669d2ba5287d3d05a28dac56396d4 100644
+--- a/MailSync/TaskProcessor.hpp
++++ b/MailSync/TaskProcessor.hpp
+@@ -79,9 +79,10 @@ private:
+     void performLocalChangeOnMessages(Task * task, LocalChangeFn modifyLocalMessage);
+     void performRemoteChangeOnMessages(Task * task, bool isMove, RemoteChangeFn applyInFolder);
+     string confirmPlacementChange(Message & msg, TaskPlacement & item, const vector<Placement> & rows);
+-    void performLocalSaveDraft(Task * task);
++    void performLocalSaveDraft(Task * task, bool moving = false);
+     void performLocalSendDraft(Task * task);
+-    void performLocalDestroyDraft(Task * task);
++    void performLocalDestroyDraft(Task * task, bool guarded = false);
++    string retireDraft(const shared_ptr<Message> & draft, const shared_ptr<Folder> & trash);
+     void performRemoteDestroyDraft(Task * task);
+ 
+     void performLocalDestroyContact(Task * task);

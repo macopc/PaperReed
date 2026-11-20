@@ -168,8 +168,13 @@ module.exports=async({app,main,cdp,work,account,cli,click,evaluate,until,restart
  const sourceWindow=await until(async()=>app.windows().find(w=>JSON.parse(new URL(w.url()).searchParams.get('loadSettings')||'{}').windowType==='composer'),'source composer');
  sourceWindow.on('dialog',()=>{});
  const sourceCdp=await app.context().newCDPSession(sourceWindow);
- await until(()=>evaluate(sourceCdp,'!!document.querySelector("[contenteditable=true]")'),'source editor');
- assert((await evaluate(sourceCdp,'document.body.innerText')).includes('CLI newer version'));
+ const openedSource=await until(()=>evaluate(sourceCdp,`(() => {
+   if (!window.AppEnv || !document.querySelector('[contenteditable=true]')) return null;
+   const props = AppEnv.getWindowProps();
+   return {header:props.headerMessageId, accountId:props.accountId,
+     body:document.querySelector('[contenteditable=true]').innerText.trim()};
+ })()`),'source editor');
+ assert.deepEqual(openedSource,{header:created.draftId,accountId:account.id,body:'CLI newer version'});
  await evaluate(sourceCdp,'setTimeout(()=>AppEnv.close(),0);true');
  await until(async()=>sourceWindow.isClosed(),'clean source close');
  await action('[data-mailbox="drafts"]');
@@ -181,8 +186,38 @@ module.exports=async({app,main,cdp,work,account,cli,click,evaluate,until,restart
  await until(()=>evaluate(cdp,'!document.querySelector(".pr-workspace")'),'unsaved draft saved and Agent preferences opened');
  assert((await cli('draft-get',ref)).body.includes('Unsaved edit before Agent setup'));
  await evaluate(cdp,'require("mailspring-exports").Actions.selectRootSheet(require("mailspring-exports").WorkspaceStore.Sheet.Threads);true');
- await main.locator('.pr-editor [contenteditable=true]').waitFor();
- await edit('CLI newer version');
+ const restoredEditor=main.locator('.pr-editor [contenteditable=true]');
+ await restoredEditor.click();
+ await restoredEditor.press('Meta+A');
+ await until(()=>evaluate(cdp,`(()=>{
+   const editor=document.querySelector('.pr-editor [contenteditable=true]');
+   const selection=getSelection();
+   return editor===document.activeElement && editor.contains(selection.anchorNode) &&
+     selection.toString().trim()==='Unsaved edit before Agent setup';
+ })()`),'restored editor has selected the previous body',5000);
+ await evaluate(cdp,`(() => {
+   const editor = document.querySelector('.pr-editor [contenteditable=true]');
+   window.restoredTextInput = [];
+   editor.addEventListener('beforeinput', event => {
+     if (!event.isTrusted || event.inputType !== 'insertText') return;
+     const [range] = event.getTargetRanges();
+     const replaced = range.endOffset - range.startOffset;
+     restoredTextInput.push({event, replaced});
+   }, {capture: true, once: true});
+ })()`);
+ await main.keyboard.insertText('CLI newer version');
+ assert.equal((await restoredEditor.innerText()).trim(),'CLI newer version');
+ assert.deepEqual(await evaluate(cdp,`restoredTextInput.map(({event, replaced}) =>
+   ({data:event.data, replaced, consumed:event.defaultPrevented}))`),
+   [{data:'CLI newer version',replaced:'Unsaved edit before Agent setup'.length,consumed:true}],
+   'the restored editor consumes exactly one native replacement event');
+ const restoredBody = await evaluate(cdp,`(() => {
+   const session = require('mailspring-exports').DraftStore.cachedDraftSession(
+     ${JSON.stringify(created.draftId)}, ${JSON.stringify(account.id)});
+   return {slate:session.draft().bodyEditorState.document.text, html:session.draft().body};
+ })()`);
+ assert.equal(restoredBody.slate, 'CLI newer version');
+ assert(['CLI newer version','<div>CLI newer version</div>'].includes(restoredBody.html));
  await action('.pr-draft-status button');
  await until(async()=>(await text()).includes('已保存到本机'),'saved draft restored');
  await evaluate(cdp,`require(AppEnv.getLoadSettings().resourcePath+'/internal_packages/mcp-server/lib/paper-reed-cli').installCLI().then(()=>true)`);
@@ -229,7 +264,7 @@ module.exports=async({app,main,cdp,work,account,cli,click,evaluate,until,restart
  await action('.pr-recovery-origin button');
  await until(async()=>(await text()).includes('原稿暂不可用或已不在草稿箱'),'source no longer draft');
  await screenshot('source-unavailable');
- await evaluate(cdp,`(async()=>{const {DatabaseStore,Message,Actions}=require('mailspring-exports');const draft=await DatabaseStore.findBy(Message,{accountId:${JSON.stringify(account.id)},headerMessageId:${JSON.stringify(copyId)}});Actions.destroyDraft({accountId:draft.accountId,headerMessageId:draft.headerMessageId,id:draft.id});return true;})()`);
+ await evaluate(cdp,`(async()=>{const {DatabaseStore,Message,Actions}=require('mailspring-exports');const draft=await DatabaseStore.findBy(Message,{accountId:${JSON.stringify(account.id)},headerMessageId:${JSON.stringify(copyId)}});Actions.destroyDraft(draft);return true;})()`);
  await action('[data-mailbox="drafts"]');
  await until(()=>evaluate(cdp,'document.querySelectorAll(".pr-copy-badge").length===1'),'deleted copy excluded from provenance list');
  assert.equal((await evaluate(cdp,'document.querySelector(".pr-copy-badge").innerText')).trim(),'恢复副本 2','Deleting the first copy must not renumber the second');
@@ -237,7 +272,7 @@ module.exports=async({app,main,cdp,work,account,cli,click,evaluate,until,restart
  assert(!renderer.includes('Failed to activate plugin'), 'All packages must activate');
  const result={realInboxThreads:8,compactSubjectWidth:compact.width,narrowSubjectWidth:narrow.width,readingAndReply:true,readerWidth,editorWidth,conflictingSendDisabled:true,sendPositionStable:true,
    cliDraftOpened:true,conflictVisible:true,navigationBlocked:true,recoveryPreservesBoth:true,newEditsRequireFreshCopy:true,
-   explicitReload:true,contextUsesSavedRevision:true,settingsReturnToDraft:true,sentResultVisible:true,subjectWraps:true,composingEnterPreserved:true,formatToggleWorks:true,fromFirst:true,recoveryLabelsPersist:true,sourceNavigation:true,missingSourceExplained:true,deletedCopyHidden:true,expectedSMTPSubmissions:1};
+   explicitReload:true,contextUsesSavedRevision:true,settingsReturnToDraft:true,nativeReplacementAppliedOnce:true,sentResultVisible:true,subjectWraps:true,composingEnterPreserved:true,formatToggleWorks:true,fromFirst:true,recoveryLabelsPersist:true,sourceNavigation:true,missingSourceExplained:true,deletedCopyHidden:true,expectedSMTPSubmissions:1};
  fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(result,null,2));
  console.log('PASS connected Paper Reed UI:',JSON.stringify(result));
 };

@@ -3,11 +3,18 @@ const {createRequire}=require('node:module'),{spawn}=require('node:child_process
 const [upstream,work,mode]=process.argv.slice(2),r=createRequire(path.join(upstream,'package.json'));
 const {_electron}=r('playwright');
 const account=JSON.parse(fs.readFileSync(path.join(work,'account.json')));
+const draftUpgradeSource=process.env.PAPER_REED_DRAFT_UPGRADE_SOURCE;
+const secondAccount=['identity','account-move-workspace','account-move-popout','account-move-collision','account-move-agent',
+ 'account-move-stale','account-move-attachments','account-move-dirty-popout','account-move-provenance','account-move-roundtrip-delete','account-move-picker-popout','account-move-original-provenance','draft-upgrade-provenance','draft-upgrade-duplicate-provenance']
+ .includes(process.env.PAPER_REED_DRAFT_LIST_CHECK)
+ ? {...account,id:'c0ffee-draft-identity-b',emailAddress:'other@example.test',name:'Second fixture account'}
+ : null;
+const accounts=secondAccount ? [account,secondAccount] : [account];
 const token=randomUUID(),config=path.join(work,'config');fs.mkdirSync(config);
 const tokenFile=path.join(work,'token');fs.writeFileSync(tokenFile,token,{mode:0o600});
-const configData={'*':{env:'production',accounts:[account],accountsVersion:2,core:{
+const configData={'*':{env:'production',accounts,accountsVersion:2,core:{
   themes:['ui-light'],disabledPackages:['open-tracking','link-tracking','send-reminders','send-later','thread-snooze'],
-  paperReed:{enabled:mode==='workspace'||mode==='controls'},workspace:{mode:'split'},sending:{undoSend:0,sounds:false},mcp:{enabled:true,accessLevel:'read-write-send',enabledAccounts:{[account.id]:{enabled:true}}}
+  paperReed:{enabled:mode==='workspace'||mode==='controls'},workspace:{mode:'split'},sending:{undoSend:0,sounds:false},mcp:{enabled:true,accessLevel:'read-write-send',enabledAccounts:Object.fromEntries(accounts.map(item=>[item.id,{enabled:true}]))}
 }}};
 fs.writeFileSync(path.join(config,'config.json'),JSON.stringify(configData));
 let app,main,cdp,port;
@@ -21,16 +28,25 @@ async function cli(command,input,expectError=false){
  return JSON.parse(stdout||stderr);
 }
 async function click(page,session,selector){const box=await evaluate(session,`(()=>{const e=document.querySelector(${JSON.stringify(selector)});if(!e)return null;const r=e.getBoundingClientRect();return {x:r.x+r.width/2,y:r.y+r.height/2};})()`);assert(box,selector);await page.mouse.click(box.x,box.y);}
-async function startDesktop(){
+async function startDesktop(build=upstream){
  const env={...process.env};env.PAPER_REED_CLI_BIN_DIR=path.join(work,"bin with space '");delete env.PLAYWRIGHT;delete env.ELECTRON_RUN_AS_NODE;
- app=await _electron.launch({executablePath:r('electron'),args:[path.join(upstream,'app'),'--dev','--no-sandbox','--config-dir-path',config],env,timeout:30000});
+ app=await _electron.launch({executablePath:r('electron'),args:[path.join(build,'app'),'--dev','--no-sandbox','--config-dir-path',config],env,timeout:30000});
  app.process().stderr.on('data',b=>fs.appendFileSync(path.join(work,'electron.log'),b));
  main=await until(async()=>app.windows().find(w=>JSON.parse(new URL(w.url() || 'about:blank').searchParams.get('loadSettings')||'{}').windowType==='default'),'main window');
  main.on('console',msg=>fs.appendFileSync(path.join(work,'renderer.log'),msg.type()+': '+msg.text()+'\n'));
  cdp=await app.context().newCDPSession(main);
  await until(()=>evaluate(cdp,'typeof AppEnv !== "undefined" && !!AppEnv.mailsyncBridge'),'app initialization');
- const km=JSON.stringify(path.join(upstream,'app/src/key-manager'));
- await evaluate(cdp,`(async()=>{const km=require(${km}).default;await km.replacePassword('test@example.test-imap','pass');await km.replacePassword('test@example.test-smtp','pass');const a=require('mailspring-exports').AccountStore.accountForId(${JSON.stringify(account.id)});await AppEnv.mailsyncBridge.forceRelaunchClient(a);return true;})()`);
+ const km=JSON.stringify(path.join(build,'app/src/key-manager'));
+ await evaluate(cdp,`(async()=>{
+   const km=require(${km}).default;
+   for(const {emailAddress,id} of ${JSON.stringify(accounts.map(({emailAddress,id})=>({emailAddress,id})))}) {
+     await km.replacePassword(emailAddress+'-imap','pass');
+     await km.replacePassword(emailAddress+'-smtp','pass');
+     const model=require('mailspring-exports').AccountStore.accountForId(id);
+     await AppEnv.mailsyncBridge.forceRelaunchClient(model);
+   }
+   return true;
+ })()`);
  console.log('SETUP secrets and sync');
  await until(()=>evaluate(cdp,`document.body.innerText.includes(${JSON.stringify((mode==='workspace'||mode==='controls')?'收件箱':'Inbox')})`),'inbox');
  await until(async()=>{try{return (await fetch(`http://127.0.0.1:${port}/mcp`)).status===401;}catch{return false;}},'production MCP listener');
@@ -39,12 +55,21 @@ async function startDesktop(){
 (async()=>{
  const reservation=require('node:net').createServer();await new Promise(r=>reservation.listen(0,'127.0.0.1',r));port=reservation.address().port;await new Promise(r=>reservation.close(r));
  configData['*'].core.mcp.port=port;configData['*'].core.mcp.token=token;fs.writeFileSync(path.join(config,'config.json'),JSON.stringify(configData));
- await startDesktop();
+ await startDesktop(draftUpgradeSource || upstream);
  if(mode==='controls') {
    await require('./check-editor-controls.cjs')({app,main,cdp,work,account,cli,click,evaluate,until,restartDesktop:async(stoppedFor=0)=>{await app.evaluate(({BrowserWindow})=>BrowserWindow.getAllWindows().forEach(w=>w.destroy()));await app.close();if(stoppedFor)await new Promise(r=>setTimeout(r,stoppedFor));await startDesktop();return {main,cdp};}});
    return;
  }
  if(mode==='workspace') {
+   if (process.env.PAPER_REED_DRAFT_LIST_CHECK) {
+     await require('./check-draft-list.cjs')({app,main,cdp,evaluate,until,account,secondAccount,cli,
+       upgradeDesktop: draftUpgradeSource ? async () => {
+         await app.close();
+         await startDesktop();
+         return {app, main, cdp};
+       } : undefined});
+     return;
+   }
    if (process.env.PAPER_REED_PINNED_PAGE_CHECK) {
      await require('./check-pinned-page.cjs')({main,cdp,evaluate,until,account,cli});
      return;

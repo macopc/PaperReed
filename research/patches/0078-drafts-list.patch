@@ -1,0 +1,2775 @@
+diff --git a/app/internal_packages/composer-templates/lib/template-picker.tsx b/app/internal_packages/composer-templates/lib/template-picker.tsx
+index e2c5c7bd5020e5592c74bc6dd187f0b7d12e7c51..9b97638d7d5abc80c478d89dfbdb06813587c2b6 100644
+--- a/app/internal_packages/composer-templates/lib/template-picker.tsx
++++ b/app/internal_packages/composer-templates/lib/template-picker.tsx
+@@ -4,7 +4,7 @@ import { localized, Actions, Message } from 'mailspring-exports';
+ import { Menu, RetinaImg } from 'mailspring-component-kit';
+ import TemplateStore from './template-store';
+ 
+-class TemplatePopover extends React.Component<{ headerMessageId: string }> {
++class TemplatePopover extends React.Component<{ headerMessageId: string; accountId?: string }> {
+   static displayName = 'TemplatePopover';
+ 
+   unsubscribe?: () => void;
+@@ -51,6 +51,7 @@ class TemplatePopover extends React.Component<{ headerMessageId: string }> {
+     Actions.insertTemplateId({
+       templateId: template.id,
+       headerMessageId: this.props.headerMessageId,
++      accountId: this.props.accountId,
+     });
+     Actions.closePopover();
+   };
+@@ -60,7 +61,7 @@ class TemplatePopover extends React.Component<{ headerMessageId: string }> {
+   };
+ 
+   _onNewTemplate = () => {
+-    Actions.createTemplate({ headerMessageId: this.props.headerMessageId });
++    Actions.createTemplate({ headerMessageId: this.props.headerMessageId, accountId: this.props.accountId });
+   };
+ 
+   render() {
+@@ -114,7 +115,8 @@ class TemplatePicker extends React.Component<{
+ 
+   _onClickButton = () => {
+     const buttonRect = (ReactDOM.findDOMNode(this) as HTMLElement).getBoundingClientRect();
+-    Actions.openPopover(<TemplatePopover headerMessageId={this.props.headerMessageId} />, {
++    Actions.openPopover(<TemplatePopover headerMessageId={this.props.headerMessageId}
++      accountId={this.props.draft.accountId} />, {
+       originRect: buttonRect,
+       direction: 'up',
+     });
+diff --git a/app/internal_packages/composer-templates/lib/template-store.ts b/app/internal_packages/composer-templates/lib/template-store.ts
+index e38175acd15cebd99a7660fe944e65a957e0cefe..983143e22ddc24617cf1706c460bf9d141f9431b 100644
+--- a/app/internal_packages/composer-templates/lib/template-store.ts
++++ b/app/internal_packages/composer-templates/lib/template-store.ts
+@@ -139,17 +139,19 @@ class TemplateStore extends MailspringStore {
+ 
+   _onCreateTemplate({
+     headerMessageId,
++    accountId,
+     name,
+     contents,
+     subject,
+   }: {
+     headerMessageId?: string;
++    accountId?: string;
+     name?: string;
+     contents?: string;
+     subject?: string;
+   } = {}) {
+     if (headerMessageId) {
+-      this._onCreateTemplateFromDraft(headerMessageId);
++      this._onCreateTemplateFromDraft(headerMessageId, accountId);
+       return;
+     }
+     if (!name || name.length === 0) {
+@@ -163,8 +165,8 @@ class TemplateStore extends MailspringStore {
+     this.saveNewTemplate(name, { subject: subject || '', body: contents }, this._onShowTemplates);
+   }
+ 
+-  async _onCreateTemplateFromDraft(headerMessageId: string) {
+-    const session = await DraftStore.sessionForClientId(headerMessageId);
++  async _onCreateTemplateFromDraft(headerMessageId: string, accountId?: string) {
++    const session = await DraftStore.sessionForClientId(headerMessageId, accountId);
+     const draft = session.draft();
+     const draftSubject = (draft.subject || '').trim();
+     const draftName = draftSubject.replace(INVALID_TEMPLATE_NAME_REGEX, '');
+@@ -371,12 +373,13 @@ class TemplateStore extends MailspringStore {
+   async _onInsertTemplateId({
+     templateId,
+     headerMessageId,
+-  }: { templateId?: string; headerMessageId?: string } = {}) {
++    accountId,
++  }: { templateId?: string; headerMessageId?: string; accountId?: string } = {}) {
+     const template = this._items.find((t) => t.id === templateId);
+     const { subject: templateSubject, body: templateBody } = parseTemplate(
+       fs.readFileSync(template.path).toString()
+     );
+-    const session = await DraftStore.sessionForClientId(headerMessageId);
++    const session = await DraftStore.sessionForClientId(headerMessageId, accountId);
+     const draft = session.draft();
+ 
+     // Never touch the subject of a reply or a forward - the "Re:" / "Fwd:" prefix
+diff --git a/app/internal_packages/composer/lib/account-contact-field.tsx b/app/internal_packages/composer/lib/account-contact-field.tsx
+index 88bc494ccf5dded626fccf27bd1c6250de6b9781..bd1ea72c895f529352a9ae99a7ae7e437534c857 100644
+--- a/app/internal_packages/composer/lib/account-contact-field.tsx
++++ b/app/internal_packages/composer/lib/account-contact-field.tsx
+@@ -39,7 +39,11 @@ export default class AccountContactField extends React.Component<AccountContactF
+       cc: [...draft.cc].concat(autoaddress.type === 'cc' ? autocontacts : []),
+       bcc: [...draft.bcc].concat(autoaddress.type === 'bcc' ? autocontacts : []),
+     });
+-    session.ensureCorrectAccount();
++    try {
++      await session.ensureCorrectAccount();
++    } catch (error) {
++      if (!AppEnv.config.get('core.paperReed.enabled')) AppEnv.showErrorDialog(error.message);
++    }
+   };
+ 
+   _renderAccountSelector() {
+diff --git a/app/internal_packages/composer/lib/attachments-area.tsx b/app/internal_packages/composer/lib/attachments-area.tsx
+index c5646e4e3761451e764b3898767fcf8a87e954c6..09dfc8ec238a8f381ed95495253e08d3713581b4 100644
+--- a/app/internal_packages/composer/lib/attachments-area.tsx
++++ b/app/internal_packages/composer/lib/attachments-area.tsx
+@@ -9,7 +9,7 @@ export const AttachmentsArea: React.FunctionComponent<{
+   // accepted.
+   attaching?: boolean;
+ }> = (props) => {
+-  const { files, headerMessageId } = props.draft;
++  const { files, headerMessageId, accountId } = props.draft;
+ 
+   return (
+     <div className="attachments-area">
+@@ -23,7 +23,7 @@ export const AttachmentsArea: React.FunctionComponent<{
+             filePath={AttachmentStore.pathForFile(file)}
+             displayName={file.filename}
+             fileIconName={`file-${file.displayExtension()}.png`}
+-            onRemoveAttachment={() => Actions.removeAttachment(headerMessageId, file)}
++            onRemoveAttachment={() => Actions.removeAttachment(headerMessageId, file, accountId)}
+           />
+         ))}
+       {props.attaching && (
+diff --git a/app/internal_packages/composer/lib/composer-header-actions.tsx b/app/internal_packages/composer/lib/composer-header-actions.tsx
+index 30d7bc5b5df069a2747f540e7eea7db76aa3b716..910e4783b102b7df61cd2ba882cd74c3495ae031 100644
+--- a/app/internal_packages/composer/lib/composer-header-actions.tsx
++++ b/app/internal_packages/composer/lib/composer-header-actions.tsx
+@@ -5,6 +5,7 @@ import Fields from './fields';
+ 
+ interface ComposerHeaderActionsProps {
+   headerMessageId: string;
++  accountId?: string;
+   enabledFields: string[];
+   onShowAndFocusField: (f: string) => void;
+ }
+@@ -12,7 +13,7 @@ export default class ComposerHeaderActions extends React.Component<ComposerHeade
+   static displayName = 'ComposerHeaderActions';
+ 
+   _onPopoutComposer = () => {
+-    Actions.composePopoutDraft(this.props.headerMessageId);
++    Actions.composePopoutDraft(this.props.headerMessageId, { accountId: this.props.accountId });
+   };
+ 
+   _onKeyDown = (handler: () => void) => (e: React.KeyboardEvent) => {
+diff --git a/app/internal_packages/composer/lib/composer-header.tsx b/app/internal_packages/composer/lib/composer-header.tsx
+index 8fd278d77ec644e7e62bdbdf9aa3748f50ee4715..229e8e0e35f063843a7f90c12e6cd43c343f01bb 100644
+--- a/app/internal_packages/composer/lib/composer-header.tsx
++++ b/app/internal_packages/composer/lib/composer-header.tsx
+@@ -292,6 +292,7 @@ export class ComposerHeader extends React.Component<ComposerHeaderProps, Compose
+       <ComposerHeaderActions
+         key="address-actions"
+         headerMessageId={this.props.draft.headerMessageId}
++        accountId={this.props.draft.accountId}
+         enabledFields={this.state.enabledFields}
+         onShowAndFocusField={this.showAndFocusField}
+       />
+diff --git a/app/internal_packages/composer/lib/composer-view.tsx b/app/internal_packages/composer/lib/composer-view.tsx
+index caa562b2c2398b4784ba82f679f01802c3a5257d..61ce50f4325908c2650adc852a6b07a97a62e097 100644
+--- a/app/internal_packages/composer/lib/composer-view.tsx
++++ b/app/internal_packages/composer/lib/composer-view.tsx
+@@ -200,14 +200,13 @@ export default class ComposerView extends React.Component<ComposerViewProps, Com
+                   onChange={(change) => {
+                     // We minimize thrashing and support editors in multiple windows by ensuring
+                     // non-value changes (eg focus) to the editorState don't trigger database saves
+-                    const skipSaving =
+-                      change.operations.size &&
+-                      change.operations.every(
++                    const skipSaving = change.selectionOnly ||
++                      (change.operations.size > 0 && change.operations.every(
+                         (op) =>
+                           op.type === 'set_selection' ||
+                           (op.type === 'set_value' &&
+                             Object.keys(op.properties).every((k) => k === 'decorations'))
+-                      );
++                      ));
+                     session.changes.add({ bodyEditorState: change.value }, { skipSaving });
+                   }}
+                 />
+@@ -385,6 +384,7 @@ export default class ComposerView extends React.Component<ComposerViewProps, Com
+       Actions.addAttachment({
+         filePath,
+         headerMessageId: this.props.draft.headerMessageId,
++        accountId: this.props.draft.accountId,
+         // The attachment store copies the file into its own directory before
+         // this fires, so the staged copy is free to go.
+         onCreated: () => EmlUtils.discardStagedEml(filePath),
+@@ -414,6 +414,7 @@ export default class ComposerView extends React.Component<ComposerViewProps, Com
+     Actions.addAttachment({
+       filePath: filePath,
+       headerMessageId: this.props.draft.headerMessageId,
++      accountId: this.props.draft.accountId,
+       onCreated: (file: File) => {
+         if (!this._mounted) return;
+         if (this.props.draft.plaintext) return;
+@@ -442,7 +443,7 @@ export default class ComposerView extends React.Component<ComposerViewProps, Com
+     // immediately and synchronously updated as soon as this function
+     // fires. Since `setState` is asynchronous, if we used that as our only
+     // check, then we might get a false reading.
+-    if (DraftStore.isSendingDraft(this.props.draft.headerMessageId)) {
++    if (DraftStore.isSendingDraft(this.props.draft.headerMessageId, this.props.draft.accountId)) {
+       return false;
+     }
+ 
+@@ -524,12 +525,13 @@ export default class ComposerView extends React.Component<ComposerViewProps, Com
+   };
+ 
+   _onSelectAttachment = () => {
+-    Actions.selectAttachment({ headerMessageId: this.props.draft.headerMessageId });
++    const { headerMessageId, accountId } = this.props.draft;
++    Actions.selectAttachment({ headerMessageId, accountId });
+   };
+ 
+   copyForAgent = async () => {
+     try {
+-      await AttachmentStore.waitForDraftAttachments(this.props.session.headerMessageId);
++      await AttachmentStore.waitForDraftAttachments(this.props.session.headerMessageId, this.props.session.accountId);
+       await this.props.session.changes.commit();
+       if (this.props.session.changes.isDirty()) throw new Error('new-edits');
+       if (!cliStatus().ready) {
+diff --git a/app/internal_packages/composer/lib/main.tsx b/app/internal_packages/composer/lib/main.tsx
+index e634fedd563e0a30ecc244e44c36c46882869430..6fabb215249adca195f3d85fb3892bc4bd739ccb 100644
+--- a/app/internal_packages/composer/lib/main.tsx
++++ b/app/internal_packages/composer/lib/main.tsx
+@@ -1,7 +1,9 @@
+ /* eslint react/sort-comp: 0 */
+ import _ from 'underscore';
+ import React from 'react';
++import { ipcRenderer } from 'electron';
+ import {
++  Actions,
+   Message,
+   localized,
+   DraftStore,
+@@ -11,17 +13,20 @@ import {
+ } from 'mailspring-exports';
+ import ComposeButton from './compose-button';
+ import ComposerView from './composer-view';
++import type { DraftAccountChange } from '../../../src/draft-identity';
+ 
+ const ComposerViewForDraftClientId = InflatesDraftClientId(ComposerView);
+ 
+ class ComposerWithWindowProps extends React.Component<
+   Record<string, unknown>,
+-  { headerMessageId: string; errorMessage?: string; errorDetail?: string }
++  { headerMessageId: string; accountId?: string; errorMessage?: string; errorDetail?: string }
+ > {
+   static displayName = 'ComposerWithWindowProps';
+   static containerRequired = false;
+ 
+   _usub?: () => void;
++  _unlistenAccount?: () => void;
++  _draftId: string;
+   _composerComponent?: any;
+ 
+   constructor(props) {
+@@ -34,7 +39,10 @@ class ComposerWithWindowProps extends React.Component<
+       throw new Error('Initialize popout composer windows with valid draftJSON');
+     }
+     const draft = new Message({}).fromJSON(draftJSON);
+-    DraftStore._createSession(headerMessageId, draft);
++    if (!AppEnv.config.get('core.paperReed.enabled') || !windowProps.accountId) {
++      DraftStore._createSession(headerMessageId, draft);
++    }
++    this._draftId = draft.id;
+     this.state = windowProps;
+ 
+     // Set the OS window title immediately based on the draft subject (if any)
+@@ -44,7 +52,20 @@ class ComposerWithWindowProps extends React.Component<
+     );
+   }
+ 
++  componentDidMount() {
++    if (!AppEnv.config.get('core.paperReed.enabled')) return;
++    this._unlistenAccount = Actions.draftAccountChanged.listen((change: DraftAccountChange) => {
++      if (change.previousMessageId !== this._draftId || change.headerMessageId !== this.state.headerMessageId ||
++          change.previousAccountId !== this.state.accountId) return;
++      const accepted = !DraftStore.hasUnsavedDraftWork(change.headerMessageId, change.previousAccountId);
++      if (!ipcRenderer.sendSync('composer-draft-account-response', change, accepted)) return;
++      this._draftId = change.messageId;
++      this.setState({ accountId: change.accountId });
++    });
++  }
++
+   componentWillUnmount() {
++    this._unlistenAccount?.();
+     if (this._usub) {
+       this._usub();
+     }
+@@ -59,7 +80,8 @@ class ComposerWithWindowProps extends React.Component<
+ 
+     // Subscribe to draft changes to keep the OS window title up to date as the user types
+     const { newDraft } = AppEnv.getWindowProps();
+-    const session = await DraftStore.sessionForClientId(this.state.headerMessageId);
++    const session = await DraftStore.sessionForClientId(this.state.headerMessageId, this.state.accountId);
++    this._usub?.();
+     this._usub = session.listen(() => {
+       const d = session.draft();
+       if (!d) return;
+@@ -84,6 +106,7 @@ class ComposerWithWindowProps extends React.Component<
+         }}
+         onDraftReady={this._onDraftReady}
+         headerMessageId={this.state.headerMessageId}
++        accountId={this.state.accountId}
+         className="composer-full-window"
+       />
+     );
+diff --git a/app/internal_packages/composer/lib/send-action-button.tsx b/app/internal_packages/composer/lib/send-action-button.tsx
+index d0edb59be63fa06dc009c599ef853375c8bc0df7..49b183d7f858e3bb5c44ac9ba51ae709c801d19d 100644
+--- a/app/internal_packages/composer/lib/send-action-button.tsx
++++ b/app/internal_packages/composer/lib/send-action-button.tsx
+@@ -49,7 +49,8 @@ export class SendActionButton extends React.Component<
+         window.removeEventListener('offline', networkChanged);
+       });
+     }
+-    const session = DraftStore._draftSessions[this.props.draft.headerMessageId];
++    const { headerMessageId, accountId } = this.props.draft;
++    const session = DraftStore.cachedDraftSession(headerMessageId, accountId);
+     if (AppEnv.config.get('core.paperReed.enabled') && session) {
+       const changed = () => this.forceUpdate();
+       session.changes.on('state', changed);
+@@ -97,8 +98,9 @@ export class SendActionButton extends React.Component<
+   };
+ 
+   hasConflict() {
++    const { headerMessageId, accountId } = this.props.draft;
+     return AppEnv.config.get('core.paperReed.enabled') &&
+-      DraftStore._draftSessions[this.props.draft.headerMessageId]?.changes.saveError?.message === 'draft-conflict';
++      DraftStore.cachedDraftSession(headerMessageId, accountId)?.changes.saveError?.message === 'draft-conflict';
+   }
+ 
+   _onSendWithAction = (sendAction: ISendAction) => {
+@@ -107,7 +109,9 @@ export class SendActionButton extends React.Component<
+       if (AppEnv.config.get('core.sending.sounds')) {
+         SoundRegistry.playSound('hit-send');
+       }
+-      Actions.sendDraft(this.props.draft.headerMessageId, { actionKey: sendAction.configKey });
++      Actions.sendDraft(this.props.draft.headerMessageId, {
++        actionKey: sendAction.configKey, accountId: this.props.draft.accountId,
++      });
+     }
+   };
+ 
+diff --git a/app/internal_packages/draft-list/lib/draft-list.tsx b/app/internal_packages/draft-list/lib/draft-list.tsx
+index a6ff7465d8d70d29caf554e4ab96b64424acfa39..a8c80f15b7f2816d68e15c2b10916e484a0746a5 100644
+--- a/app/internal_packages/draft-list/lib/draft-list.tsx
++++ b/app/internal_packages/draft-list/lib/draft-list.tsx
+@@ -53,7 +53,7 @@ class DraftList extends React.Component {
+ 
+   _onDoubleClick = (draft: Message) => {
+     if (!(draft as any).uploadTaskId) {
+-      Actions.composePopoutDraft(draft.headerMessageId);
++      Actions.composePopoutDraft(draft.headerMessageId, { accountId: draft.accountId });
+     }
+   };
+ 
+diff --git a/app/internal_packages/message-list/lib/message-item-container.tsx b/app/internal_packages/message-list/lib/message-item-container.tsx
+index 8af5d1728db7ce9ba13f46801a5e85ad3894f381..fb4c78100eee6c8b556fef968f3af5ab17eb2c2a 100644
+--- a/app/internal_packages/message-list/lib/message-item-container.tsx
++++ b/app/internal_packages/message-list/lib/message-item-container.tsx
+@@ -79,7 +79,7 @@ export default class MessageItemContainer extends React.Component<
+ 
+   _getStateFromStores(props = this.props) {
+     return {
+-      isSending: DraftStore.isSendingDraft(props.message.headerMessageId),
++      isSending: DraftStore.isSendingDraft(props.message.headerMessageId, props.message.accountId),
+     };
+   }
+ 
+@@ -111,6 +111,7 @@ export default class MessageItemContainer extends React.Component<
+           this._messageComponent = cm;
+         }}
+         headerMessageId={this.props.message.headerMessageId}
++        accountId={this.props.message.accountId}
+         className={this._classNames()}
+         mode={'inline'}
+         threadId={this.props.thread.id}
+diff --git a/app/internal_packages/message-list/lib/message-list.tsx b/app/internal_packages/message-list/lib/message-list.tsx
+index d427a141fdbdb8fd258d4f236b666ee20a2568c2..60004e7efef2b1b009f8febd2d1d075695cdba8c 100644
+--- a/app/internal_packages/message-list/lib/message-list.tsx
++++ b/app/internal_packages/message-list/lib/message-list.tsx
+@@ -237,7 +237,7 @@ class MessageList extends React.Component<MessageListProps, MessageListState> {
+       headerMessageId: draft.headerMessageId,
+       onCreated: () => {
+         EmlUtils.discardStagedEml(staged.filePath);
+-        Actions.composePopoutDraft(draft.headerMessageId);
++        Actions.composePopoutDraft(draft.headerMessageId, { accountId: draft.accountId });
+       },
+     });
+   };
+diff --git a/app/internal_packages/paper-reed/lib/draft-status.tsx b/app/internal_packages/paper-reed/lib/draft-status.tsx
+index f3c733dd5a8881ae92a9ab2ff58a32fabe205723..baea8c2f559f078f8f92c009cab0f23d19eade4d 100644
+--- a/app/internal_packages/paper-reed/lib/draft-status.tsx
++++ b/app/internal_packages/paper-reed/lib/draft-status.tsx
+@@ -5,29 +5,51 @@ import { saveDraftCopy, desktopAccess, desktopDraftRecoveryInfo, DraftRecoveryIn
+ export default class PaperReedDraftStatus extends React.Component<{ session: DraftEditingSession }> {
+   state = { busy: false, copyId: '', copySnapshot: '', notice: '', recovery: null as DraftRecoveryInfo | null, sourceNotice: '' };
+   mounted = false;
++  recoveryAccount = '';
++
+   componentDidMount() {
+     this.mounted = true;
+     this.props.session.changes.on('state', this.changed);
+-    desktopDraftRecoveryInfo([this.props.session.draft()]).then(records => {
+-      if (this.mounted) this.setState({ recovery: records.find(r => r.copyDraftId === this.props.session.headerMessageId) || null });
+-    }).catch(() => { if (this.mounted) this.setState({ sourceNotice: '副本来源暂时无法读取。' }); });
++    this.readRecovery();
+   }
+   componentWillUnmount() {
+     this.mounted = false;
+     this.props.session.changes.removeListener('state', this.changed);
+   }
+-  changed = () => this.forceUpdate();
++  changed = () => {
++    if (this.recoveryAccount !== this.props.session.accountId) this.readRecovery();
++    this.forceUpdate();
++  };
++  private async recoveryForDraft(draft: Message) {
++    const records = await desktopDraftRecoveryInfo([draft]);
++    return records.find(r => r.accountId === draft.accountId && r.copyDraftId === draft.headerMessageId) || null;
++  }
++
++  readRecovery = async () => {
++    const draft = this.props.session.draft();
++    this.recoveryAccount = draft.accountId;
++    try {
++      const recovery = await this.recoveryForDraft(draft);
++      if (this.mounted && this.props.session.accountId === draft.accountId) {
++        this.setState({ recovery, sourceNotice: '' });
++      }
++    } catch {
++      if (this.mounted && this.props.session.accountId === draft.accountId) {
++        this.setState({ sourceNotice: '副本来源暂时无法读取。' });
++      }
++    }
++  };
+   save = async () => {
+-    try { await AttachmentStore.waitForDraftAttachments(this.props.session.headerMessageId); await this.props.session.changes.commit(); } catch { /* State stays visible below. */ }
++    try { await AttachmentStore.waitForDraftAttachments(this.props.session.headerMessageId, this.props.session.accountId); await this.props.session.changes.commit(); } catch { /* State stays visible below. */ }
+   };
+   copy = async () => {
+     if (this.state.busy) return;
+     this.setState({ busy: true, notice: '' });
+     try {
+-      await AttachmentStore.waitForDraftAttachments(this.props.session.headerMessageId);
++      await AttachmentStore.waitForDraftAttachments(this.props.session.headerMessageId, this.props.session.accountId);
+       const snapshot = JSON.stringify(this.props.session.draft().toJSON());
+       if (snapshot === this.state.copySnapshot) {
+-        Actions.composePopoutDraft(this.state.copyId);
++        Actions.composePopoutDraft(this.state.copyId, { accountId: this.props.session.accountId });
+         return;
+       }
+       const source = new Message({}).fromJSON(JSON.parse(snapshot));
+@@ -54,11 +76,12 @@ export default class PaperReedDraftStatus extends React.Component<{ session: Dra
+     }
+   };
+   openSource = async () => {
+-    const { recovery } = this.state;
+     try {
+-      const source = await getDraft({ accountId: recovery.accountId, draftId: recovery.sourceDraftId }, desktopAccess);
++      const recovery = await this.recoveryForDraft(this.props.session.draft());
++      if (!recovery?.sourceAvailable) throw new Error('draft-not-found');
++      const source = await getDraft({ accountId: recovery.sourceAccountId, draftId: recovery.sourceDraftId }, desktopAccess);
+       if (this.mounted) this.setState({ sourceNotice: '' });
+-      Actions.composePopoutDraft(source.headerMessageId);
++      Actions.composePopoutDraft(source.headerMessageId, { accountId: source.accountId });
+     } catch {
+       if (this.mounted) this.setState({ sourceNotice: '原稿暂不可用或已不在草稿箱。这份副本仍然保留。' });
+     }
+@@ -71,7 +94,7 @@ export default class PaperReedDraftStatus extends React.Component<{ session: Dra
+     const currentCopy = this.state.copyId && this.state.copySnapshot === JSON.stringify(this.props.session.draft().toJSON());
+     return <div className={`pr-draft-status ${changes.saveError ? 'needs-attention' : ''}`}>
+       {this.state.recovery && <div className="pr-recovery-origin">
+-        <span><strong>恢复副本 {this.state.recovery.copyNumber}</strong> · {new Date(this.state.recovery.createdAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
++        <span><strong>恢复副本 {this.state.recovery.copyLabel}</strong> · {new Date(this.state.recovery.createdAt).toLocaleString('zh-CN', { month: 'numeric', day: 'numeric', hour: '2-digit', minute: '2-digit', second: '2-digit' })}</span>
+         <button type="button" onClick={this.openSource}>查看原稿</button>
+       </div>}
+       {this.state.sourceNotice && <p role="status">{this.state.sourceNotice}</p>}
+diff --git a/app/internal_packages/paper-reed/lib/main.tsx b/app/internal_packages/paper-reed/lib/main.tsx
+index 648ce7e30a9bd1d09f4d8b92d7ee14cd11ce4f1b..42e71674bc4489bc202153b632dda74bd051a7f4 100644
+--- a/app/internal_packages/paper-reed/lib/main.tsx
++++ b/app/internal_packages/paper-reed/lib/main.tsx
+@@ -7,12 +7,13 @@ let timer: ReturnType<typeof setInterval>;
+ let databaseTimer: ReturnType<typeof setTimeout>;
+ let unlisten: () => void;
+ let unlistenExternalThread: () => void;
++let unlistenDraftAccount: () => void;
+ const reconcile = () =>
+   reconcileLocalSnoozes()
+     .then(() => processLocalRules())
+     .catch((error) => console.error('Paper Reed local organization:', error.message));
+ import { Actions, ComponentRegistry, WorkspaceStore, DatabaseStore } from 'mailspring-exports';
+-import PaperReedWorkspace, { openThreadInWorkspace } from './workspace';
++import PaperReedWorkspace, { openThreadInWorkspace, updateWorkspaceDraftAccount } from './workspace';
+ export function activate() {
+   if (!AppEnv.config.get('core.paperReed.enabled')) return;
+   if (AppEnv.isMainWindow()) {
+@@ -28,6 +29,7 @@ export function activate() {
+   document.body.classList.add('paper-reed-enabled');
+   if (AppEnv.isMainWindow()) {
+     unlistenExternalThread = Actions.focusThreadMainWindow.listen(openThreadInWorkspace);
++    unlistenDraftAccount = Actions.draftAccountChanged.listen(updateWorkspaceDraftAccount);
+     ComponentRegistry.register(PaperReedWorkspace, { location: WorkspaceStore.Location.PaperReed });
+   }
+ }
+@@ -36,6 +38,7 @@ export function deactivate() {
+   clearTimeout(databaseTimer);
+   unlisten?.();
+   unlistenExternalThread?.();
++  unlistenDraftAccount?.();
+   window.removeEventListener('focus', reconcile);
+   ComponentRegistry.unregister(PaperReedWorkspace);
+   document.body.classList.remove('paper-reed-enabled');
+diff --git a/app/internal_packages/paper-reed/lib/workspace.tsx b/app/internal_packages/paper-reed/lib/workspace.tsx
+index e8c23c24b87824395a629231dea4ecd044dc24f3..cdc7eec463cda58ffa3856317335e2e5c5c6f45e 100644
+--- a/app/internal_packages/paper-reed/lib/workspace.tsx
++++ b/app/internal_packages/paper-reed/lib/workspace.tsx
+@@ -50,6 +50,7 @@ import MessageList, { PopInRequest } from '../../message-list/lib/message-list';
+ import ComposerView from '../../composer/lib/composer-view';
+ import InflatesDraftClientId from '../../../src/decorators/inflates-draft-client-id';
+ import DraftFactory from '../../../src/flux/stores/draft-factory';
++import type { DraftAccountChange } from '../../../src/draft-identity';
+ 
+ const Composer = InflatesDraftClientId<{ workspace?: boolean }>(ComposerView);
+ const folders = [
+@@ -164,6 +165,23 @@ interface ThreadOpenOptions {
+ let activeWorkspace: PaperReedWorkspace | null = null;
+ let pendingThread: { thread: Thread; options: ThreadOpenOptions } | null = null;
+ 
++export function updateWorkspaceDraftAccount(change: DraftAccountChange) {
++  const location = activeWorkspace?.state || lastLocation;
++  const selected = location?.selected;
++  if (location?.route !== 'compose' || !(selected instanceof Message) ||
++      selected.id !== change.previousMessageId || selected.headerMessageId !== change.headerMessageId ||
++      selected.accountId !== change.previousAccountId) return;
++
++  if (DraftStore.hasUnsavedDraftWork(change.headerMessageId, change.previousAccountId)) return;
++  const draft = DraftStore.cachedDraftSession(change.headerMessageId, change.accountId)?.draft() ||
++    new Message({}).fromJSON({ ...selected.toJSON(), aid: change.accountId, id: change.messageId });
++  if (activeWorkspace) {
++    activeWorkspace.setState({ selected: draft });
++  } else {
++    lastLocation = { ...lastLocation, selected: draft };
++  }
++}
++
+ export function openThreadInWorkspace(thread: Thread, options: ThreadOpenOptions = {}) {
+   if (options.popIn) {
+     if (Date.now() >= options.popIn.deadline) return;
+@@ -232,7 +250,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   private moveSaved: Promise<boolean> | null = null;
+   private searchBlockedBySave = false;
+   private followUpVisit = 0;
+-  private followUpPageBeforeLoad?: { scope: string; ids: Set<string> };
++  private listPageBeforeLoad?: { scope: string; ids: Set<string> };
+   receiptStarted = 0;
+   operationGeneration = 0;
+   componentDidMount() {
+@@ -241,8 +259,13 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     this.unlisten = [
+       DatabaseStore.listen((change) => {
+         if (['Thread', 'Message', 'Folder', 'Label'].includes(change.objectClass) &&
+-            change.objects.some((item) => this.accountIds().includes(item.accountId)))
++            change.objects.some((item) => this.accountIds().includes(item.accountId))) {
++          if (this.isDraftList() && change.objectClass === 'Message' &&
++              change.objects.some((item) => item instanceof Message && item.draft)) {
++            this.generation++;
++          }
+           this.scheduleRefresh();
++        }
+       }),
+       onLocalTriageChanged(() => {
+         if (this.followUpView()) this.generation++;
+@@ -266,12 +289,10 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     ];
+     this.unlisten.push(DraftStore.listen(() => this.forceUpdate()));
+     this.unlisten.push(
+-      Actions.draftDeliverySucceeded.listen(({ headerMessageId }) => {
+-        if (
+-          this.state.route === 'compose' &&
+-          this.state.selected instanceof Message &&
+-          this.state.selected.headerMessageId === headerMessageId
+-        ) {
++      Actions.draftDeliverySucceeded.listen(({ headerMessageId, accountId }) => {
++        const { selected } = this.state;
++        if (this.state.route === 'compose' && selected instanceof Message &&
++            selected.headerMessageId === headerMessageId && selected.accountId === accountId) {
+           this.setState(
+             { route: 'list', folder: 'sent', selected: null, rows: [], loading: true },
+             this.refresh
+@@ -327,7 +348,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+           unreadOnly !== previous.unreadOnly || searchVisit !== previous.searchVisit ||
+           (searchPending && !previous.searchPending))) {
+       this.followUpVisit++;
+-      this.followUpPageBeforeLoad = undefined;
++      this.listPageBeforeLoad = undefined;
+       if (this.state.followUpFeedback) this.setState({ followUpFeedback: undefined });
+     }
+     if (previous.route === 'list' && route !== 'list' && (searchPending || agentCopyCancelled)) {
+@@ -351,7 +372,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     Object.values(DraftStore._draftSessions).filter(
+       (s) =>
+         !s._destroyed &&
+-        (s.changes.isDirty() || AttachmentStore.hasPendingDraftAttachments(s.headerMessageId))
++        (s.changes.isDirty() || AttachmentStore.hasPendingDraftAttachments(s.headerMessageId, s.accountId))
+     );
+   scheduleRefresh = () => {
+     clearTimeout(this.refreshTimer);
+@@ -398,6 +419,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+           .where({ draft: true })
+           .where(Message.attributes.accountId.in(ids))
+           .order(Message.attributes.date.descending())
++          .order(Message.attributes.id.ascending())
+           .limit(limit + 1);
+       } else {
+         const input = {
+@@ -462,9 +484,9 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       }
+       const more = rows.length > limit;
+       if (current()) {
+-        const page = this.followUpPageBeforeLoad;
++        const page = this.listPageBeforeLoad;
+         const restoreFocus = this.restoreListFocus(false, page?.scope === scope ? page.ids : undefined);
+-        this.followUpPageBeforeLoad = undefined;
++        this.listPageBeforeLoad = undefined;
+         this.setState((previous) => ({
+           rows: rows.slice(0, limit),
+           labels,
+@@ -483,7 +505,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       }
+     } catch {
+       if (current()) {
+-        this.followUpPageBeforeLoad = undefined;
++        this.listPageBeforeLoad = undefined;
+         this.setState(previous => ({
+           loading: false,
+           followUpRefillScope: previous.followUpRefillScope === scope
+@@ -495,7 +517,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   };
+   private loadMore = () => {
+     if (this.state.limit >= 100 || this.listActionsUnavailable()) return;
+-    if (this.followUpView()) this.followUpPageBeforeLoad = {
++    if (this.followUpView() || this.isDraftList()) this.listPageBeforeLoad = {
+       scope: this.listReadScope(),
+       ids: new Set(this.state.rows.map(row => row.id)),
+     };
+@@ -503,34 +525,39 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   };
+   private restoreListFocus(leavingView = false, previousPage?: ReadonlySet<string>) {
+     const view = this.followUpView();
++    const drafts = this.isDraftList();
+     const bulkUnpin = '.pr-local-controls [data-local-action=unpin]';
+     let selector = '.pr-mail-row, .pr-follow-up-action, .pr-follow-up-empty button, .pr-follow-up-row input';
+     if (view) {
+       selector += ', .pr-load-more, .pr-local-controls :is(button,input,select), .pr-selection-actions button';
+     }
+-    const row = this.state.route === 'list' && (this.state.query || view) &&
++    if (drafts) selector += ', .pr-load-more, .pr-drafts-empty button, .pr-draft-read-error button';
++    const row = this.state.route === 'list' && (this.state.query || view || drafts) &&
+       document.activeElement?.closest<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>(selector);
+-    const id = row && row.closest<HTMLElement>('.pr-follow-up-row')?.dataset.followUpId;
++    const id = row && (row.dataset.listId || row.closest<HTMLElement>('.pr-follow-up-row')?.dataset.followUpId);
+     const loadingMore = row && row.matches('.pr-load-more');
+     const index = loadingMore ? this.state.rows.length :
+-      view ? this.state.rows.findIndex(item => item.id === id) : -1;
++      this.state.rows.findIndex(item => item.id === id);
+     return () => {
+       const firstAdded = loadingMore && previousPage &&
+         this.state.rows.find(item => !previousPage.has(item.id));
+       const reachedLimit = firstAdded && row.getAttribute('aria-disabled') === 'true';
+       if (row && this.state.route === 'list' && (row.disabled || !row.isConnected || reachedLimit) &&
+           (document.activeElement === row || document.activeElement === document.body)) {
+-        const selector = row.matches('.pr-follow-up-action') ? '.pr-follow-up-action'
++        const sameDrafts = !leavingView && drafts && this.isDraftList();
++        const selector = sameDrafts ? '.pr-mail-row[data-draft-id]'
++          : row.matches('.pr-follow-up-action') ? '.pr-follow-up-action'
+           : row.matches('.pr-follow-up-row input') ? '.pr-follow-up-row input' : '.pr-follow-up-row .pr-mail-row';
+         const sameView = !leavingView && view && view === this.followUpView();
+-        const candidates = sameView
++        const candidates = sameView || sameDrafts
+           ? Array.from(document.querySelectorAll<HTMLElement>(selector + ':not(:disabled)'))
+           : [];
+         const replacement = (sameView && row.matches(bulkUnpin) &&
+           document.querySelector<HTMLElement>(bulkUnpin)) || (firstAdded &&
+-          candidates.find(candidate => candidate.dataset.threadId === firstAdded.id))
++          candidates.find(candidate => candidate.dataset.listId === firstAdded.id))
+           || candidates[Math.min(Math.max(index, 0), candidates.length - 1)];
+         const fallback = (sameView && document.querySelector<HTMLElement>('.pr-follow-up-empty button'))
++          || (sameDrafts && document.querySelector<HTMLElement>('.pr-drafts-empty button'))
+           || document.querySelector<HTMLInputElement>('.pr-search-input');
+         (replacement || fallback)?.focus();
+       }
+@@ -570,7 +597,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     let saved = false;
+     try {
+       for (const session of this.dirtySessions()) {
+-        await AttachmentStore.waitForDraftAttachments(session.headerMessageId);
++        await AttachmentStore.waitForDraftAttachments(session.headerMessageId, session.accountId);
+         await session.changes.commit();
+       }
+       if (this.dirtySessions().length) {
+@@ -601,7 +628,8 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   };
+   navigate = (folder: string, accountId = this.state.accountId) =>
+     this.move(() => {
+-      const restoreFocus = this.followUpView() && this.restoreListFocus(true);
++      const restoreFocus = (this.followUpView() || this.isDraftList()) && this.restoreListFocus(true);
++      this.listPageBeforeLoad = undefined;
+       const changingAccount = accountId !== this.state.accountId;
+       const { query, searchText, searchPending, searchClearing, searchVisit } = this.state;
+       Actions.setFocus({ collection: 'thread', item: null });
+@@ -637,11 +665,26 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   }
+ 
+   open = (row: Thread | Message, { inbox = false, popIn }: ThreadOpenOptions = {}) =>
+-    this.move(() => {
++    this.move(async () => {
+       if (popIn && (!this.mounted || Date.now() >= popIn.deadline)) return false;
+       if (row instanceof Message) {
+-        this.setState({ route: 'compose', selected: row, popInRequest: undefined });
+-        return;
++        if (this.listActionsUnavailable()) return false;
++        const scope = this.listReadScope();
++        const generation = this.generation;
++        const current = () => this.mounted && this.state.route === 'list' &&
++          this.listReadScope() === scope && this.generation === generation && !this.listActionsUnavailable();
++        const draft = await DatabaseStore.findBy<Message>(Message, {
++          accountId: row.accountId, headerMessageId: row.headerMessageId, draft: true,
++        });
++        if (draft && current()) {
++          const session = await DraftStore.sessionForClientId(draft.headerMessageId, draft.accountId);
++          if (current() && session.draft()?.accountId === draft.accountId) {
++            this.setState({ route: 'compose', selected: draft, popInRequest: undefined });
++            return;
++          }
++        }
++        if (this.mounted) void this.refresh();
++        return false;
+       }
+       const source = popIn ? MailboxPerspective.fromJSON(popIn.perspectiveJSON) : null;
+       if (popIn && (!source || !AccountStore.accountForId(row.accountId))) {
+@@ -688,9 +731,10 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       const selected = this.state.selected;
+       Actions.setFocus({ collection: 'thread', item: null });
+       this.setState({ route: 'list', selected: null, checked: [] }, () => {
+-        const row = Array.from(document.querySelectorAll<HTMLButtonElement>('.pr-mail-row:not(:disabled)')).find(
++        const rows = Array.from(document.querySelectorAll<HTMLButtonElement>('.pr-mail-row:not(:disabled)'));
++        const row = rows.find(el => selected?.id && el.dataset.listId === selected.id) || rows.find(
+           (el) => selected instanceof Message
+-            ? el.dataset.draftId === selected.headerMessageId
++            ? el.dataset.draftId === selected.headerMessageId && el.dataset.draftAccountId === selected.accountId
+             : el.dataset.threadId === selected?.id
+         );
+         (row || document.querySelector<HTMLInputElement>('.pr-search-input'))?.focus();
+@@ -711,12 +755,12 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+         accountId: account.id,
+         from: [account.defaultMe()],
+       });
+-      await DraftStore._finalizeAndPersistNewMessage(draft);
+-      this.setState({ route: 'compose', selected: draft });
++      const { draft: persisted } = await DraftStore._finalizeAndPersistNewMessage(draft);
++      this.setState({ route: 'compose', selected: persisted });
+     });
+   copyContext = () => {
+     const listScope = this.state.route === 'list' ? this.listReadScope() : null;
+-    if (listScope && this.listActionsUnavailable()) return;
++    if (listScope && (this.isDraftList() || this.listActionsUnavailable())) return;
+     const selection = () => JSON.stringify([...this.state.checked].sort());
+     const requestedSelection = listScope && selection();
+     return this.move(async () => {
+@@ -752,7 +796,8 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+           unread: this.state.unreadOnly,
+         };
+       if (route === 'compose' && selected instanceof Message) {
+-        const session = await DraftStore.sessionForClientId(selected.headerMessageId);
++        const session = await DraftStore.sessionForClientId(selected.headerMessageId, selected.accountId);
++        if (!session.draft() || this.state.selected !== selected || this.state.route !== route) return false;
+         context = {
+           scope: 'draft',
+           accountId: session.draft().accountId,
+@@ -816,6 +861,9 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   private followUpView({ folder, query }: State = this.state) {
+     return !query && (folder === 'pinned' || folder === 'snoozed') ? folder : null;
+   }
++  private isDraftList() {
++    return this.state.folder === 'drafts' && !this.state.query;
++  }
+   private followUpRefilling() {
+     const { route, searchPending, followUpRefillScope } = this.state;
+     return route === 'list' && !searchPending &&
+@@ -823,7 +871,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   }
+   listActionsUnavailable() {
+     const { loading, listRead } = this.state;
+-    return this.followUpRefilling() || this.searchResultsUnavailable() || (!!this.followUpView() &&
++    return this.followUpRefilling() || this.searchResultsUnavailable() || ((!!this.followUpView() || this.isDraftList()) &&
+       (loading || listRead?.failed || listRead?.scope !== this.listReadScope()));
+   }
+   retrySearchRead = () => {
+@@ -941,7 +989,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+         run: () => this.organize(action),
+       })),
+       { id: 'paper-reed:settings', title: '打开设置', shortcutId: 'application:open-preferences', run: this.preferences },
+-      { id: 'paper-reed:agent', title: '交给 Agent', disabled: list && !listReady, run: this.copyContext },
++      { id: 'paper-reed:agent', title: '交给 Agent', disabled: list && (!listReady || this.isDraftList()), run: this.copyContext },
+     ];
+   };
+   renderLocalControls(targets = this.selectedTargets()) {
+@@ -1177,25 +1225,56 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       </div>
+     );
+   }
++  private renderDraftRow(draft: Message, unavailable: boolean) {
++    const subject = draft.subject || '无主题';
++    const recipients = draft.to?.map(contact => contact.displayName()) || [];
++    const additional = recipients.length - 2;
++    const to = recipients.length
++      ? recipients.slice(0, 2).join('、') + (additional > 0 ? ` 等 ${recipients.length} 人` : '')
++      : '未填写收件人';
++    const account = !this.state.accountId && this.accountIds().length > 1
++      ? AccountStore.accountForId(draft.accountId)?.emailAddress
++      : null;
++    const recovery = this.state.recovery.find(item =>
++      item.accountId === draft.accountId && item.copyDraftId === draft.headerMessageId);
++    const copies = this.state.recovery.filter(item =>
++      item.sourceAvailable && item.sourceAccountId === draft.accountId && item.sourceDraftId === draft.headerMessageId).length;
++    const provenance = recovery ? `恢复副本 ${recovery.copyLabel}`
++      : copies ? `原稿 · ${copies} 份恢复副本` : null;
++    return (
++      <button type="button" className="pr-mail-row pr-draft-row" key={draft.id}
++        data-list-id={draft.id} data-draft-id={draft.headerMessageId} data-draft-account-id={draft.accountId}
++        onKeyDown={keepNativeButtonActivation} onClick={() => this.open(draft)}
++        disabled={unavailable}>
++        <span className="pr-draft-row-main">
++          <span className="pr-draft-row-title">
++            <span className="pr-subject">{subject}</span>
++            {recovery && <span className="pr-copy-badge">{provenance}</span>}
++          </span>
++          <span className="pr-draft-row-details">
++            <span className="pr-draft-recipients" title={recipients.length ? recipients.join('、') : undefined}>
++              {recipients.length ? `收件人 · ${to}` : to}
++            </span>
++            {account && <span className="pr-draft-mailbox" title={account}>{account}</span>}
++            {!recovery && provenance && <span className="pr-copy-source">{provenance}</span>}
++          </span>
++        </span>
++        {draft.date && Number.isFinite(draft.date.getTime()) && <time className="pr-date" dateTime={draft.date.toISOString()}>
++          {draft.date.toLocaleDateString(undefined, {month: 'short', day: 'numeric'})}
++        </time>}
++      </button>
++    );
++  }
+   renderRow = (row: Thread | Message, searchUnavailable: boolean, snoozeUntil?: number) => {
++    if (row instanceof Message) return this.renderDraftRow(row, searchUnavailable);
+     const reminder = snoozeUntil && snoozeTime.format(snoozeUntil);
+-    const draft = row instanceof Message;
+-    const recovery =
+-      draft &&
+-      this.state.recovery.find(
+-        (r) => r.accountId === row.accountId && r.copyDraftId === row.headerMessageId
+-      );
+-    const copyCount = draft
+-      ? this.state.recovery.filter(
+-          (r) => r.accountId === row.accountId && r.sourceDraftId === row.headerMessageId
+-        ).length
+-      : 0;
+-    const contacts = draft ? row.to : row.participants;
++    const contacts = row.participants;
+     const person =
+       contacts?.find((c) => c.email !== AccountStore.accountForId(row.accountId)?.emailAddress) ||
+       contacts?.[0];
+-    const name = person?.displayName() || (draft ? '未填写收件人' : '未知发件人');
+-    const date = draft ? row.date : row.lastMessageReceivedTimestamp;
++    const name = person?.displayName() || '未知发件人';
++    const date = row.lastMessageReceivedTimestamp;
++    const local = this.state.local[row.id];
+     const color =
+       AccountStore.accountForId(row.accountId)?.color ||
+       colors[Math.max(0, AccountStore.accountIds().indexOf(row.accountId)) % colors.length];
+@@ -1207,9 +1286,9 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+         onKeyDown={keepNativeButtonActivation}
+         onClick={() => this.open(row)}
+         disabled={searchUnavailable}
+-        data-draft-id={draft ? row.headerMessageId : undefined}
+-        data-thread-id={!draft ? row.id : undefined}
+-        aria-label={`${recovery ? '恢复副本，' : copyCount ? '原稿，' : ''}${row.unread ? '未读，' : ''}${name}，${row.subject || '无主题'}${reminder ? `，提醒 ${reminder}` : ''}`}
++        data-list-id={row.id}
++        data-thread-id={row.id}
++        aria-label={`${row.unread ? '未读，' : ''}${name}，${row.subject || '无主题'}${reminder ? `，提醒 ${reminder}` : ''}`}
+       >
+         <span
+           className="pr-avatar"
+@@ -1221,55 +1300,30 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+         <span className="pr-sender">{name}</span>
+         <span className="pr-summary">
+           <span className="pr-subject">{row.subject || '无主题'}</span>
+-          {!draft &&
+-            (this.state.local[row.id]?.labels.length > 0 ||
+-              (!snoozeUntil && this.state.local[row.id]?.snoozeUntil)) && (
+-              <span className="pr-local-marks">
+-                {this.state.local[row.id]?.labels.slice(0, 2).map((l) => (
+-                  <span key={l.id} className="pr-local-label" title={l.name}>
+-                    <i className="pr-label-dot" style={{ backgroundColor: l.color }} />
+-                    <span>{l.name}</span>
+-                  </span>
+-                ))}
+-                {this.state.local[row.id]?.labels.length > 2 && (
+-                  <span title={this.state.local[row.id].labels.map((l) => l.name).join('、')}>
+-                    +{this.state.local[row.id].labels.length - 2}
+-                  </span>
+-                )}
+-                {!snoozeUntil && this.state.local[row.id]?.snoozeUntil && (
+-                  <time dateTime={new Date(this.state.local[row.id].snoozeUntil).toISOString()}>
+-                    稍后 · {localTime(this.state.local[row.id].snoozeUntil)}
+-                  </time>
+-                )}
+-              </span>
+-            )}
+-          <span className="pr-snippet">
+-            {recovery ? (
+-              <>
+-                <span className="pr-copy-badge">恢复副本 {recovery.copyNumber}</span>
+-                <span>
+-                  {' '}
+-                  ·{' '}
+-                  {new Date(recovery.createdAt).toLocaleString('zh-CN', {
+-                    month: 'numeric',
+-                    day: 'numeric',
+-                    hour: '2-digit',
+-                    minute: '2-digit',
+-                    second: '2-digit',
+-                  })}
++          {(local?.labels.length > 0 || (!snoozeUntil && local?.snoozeUntil)) && (
++            <span className="pr-local-marks">
++              {local.labels.slice(0, 2).map((l) => (
++                <span key={l.id} className="pr-local-label" title={l.name}>
++                  <i className="pr-label-dot" style={{ backgroundColor: l.color }} />
++                  <span>{l.name}</span>
+                 </span>
+-              </>
+-            ) : copyCount ? (
+-              <>
+-                <span className="pr-copy-source">原稿 · {copyCount} 份恢复副本</span>
+-              </>
+-            ) : (
+-              this.state.snippets[row.id] || row.snippet || (draft ? '继续编辑这封草稿' : '')
+-            )}
+-          </span>
++              ))}
++              {local.labels.length > 2 && (
++                <span title={local.labels.map((l) => l.name).join('、')}>
++                  +{local.labels.length - 2}
++                </span>
++              )}
++              {!snoozeUntil && local.snoozeUntil && (
++                <time dateTime={new Date(local.snoozeUntil).toISOString()}>
++                  稍后 · {localTime(local.snoozeUntil)}
++                </time>
++              )}
++            </span>
++          )}
++          <span className="pr-snippet">{this.state.snippets[row.id] || row.snippet}</span>
+         </span>
+         <span className="pr-date">
+-          {!draft && this.state.local[row.id]?.pinned && <PinMark />}
++          {local?.pinned && <PinMark />}
+           {row.unread && <span className="pr-unread" aria-hidden="true" />}
+           {snoozeUntil
+             ? <time dateTime={new Date(snoozeUntil).toISOString()}>{reminder}</time>
+@@ -1277,9 +1331,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+         </span>
+       </button>
+     );
+-    return draft ? (
+-      content
+-    ) : (
++    return (
+       <div
+         className={`pr-mail-item ${this.state.checked.includes(row.id) ? 'selected' : ''}`}
+         key={row.id}
+@@ -1510,10 +1562,13 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     const listRead = this.state.listRead?.scope === this.listReadScope() ? this.state.listRead : null;
+     const readFailed = listRead?.failed;
+     const searchActive = route === 'list' && (!!this.state.query || !!this.state.searchPending);
++    const draftList = route === 'list' && this.isDraftList();
++    const drafts = draftList && !searchActive;
+     const followUp = route === 'list' ? this.followUpView() : null;
+     const snoozed = followUp === 'snoozed';
++    const localList = !!followUp || drafts;
+     const atListLimit = this.state.limit >= 100;
+-    const readBelowSearch = searchActive || followUp || (route === 'list' && this.state.searchClearing);
++    const readBelowSearch = searchActive || localList || (route === 'list' && this.state.searchClearing);
+     const searchUnavailable = route === 'list' && this.listActionsUnavailable();
+     const followUpFeedback = followUp && !searchActive &&
+       this.state.followUpFeedback?.scope === this.listReadScope() && this.state.followUpFeedback;
+@@ -1526,7 +1581,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     const title =
+       route === 'compose' ? '写一封信' : searchActive ? '搜索结果' : snoozed ? '稍后处理' : this.locationTitle();
+     const editingDraft = route === 'compose' && selected instanceof Message &&
+-      !DraftStore.isSendingDraft(selected.headerMessageId);
++      !DraftStore.isSendingDraft(selected.headerMessageId, selected.accountId);
+     const back = (
+       <button className="pr-back" onKeyDown={keepNativeButtonActivation} onClick={this.backToList}>
+         ‹ 返回{this.state.query ? '搜索结果' : this.locationTitle()}
+@@ -1624,7 +1679,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+           <main className={`pr-main pr-route-${route}`}>
+             {(!editingDraft || agent) && <div className="pr-page-head">
+               {route === 'list' ? <h1>{title}</h1> : !editingDraft && back}
+-              {(route !== 'compose' || agent) && (
++              {!draftList && (route !== 'compose' || agent) && (
+                 <button
+                   className="pr-agent-button"
+                   aria-expanded={agent}
+@@ -1658,7 +1713,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                 <button onKeyDown={keepNativeButtonActivation} onClick={this.refresh}>重新读取</button>
+               </div>
+             )}
+-            {agent && (
++            {agent && !draftList && (
+               <section className="pr-agent-panel" aria-label="Agent 交接">
+                 <strong>{cliStatus().ready ? '交给你的 Agent' : '先连接 CLI'}</strong>
+                 <p>
+@@ -1689,14 +1744,15 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                   <p className="pr-notice" role="status">交接已取消。核对当前结果后重新复制给 Agent。</p>
+                 )}
+                 {readBelowSearch && readFailed && !loading && !this.state.searchPending && (
+-                  <div className="pr-notice" role="alert">
+-                    {mailReadError}
++                  <div className={drafts ? 'pr-notice pr-draft-read-error' : 'pr-notice'} role="alert">
++                    {drafts ? '草稿暂时无法读取。' : mailReadError}
+                     <button onKeyDown={keepNativeButtonActivation} onClick={this.retrySearchRead}>重新读取</button>
+                   </div>
+                 )}
+                 {this.renderListTools(
+                   !searchActive && !searchUnavailable &&
+-                    (!emptyInbox || inboxState === 'empty' || inboxState === 'unread'),
++                    (!emptyInbox || inboxState === 'empty' || inboxState === 'unread') &&
++                    (!drafts || rows.length > 0),
+                   searchActive, searchUnavailable
+                 )}
+                 {followUpFeedback && (
+@@ -1711,22 +1767,32 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                       : this.renderRow(row, searchUnavailable))}
+                   {inboxState && this.renderEmptyInbox(inboxState, accounts)}
+                   {followUp && !searchUnavailable && !rows.length && this.renderFollowUpEmpty(followUp)}
++                  {drafts && !searchUnavailable && !rows.length && (
++                    <div className="pr-drafts-empty">
++                      <p role="status">暂无草稿</p>
++                      <button type="button" onKeyDown={keepNativeButtonActivation} onClick={this.compose}>
++                        写邮件
++                      </button>
++                    </div>
++                  )}
+                   {searchActive && !searchUnavailable && !rows.length && this.renderSearchEmpty()}
+-                  {!searchActive && !rows.length && !emptyInbox && !readFailed && (!followUp || loading) && (
++                  {!searchActive && !rows.length && !emptyInbox && !readFailed &&
++                    (drafts ? searchUnavailable : !followUp || loading) && (
+                     <p className="pr-empty" role="status">
+-                      {loading ? '正在读取邮件…' : '这里还没有邮件'}
++                      {drafts ? '正在读取草稿…' : loading ? '正在读取邮件…' : '这里还没有邮件'}
+                     </p>
+                   )}
+                   {this.state.more && !searchUnavailable && (
+                     <button
+                       className="pr-load-more"
+-                      disabled={!followUp && atListLimit}
+-                      aria-disabled={followUp ? atListLimit : undefined}
++                      disabled={!localList && atListLimit}
++                      aria-disabled={localList ? atListLimit : undefined}
+                       onKeyDown={keepNativeButtonActivation}
+                       onClick={this.loadMore}
+                     >
+                       {atListLimit
+-                        ? (followUp && rows.length < 100 ? '正在加载更多…'
++                        ? (localList && rows.length < 100 ? '正在加载更多…'
++                          : drafts ? '已显示前 100 份草稿'
+                           : followUp === 'pinned' ? '已显示前 100 个置顶会话' : '已显示 100 个会话，请缩小搜索范围')
+                         : '加载更多'}
+                     </button>
+@@ -1748,10 +1814,11 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+             ) : (
+               selected instanceof Message && (
+                 <div className="pr-editor">
+-                  {DraftStore.isSendingDraft(selected.headerMessageId) ? (
++                  {DraftStore.isSendingDraft(selected.headerMessageId, selected.accountId) ? (
+                     <p role="status">正在发送，请等待服务器确认…</p>
+                   ) : (
+-                    <Composer workspace headerMessageId={selected.headerMessageId} onDraftReady={() => {}}>{back}</Composer>
++                    <Composer workspace headerMessageId={selected.headerMessageId} accountId={selected.accountId}
++                      onDraftUnavailable={this.backToList} onDraftReady={() => {}}>{back}</Composer>
+                   )}
+                 </div>
+               )
+diff --git a/app/internal_packages/paper-reed/styles/paper-reed.less b/app/internal_packages/paper-reed/styles/paper-reed.less
+index 6b3c55737c9ec6446e526159e1665788cda45c31..dc76adae1b8f6359575bb62a8738baf49090c6cb 100644
+--- a/app/internal_packages/paper-reed/styles/paper-reed.less
++++ b/app/internal_packages/paper-reed/styles/paper-reed.less
+@@ -228,6 +228,32 @@
+   .pr-composer .pr-recovery-origin strong { font-weight: 500; color: var(--pr-reed); }
+   .pr-copy-badge { color: var(--pr-reed); background: #e9eee5; padding: 1px 5px; border-radius: 3px; font-size: 11px; }
+   .pr-copy-source { color: var(--pr-muted); font-size: 11px; }
++  .pr-workspace .pr-mail-list .pr-draft-row {
++    grid-template-columns: minmax(0, 1fr) auto;
++    grid-template-areas: "draft date";
++    align-items: start;
++    gap: 8px 16px;
++    min-height: 68px;
++    padding: 12px 0;
++  }
++  .pr-draft-row-main { grid-area: draft; min-width: 0; display: grid; gap: 4px; }
++  .pr-draft-row-title, .pr-draft-row-details {
++    display: flex;
++    align-items: baseline;
++    gap: 8px;
++    min-width: 0;
++  }
++  .pr-draft-row-title .pr-subject { font-weight: 500; }
++  .pr-draft-row-title .pr-copy-badge, .pr-draft-row-details .pr-copy-source {
++    flex: none;
++    white-space: nowrap;
++  }
++  .pr-draft-row-details { font-size: 12px; color: var(--pr-muted); }
++  .pr-draft-recipients, .pr-draft-mailbox { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++  .pr-draft-mailbox { flex: 0 1 auto; }
++  .pr-drafts-empty { display: flex; align-items: baseline; flex-wrap: wrap; gap: 8px 16px; padding: 20px 0; }
++  .pr-drafts-empty p { margin: 0; font-size: 14px; font-weight: 500; }
++  .pr-drafts-empty button { color: var(--pr-reed); }
+   .pr-composer .composer-action-bar-wrap { margin-top: 20px; padding: 16px 0; background: transparent; box-shadow: none; border-top: 1px solid var(--pr-line); }
+   .pr-compose-actions { display: flex; align-items: center; gap: 12px; flex-wrap: wrap; }
+   .pr-compose-actions button, .pr-compose-more summary { font: 12px/20px -apple-system, BlinkMacSystemFont, 'PingFang SC', sans-serif; color: var(--pr-muted); background: transparent; border: 0; box-shadow: none; padding: 7px 0; border-radius: 5px; cursor: pointer; }
+diff --git a/app/internal_packages/send-later/lib/main.ts b/app/internal_packages/send-later/lib/main.ts
+index 8b082785009d04a2634117fac373a25ce95ba303..010377f0fff1c7ccb899fbf656e644a96a3eb0e5 100644
+--- a/app/internal_packages/send-later/lib/main.ts
++++ b/app/internal_packages/send-later/lib/main.ts
+@@ -48,7 +48,7 @@ function handleMetadataExpiration(change) {
+     }
+ 
+     // clear the metadata
+-    const session = await DraftStore.sessionForClientId(message.headerMessageId);
++    const session = await DraftStore.sessionForClientId(message.headerMessageId, message.accountId);
+     if (!session.draft()) {
+       // Draft was already sent or deleted before the expiration fired
+       return;
+@@ -58,7 +58,7 @@ function handleMetadataExpiration(change) {
+ 
+     // send the draft
+     const actionKey = metadata.actionKey || SendActionsStore.DefaultSendActionKey;
+-    Actions.sendDraft(message.headerMessageId, { actionKey, delay: 0 });
++    Actions.sendDraft(message.headerMessageId, { actionKey, delay: 0, accountId: message.accountId });
+   });
+ }
+ 
+diff --git a/app/internal_packages/thread-list/lib/thread-list-context-menu.ts b/app/internal_packages/thread-list/lib/thread-list-context-menu.ts
+index 37333c2a796d5b07b14589b8ad1e6f7a7591f546..ff204b1f692f4ebb2c21a717c5d5c731af917441 100644
+--- a/app/internal_packages/thread-list/lib/thread-list-context-menu.ts
++++ b/app/internal_packages/thread-list/lib/thread-list-context-menu.ts
+@@ -219,7 +219,7 @@ export default class ThreadListContextMenu {
+           headerMessageId: draft.headerMessageId,
+           onCreated: () => {
+             EmlUtils.discardStagedEml(filePath);
+-            Actions.composePopoutDraft(draft.headerMessageId);
++            Actions.composePopoutDraft(draft.headerMessageId, { accountId: draft.accountId });
+           },
+         });
+       },
+diff --git a/app/spec/stores/attachment-store-spec.ts b/app/spec/stores/attachment-store-spec.ts
+index 6de4f22c6e20b82854d2dcab8d02b7200dc78d4c..cd44dbb18e0367a5ad3407b97db5bfcda5eab4fe 100644
+--- a/app/spec/stores/attachment-store-spec.ts
++++ b/app/spec/stores/attachment-store-spec.ts
+@@ -52,7 +52,7 @@ describe('AttachmentStore', function () {
+       waitsFor(() => this.files.length === 3);
+       runs(() => {
+         expect(this.files.map((f: File) => f.filename)).toEqual(['a.png', 'b.png', 'c.png']);
+-        expect(AttachmentStore._pendingAddsByDraft['draft-1']).toBeUndefined();
++        expect(AttachmentStore._pendingAddsByDraft.has('draft-1')).toBe(false);
+       });
+     });
+ 
+diff --git a/app/src/browser/application.ts b/app/src/browser/application.ts
+index ee30e4b8f80c8f48a073ce8eee20710d9d43002e..710e01e19460fe8fa58fbaa847295ec30a8e0e4d 100644
+--- a/app/src/browser/application.ts
++++ b/app/src/browser/application.ts
+@@ -23,6 +23,7 @@ import { EventEmitter } from 'events';
+ 
+ import { localized, initializeLocalization } from '../intl';
+ import WindowManager from './window-manager';
++import type { DraftAccountChange, DraftAccountMove } from '../draft-identity';
+ import { replacesWindowDocument, type default as MailspringWindow } from './mailspring-window';
+ import FileListCache from './file-list-cache';
+ import ConfigMigrator from './config-migrator';
+@@ -790,13 +791,46 @@ export default class Application extends EventEmitter {
+     });
+ 
+     onFromMailspringWindows(ipcMain, 'new-window', (event, options) => {
+-      const win = options.windowKey ? this.windowManager.get(options.windowKey) : null;
+-      if (win) {
+-        win.show();
+-        win.focus();
+-      } else {
+-        this.windowManager.newWindow(rendererWindowOptions(options));
++      const open = () => {
++        const win = options.windowKey ? this.windowManager.get(options.windowKey) : null;
++        if (win) {
++          win.show();
++          win.focus();
++        } else {
++          this.windowManager.newWindow(rendererWindowOptions(options));
++        }
++      };
++      if (options.windowType === 'composer' && this.windowManager.deferDraftWindowOpen(options.windowKey, open)) return;
++      open();
++    });
++
++    const validDraftAccountMove = (move: DraftAccountMove) => move &&
++      [move.requestId, move.headerMessageId, move.previousAccountId, move.previousMessageId, move.accountId]
++        .every(value => typeof value === 'string' && value.length > 0);
++    const validDraftAccountChange = (change: DraftAccountChange) => validDraftAccountMove(change) &&
++      typeof change.messageId === 'string' && change.messageId.length > 0;
++
++    onFromMailspringWindows(ipcMain, 'composer-draft-account-moving', (event, move: DraftAccountMove) => {
++      if (event.senderFrame === event.sender.mainFrame && this.config.get('core.paperReed.enabled') &&
++          validDraftAccountMove(move)) {
++        this.windowManager.expectDraftWindowAccountChange(move, event.sender);
++      }
++      event.returnValue = null;
++    });
++    onFromMailspringWindows(ipcMain, 'composer-draft-account-moved', (event, change: DraftAccountChange) => {
++      if (event.senderFrame === event.sender.mainFrame && validDraftAccountChange(change)) {
++        this.windowManager.completeDraftWindowAccountChange(change, event.sender);
+       }
++      event.returnValue = null;
++    });
++    onFromMailspringWindows(ipcMain, 'composer-draft-account-move-cancelled', (event, move: DraftAccountMove) => {
++      if (event.senderFrame === event.sender.mainFrame && validDraftAccountMove(move)) {
++        this.windowManager.cancelDraftWindowAccountChange(move, event.sender);
++      }
++    });
++    onFromMailspringWindows(ipcMain, 'composer-draft-account-response', (event, change: DraftAccountChange, accepted: boolean) => {
++      event.returnValue = event.senderFrame === event.sender.mainFrame && validDraftAccountChange(change) &&
++        this.windowManager.confirmDraftWindowAccountChange(change, BrowserWindow.fromWebContents(event.sender), accepted === true);
+     });
+ 
+     // Theme Error Handling
+diff --git a/app/src/browser/window-manager.ts b/app/src/browser/window-manager.ts
+index 527e8f6aa279e43a4a74b64bc5d8856cb780b5f1..9df09b4bc4f175407e5a3922dfe9755d4c9fc3ac 100644
+--- a/app/src/browser/window-manager.ts
++++ b/app/src/browser/window-manager.ts
+@@ -1,12 +1,27 @@
+ import _ from 'underscore';
+-import { app, BrowserWindow } from 'electron';
++import { app, BrowserWindow, WebContents } from 'electron';
+ import WindowLauncher from './window-launcher';
+ import { localized } from '../intl';
+ import MailspringWindow from './mailspring-window';
++import { draftWindowKey, type DraftAccountChange, type DraftAccountMove } from '../draft-identity';
+ 
+ const MAIN_WINDOW = 'default';
+ const SPEC_WINDOW = 'spec';
+ const ONBOARDING_WINDOW = 'onboarding';
++const DRAFT_WINDOW_RESPONSE_TIMEOUT_MS = 2000;
++
++type DraftWindowMoveAttempt = {
++  window: MailspringWindow;
++  initiator: WebContents;
++  stopListening: () => void;
++};
++
++type DraftWindowAccountChange = {
++  attempts: Map<string, DraftWindowMoveAttempt>;
++  completed?: DraftAccountChange;
++  timeout?: ReturnType<typeof setTimeout>;
++  open?: () => void;
++};
+ 
+ export default class WindowManager {
+   static MAIN_WINDOW = MAIN_WINDOW;
+@@ -16,6 +31,7 @@ export default class WindowManager {
+   initializeInBackground: boolean;
+   _windows: { [key: string]: MailspringWindow } = {};
+   windowLauncher: WindowLauncher;
++  private draftWindowAccountChanges = new Map<string, DraftWindowAccountChange>();
+ 
+   constructor({
+     devMode,
+@@ -120,6 +136,119 @@ export default class WindowManager {
+     return win;
+   }
+ 
++  expectDraftWindowAccountChange(move: DraftAccountMove, initiator: WebContents) {
++    const oldKey = draftWindowKey(move.headerMessageId, move.previousAccountId);
++    const nextKey = draftWindowKey(move.headerMessageId, move.accountId);
++    const source = this.get(oldKey);
++    if (!source || source.windowType !== 'composer' || this.get(nextKey)) return;
++
++    const pending = this.draftWindowAccountChanges.get(nextKey) || { attempts: new Map() };
++    if (pending.attempts.has(move.requestId)) return;
++    const cancelled = () => this.cancelDraftWindowAccountChange(move, initiator, true);
++    source.browserWindow.once('closed', cancelled);
++    initiator.once('destroyed', cancelled);
++    initiator.once('render-process-gone', cancelled);
++    pending.attempts.set(move.requestId, {
++      window: source, initiator,
++      stopListening: () => {
++        source.browserWindow.removeListener('closed', cancelled);
++        initiator.removeListener('destroyed', cancelled);
++        initiator.removeListener('render-process-gone', cancelled);
++      },
++    });
++    this.draftWindowAccountChanges.set(nextKey, pending);
++  }
++
++  completeDraftWindowAccountChange(change: DraftAccountChange, initiator: WebContents) {
++    const key = draftWindowKey(change.headerMessageId, change.accountId);
++    const pending = this.draftWindowAccountChanges.get(key);
++    if (!pending || pending.completed ||
++        pending.attempts.get(change.requestId)?.initiator !== initiator) return;
++    pending.completed = change;
++    pending.timeout = setTimeout(() => this.finishDraftWindowAccountChange(key),
++      DRAFT_WINDOW_RESPONSE_TIMEOUT_MS);
++  }
++
++  cancelDraftWindowAccountChange(move: DraftAccountMove, initiator: WebContents, windowClosed = false) {
++    const key = draftWindowKey(move.headerMessageId, move.accountId);
++    const pending = this.draftWindowAccountChanges.get(key);
++    const attempt = pending?.attempts.get(move.requestId);
++    if (!attempt || attempt.initiator !== initiator) return;
++    if (pending.completed?.requestId === move.requestId) {
++      if (windowClosed) this.finishDraftWindowAccountChange(key);
++      return;
++    }
++    attempt.stopListening();
++    pending.attempts.delete(move.requestId);
++    if (!pending.attempts.size) this.finishDraftWindowAccountChange(key);
++  }
++
++  deferDraftWindowOpen(windowKey: string, open: () => void) {
++    const pending = this.draftWindowAccountChanges.get(windowKey);
++    if (!pending) return false;
++    pending.open = open;
++    return true;
++  }
++
++  confirmDraftWindowAccountChange(change: DraftAccountChange, sender: BrowserWindow, accepted: boolean) {
++    const key = draftWindowKey(change.headerMessageId, change.accountId);
++    const pending = this.draftWindowAccountChanges.get(key);
++    const attempt = pending?.attempts.get(change.requestId);
++    if (attempt?.window.browserWindow !== sender || !pending?.completed ||
++        pending.completed.requestId !== change.requestId ||
++        pending.completed.previousAccountId !== change.previousAccountId ||
++        pending.completed.previousMessageId !== change.previousMessageId ||
++        pending.completed.messageId !== change.messageId) return false;
++    const rebound = accepted && this.rebindDraftWindow(attempt.window, change, key);
++    this.finishDraftWindowAccountChange(key);
++    return rebound;
++  }
++
++  private finishDraftWindowAccountChange(key: string) {
++    const pending = this.draftWindowAccountChanges.get(key);
++    if (!pending) return;
++    this.draftWindowAccountChanges.delete(key);
++    clearTimeout(pending.timeout);
++    const moved = pending.completed;
++    if (moved) {
++      const oldKey = draftWindowKey(moved.headerMessageId, moved.previousAccountId);
++      const source = pending.attempts.get(moved.requestId)?.window;
++      if (source && this.get(oldKey) === source && !source.browserWindow.isDestroyed()) {
++        // A retained editor owns its working copy, while a returning draft can open a fresh window.
++        const recoveryKey = `composer-recovery-${source.browserWindow.id}`;
++        delete this._windows[oldKey];
++        source.windowKey = recoveryKey;
++        this._registerWindow(source);
++        source.setLoadSettings({ ...source.loadSettings(), windowKey: recoveryKey });
++      }
++    }
++    for (const attempt of pending.attempts.values()) attempt.stopListening();
++    pending.open?.();
++  }
++
++  private rebindDraftWindow(win: MailspringWindow, change: DraftAccountChange, newKey: string) {
++    const oldKey = draftWindowKey(change.headerMessageId, change.previousAccountId);
++    if (this.get(oldKey) !== win || this.get(newKey)) return false;
++    const settings = win.loadSettings();
++    const props = settings.windowProps as {
++      accountId: string; headerMessageId: string; draftJSON: Record<string, unknown>;
++    };
++    if (props?.accountId !== change.previousAccountId || props.headerMessageId !== change.headerMessageId ||
++        props.draftJSON?.id !== change.previousMessageId) return false;
++
++    delete this._windows[oldKey];
++    win.windowKey = newKey;
++    this._registerWindow(win);
++    win.setLoadSettings({
++      ...settings, windowKey: newKey,
++      windowProps: {
++        ...props, accountId: change.accountId,
++        draftJSON: { ...props.draftJSON, aid: change.accountId, id: change.messageId },
++      },
++    });
++    return true;
++  }
++
+   _registerWindow = (win: MailspringWindow) => {
+     if (!win.windowKey) {
+       throw new Error('WindowManager: You must provide a windowKey');
+diff --git a/app/src/components/composer-editor/composer-editor.tsx b/app/src/components/composer-editor/composer-editor.tsx
+index 93ffa96cbf575cf5dcb041e081e8a8a03318afe0..656d9c447e38d3787f26bd53bcf3a3c805493acc 100644
+--- a/app/src/components/composer-editor/composer-editor.tsx
++++ b/app/src/components/composer-editor/composer-editor.tsx
+@@ -4,6 +4,7 @@ import * as Immutable from 'immutable';
+ import { Editor, Value, Operation, Range, Block, Text, Point } from 'slate';
+ import { Editor as SlateEditorComponent, EditorProps, Plugin } from 'slate-react';
+ import Plain from 'slate-plain-serializer';
++import { HAS_INPUT_EVENTS_LEVEL_2 } from 'slate-dev-environment';
+ import { webUtils } from 'electron';
+ import { InlineStyleTransformer, SanitizeTransformer } from 'mailspring-exports';
+ import os from 'os';
+@@ -78,7 +79,7 @@ export function normalizePlainTextForPaste(text: string) {
+ interface ComposerEditorProps {
+   value: Value;
+   propsForPlugins: any;
+-  onChange: (change: { operations: Immutable.List<Operation>; value: Value }) => void;
++  onChange: (change: { operations: Immutable.List<Operation>; value: Value; selectionOnly?: boolean }) => void;
+   className?: string;
+   readOnly?: boolean;
+   onBlur?: (e: React.FocusEvent) => void;
+@@ -97,6 +98,7 @@ export class ComposerEditor extends React.Component<ComposerEditorProps, Compose
+   _pluginKeyHandlers = {};
+   _mounted = false;
+   editor: Editor | null = null;
++  _inputElement: Element | null = null;
+   state: ComposerEditorState = { isTyping: false };
+ 
+   // True between compositionstart and compositionend (IME input, dead keys). The
+@@ -136,6 +138,10 @@ export class ComposerEditor extends React.Component<ComposerEditorProps, Compose
+ 
+   componentDidMount() {
+     this._mounted = true;
++    if (!HAS_INPUT_EVENTS_LEVEL_2) {
++      this._inputElement = ReactDOM.findDOMNode(this.editor as any) as Element;
++      this._inputElement?.addEventListener('beforeinput', this.onNativeTextInput);
++    }
+     this.props.onUpdatedSlateEditor && this.props.onUpdatedSlateEditor(this.editor);
+ 
+     // This is a bit of a hack. The toolbar requires access to the Editor model,
+@@ -146,6 +152,7 @@ export class ComposerEditor extends React.Component<ComposerEditorProps, Compose
+ 
+   componentWillUnmount() {
+     this._mounted = false;
++    this._inputElement?.removeEventListener('beforeinput', this.onNativeTextInput);
+     this.props.onUpdatedSlateEditor && this.props.onUpdatedSlateEditor(null);
+ 
+     // We need to explicitly blur the editor so that it saves a new selection (null)
+@@ -156,6 +163,7 @@ export class ComposerEditor extends React.Component<ComposerEditorProps, Compose
+     if (editorEl && editorEl.contains(document.getSelection().anchorNode)) {
+       this.props.onChange({
+         operations: Immutable.List([]),
++        selectionOnly: Immutable.is(this.editor.value.document, this.props.value.document),
+         value: this.editor.deselect().blur().value,
+       });
+     }
+@@ -187,6 +195,17 @@ export class ComposerEditor extends React.Component<ComposerEditorProps, Compose
+     InlineAttachmentChanges.insert(this.editor, file);
+   };
+ 
++  onNativeTextInput = (event: InputEvent) => {
++    if (event.target !== this._inputElement || event.defaultPrevented || !event.cancelable ||
++        event.inputType !== 'insertText' || event.isComposing || this._isComposing ||
++        !event.data || !event.getTargetRanges?.().length) return;
++
++    // Slate's older browser detection can leave Electron using React's textInput
++    // polyfill. Use the browser's edit range and let Slate consume it before that
++    // second event can apply the same insertion.
++    this.editor.run('onBeforeInput', event);
++  };
++
+   onFocusIfBlurred = (_event: React.MouseEvent<HTMLDivElement>) => {
+     if (!this.props.value.selection.isFocused) {
+       this.focus();
+diff --git a/app/src/decorators/inflates-draft-client-id.tsx b/app/src/decorators/inflates-draft-client-id.tsx
+index d640880f337ccf253ff79ae6f398e6214b346bd2..243064862a62a28d2318239077264513657b52e2 100644
+--- a/app/src/decorators/inflates-draft-client-id.tsx
++++ b/app/src/decorators/inflates-draft-client-id.tsx
+@@ -4,10 +4,12 @@ import * as Actions from '../flux/actions';
+ import * as Utils from '../flux/models/utils';
+ import { Message, DraftEditingSession } from 'mailspring-exports';
+ 
++type DraftProps = { headerMessageId: string; accountId?: string; onDraftReady: () => void; onDraftUnavailable?: () => void };
++
+ function InflatesDraftClientId<ExtraProps extends object = Record<never, never>>(ComposedComponent) {
+   return class extends React.Component<
+-    { headerMessageId: string; onDraftReady: () => void } & React.HTMLProps<HTMLElement> & ExtraProps,
+-    { draft: Message; session: DraftEditingSession; _lastHeaderMessageId: string }
++    DraftProps & React.HTMLProps<HTMLElement> & ExtraProps,
++    { draft: Message; session: DraftEditingSession; _lastHeaderMessageId: string; _lastAccountId?: string }
+   > {
+     static displayName = ComposedComponent.displayName;
+ 
+@@ -18,22 +20,28 @@ function InflatesDraftClientId<ExtraProps extends object = Record<never, never>>
+     static containerRequired = false;
+ 
+     static getDerivedStateFromProps(
+-      props: { headerMessageId: string; onDraftReady: () => void },
+-      state: { draft: Message; session: DraftEditingSession; _lastHeaderMessageId: string }
++      props: DraftProps,
++      state: { draft: Message; session: DraftEditingSession; _lastHeaderMessageId: string; _lastAccountId?: string }
+     ) {
+       // If headerMessageId prop has changed, clear draft and session state
+       // to prevent rendering with mismatched data
+-      if (props.headerMessageId !== state._lastHeaderMessageId) {
++      if (props.headerMessageId !== state._lastHeaderMessageId || props.accountId !== state._lastAccountId) {
++        if (state.session?.headerMessageId === props.headerMessageId &&
++            state.session?.accountId === props.accountId) {
++          return { draft: state.session.draft(), _lastHeaderMessageId: props.headerMessageId, _lastAccountId: props.accountId };
++        }
+         return {
+           draft: null,
+           session: null,
+           _lastHeaderMessageId: props.headerMessageId,
++          _lastAccountId: props.accountId,
+         };
+       }
+       return null;
+     }
+ 
+     _mounted = false;
++    _preparation = 0;
+     _sessionUnlisten?: () => void;
+ 
+     constructor(props) {
+@@ -42,12 +50,13 @@ function InflatesDraftClientId<ExtraProps extends object = Record<never, never>>
+         session: null,
+         draft: null,
+         _lastHeaderMessageId: props.headerMessageId,
++        _lastAccountId: props.accountId,
+       };
+     }
+ 
+     componentDidMount() {
+       this._mounted = true;
+-      this._prepareForDraft(this.props.headerMessageId);
++      this._prepareForDraft();
+     }
+ 
+     componentWillUnmount() {
+@@ -56,26 +65,38 @@ function InflatesDraftClientId<ExtraProps extends object = Record<never, never>>
+       this._deleteDraftIfEmpty();
+     }
+ 
+-    componentDidUpdate(prevProps: { headerMessageId: string; onDraftReady: () => void }) {
+-      if (prevProps.headerMessageId !== this.props.headerMessageId) {
++    componentDidUpdate(prevProps: DraftProps, prevState: { session: DraftEditingSession }) {
++      if ((prevProps.headerMessageId !== this.props.headerMessageId || prevProps.accountId !== this.props.accountId) &&
++          (!this.state.session || this.state.session !== prevState.session)) {
+         // getDerivedStateFromProps has already cleared draft/session state before render
+         // Now we just need to teardown the old draft and prepare for the new one
+-        this._teardownForDraft();
+-        this._prepareForDraft(this.props.headerMessageId);
++        this._teardownForDraft(prevState.session);
++        this._prepareForDraft();
+       }
+     }
+ 
+-    async _prepareForDraft(headerMessageId) {
++    async _prepareForDraft() {
++      const { headerMessageId, accountId } = this.props;
+       if (!headerMessageId) {
+         return;
+       }
+-      const session = await DraftStore.sessionForClientId(headerMessageId);
+-      const shouldSetState = () =>
+-        this._mounted && session.headerMessageId === this.props.headerMessageId;
++      const preparation = ++this._preparation;
++      const shouldSetState = () => this._mounted && preparation === this._preparation;
++      let session: DraftEditingSession;
++      try {
++        session = await DraftStore.sessionForClientId(headerMessageId, accountId);
++      } catch {
++        if (shouldSetState()) this.props.onDraftUnavailable?.();
++        return;
++      }
+ 
+       if (!shouldSetState()) {
+         return;
+       }
++      if (!session.draft()) {
++        this.props.onDraftUnavailable?.();
++        return;
++      }
+       this._sessionUnlisten = session.listen(() => {
+         if (!shouldSetState()) {
+           return;
+@@ -90,14 +111,15 @@ function InflatesDraftClientId<ExtraProps extends object = Record<never, never>>
+       this.props.onDraftReady();
+     }
+ 
+-    _teardownForDraft() {
+-      if (this.state.session) {
+-        this.state.session.changes.commit().catch((error) => {
++    _teardownForDraft(session = this.state.session) {
++      if (session) {
++        session.changes.commit().catch((error) => {
+           if (!AppEnv.config.get('core.paperReed.enabled')) AppEnv.showErrorDialog(error.message);
+         });
+       }
+       if (this._sessionUnlisten) {
+         this._sessionUnlisten();
++        this._sessionUnlisten = undefined;
+       }
+     }
+ 
+diff --git a/app/src/draft-identity.ts b/app/src/draft-identity.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..7a88b0d8986189e6c99d02bb4d4250f214c539b1
+--- /dev/null
++++ b/app/src/draft-identity.ts
+@@ -0,0 +1,15 @@
++export type DraftAccountMove = {
++  requestId: string;
++  headerMessageId: string;
++  previousAccountId: string;
++  previousMessageId: string;
++  accountId: string;
++};
++
++export type DraftAccountChange = DraftAccountMove & { messageId: string };
++
++export function draftWindowKey(headerMessageId: string, accountId?: string) {
++  return accountId
++    ? `composer-${JSON.stringify([headerMessageId, accountId])}`
++    : `composer-${headerMessageId}`;
++}
+diff --git a/app/src/flux/actions.ts b/app/src/flux/actions.ts
+index 6714c004a96f27b570c8aa1ee745e0d28bdfe7db..08194b612878513651c552546c0a405461d1a968 100644
+--- a/app/src/flux/actions.ts
++++ b/app/src/flux/actions.ts
+@@ -455,6 +455,7 @@ export const composeNewDraftToRecipient = create('composeNewDraftToRecipient', A
+   ```
+   */
+ export const sendDraft = create('sendDraft', ActionScopeWindow);
++export const draftAccountChanged = create('draftAccountChanged', ActionScopeGlobal);
+ /*
+   Public: Fired when a draft is successfully sent
+   *Scope: Global*
+diff --git a/app/src/flux/stores/attachment-store.ts b/app/src/flux/stores/attachment-store.ts
+index ee780d4de48b613e68a1b4f861d8a4d90530820c..994ba179c983a518d3e1289bf4f55fbfdf67e369 100644
+--- a/app/src/flux/stores/attachment-store.ts
++++ b/app/src/flux/stores/attachment-store.ts
+@@ -4,6 +4,7 @@ import path from 'path';
+ import { shell } from 'electron';
+ import MailspringStore from 'mailspring-store';
+ import DraftStore from './draft-store';
++import type { DraftEditingSession } from './draft-editing-session';
+ import * as Actions from '../actions';
+ import { File } from '../models/file';
+ import { Message } from '../models/message';
+@@ -33,7 +34,8 @@ class AttachmentStore extends MailspringStore {
+   _filePreviewPaths = {};
+   _filesDirectory: string = path.join(AppEnv.getConfigDirPath(), 'files');
+   _lastDownloadDirectory: string;
+-  _pendingAddsByDraft: { [headerMessageId: string]: Promise<void> } = {};
++  _pendingAddsByDraft = new Map<string | DraftEditingSession, Promise<void>>();
++  private _openPickers = new Map<DraftEditingSession, number>();
+ 
+   constructor() {
+     super();
+@@ -437,40 +439,66 @@ class AttachmentStore extends MailspringStore {
+     }
+   }
+ 
+-  async _applySessionChanges(headerMessageId: string, changeFunction: (files: File[]) => File[]) {
+-    const session = await DraftStore.sessionForClientId(headerMessageId);
++  async _applySessionChanges(
++    headerMessageId: string, changeFunction: (files: File[]) => File[], accountId?: string,
++    acceptedSession?: DraftEditingSession
++  ) {
++    const session = acceptedSession || await DraftStore.sessionForClientId(headerMessageId, accountId);
++    if (session._destroyed || !session.draft()) throw new Error('draft-not-found');
+     const files = changeFunction(session.draft().files);
+     session.changes.add({ files });
+   }
+ 
+   // Handlers
+ 
+-  _onSelectAttachment = ({ headerMessageId }) => {
++  _onSelectAttachment = ({ headerMessageId, accountId }) => {
+     this._assertIdPresent(headerMessageId);
+-
+-    // When the dialog closes, it triggers `Actions.addAttachment`
++    const session = AppEnv.config.get('core.paperReed.enabled')
++      ? DraftStore.cachedDraftSession(headerMessageId, accountId) : undefined;
++    if (session) this._openPickers.set(session, (this._openPickers.get(session) || 0) + 1);
++
++    let released = false;
++    const release = () => {
++      if (!session || released) return;
++      released = true;
++      const count = this._openPickers.get(session);
++      if (count > 1) this._openPickers.set(session, count - 1);
++      else this._openPickers.delete(session);
++    };
+     return AppEnv.showOpenDialog({ properties: ['openFile', 'multiSelections'] }, (paths) => {
+-      if (paths == null) {
+-        return;
+-      }
+-      let pathsToOpen = paths;
+-      if (typeof pathsToOpen === 'string') {
+-        pathsToOpen = [pathsToOpen];
++      try {
++        if (!paths?.length) return;
++        if (session?._destroyed) {
++          void AppEnv.showErrorDialog('草稿已关闭。请打开草稿后重新选择附件。');
++          return;
++        }
++        const files = typeof paths === 'string' ? [paths] : paths;
++        files.forEach(filePath =>
++          Actions.addAttachment({ headerMessageId, accountId: session?.accountId || accountId, filePath }));
++      } finally {
++        release();
+       }
+-
+-      pathsToOpen.forEach((filePath) => Actions.addAttachment({ headerMessageId, filePath }));
++    })?.catch(error => {
++      release();
++      return AppEnv.showErrorDialog(error.message);
+     });
+   };
+ 
++  isSelectingDraftAttachments(session: DraftEditingSession) {
++    return this._openPickers.has(session);
++  }
++
+   // Adds are serialized per draft so files land on the draft in dispatch
+   // order rather than the order their copies happen to finish.
+   _onAddAttachment = ({
+     headerMessageId,
++    accountId,
+     filePath,
+     inline = false,
+     onCreated = (file: File) => {},
+   }: {
+     headerMessageId: string;
++    accountId?: string;
+     filePath: string;
+     inline?: boolean;
+     onCreated?: (file: File) => void;
+@@ -478,14 +506,18 @@ class AttachmentStore extends MailspringStore {
+     this._assertIdPresent(headerMessageId);
+ 
+     // Keep the operation's rejection for every waiter; only the queue tail recovers.
+-    const previous = this._pendingAddsByDraft[headerMessageId] || Promise.resolve();
+-    const current = previous.catch(() => {}).then(() =>
+-      this._addAttachmentNow({ headerMessageId, filePath, inline, onCreated })
++    // Keep accepted imports with the editor when its account changes.
++    const acceptedSession = AppEnv.config.get('core.paperReed.enabled')
++      ? DraftStore.cachedDraftSession(headerMessageId, accountId)
++      : undefined;
++    const key = acceptedSession || this._attachmentKey(headerMessageId, accountId);
++    const pending = this.pendingDraftAttachments(headerMessageId, accountId);
++    const current = Promise.all(pending.map(promise => promise.catch(() => {}))).then(() =>
++      this._addAttachmentNow({ headerMessageId, accountId, filePath, inline, onCreated, acceptedSession })
+     );
+-    this._pendingAddsByDraft[headerMessageId] = current;
++    this._pendingAddsByDraft.set(key, current);
+     const finished = () => {
+-      if (this._pendingAddsByDraft[headerMessageId] === current)
+-        delete this._pendingAddsByDraft[headerMessageId];
++      if (this._pendingAddsByDraft.get(key) === current) this._pendingAddsByDraft.delete(key);
+     };
+     // Acknowledging the dialog abandons the failed add. Readers never consume errors.
+     current.then(finished, async (error) => {
+@@ -495,25 +527,46 @@ class AttachmentStore extends MailspringStore {
+     return current;
+   };
+ 
+-  hasPendingDraftAttachments(headerMessageId: string) {
+-    return !!this._pendingAddsByDraft[headerMessageId];
++  private _attachmentKey(headerMessageId: string, accountId?: string) {
++    return accountId && AppEnv.config.get('core.paperReed.enabled')
++      ? JSON.stringify([headerMessageId, accountId]) : headerMessageId;
+   }
+ 
+-  async waitForDraftAttachments(headerMessageId: string) {
+-    while (this._pendingAddsByDraft[headerMessageId])
+-      await this._pendingAddsByDraft[headerMessageId];
++  private pendingDraftAttachments(headerMessageId: string, accountId?: string) {
++    const keys = new Set<string | DraftEditingSession>([headerMessageId, this._attachmentKey(headerMessageId, accountId)]);
++    if (AppEnv.config.get('core.paperReed.enabled')) {
++      const session = DraftStore.cachedDraftSession(headerMessageId, accountId);
++      if (session) keys.add(session);
++    }
++    return Array.from(keys, key => this._pendingAddsByDraft.get(key)).filter(Boolean);
++  }
++
++  hasPendingDraftAttachments(headerMessageId: string, accountId?: string) {
++    return this.pendingDraftAttachments(headerMessageId, accountId).length > 0;
++  }
++
++  async waitForDraftAttachments(headerMessageId: string, accountId?: string) {
++    let pending = this.pendingDraftAttachments(headerMessageId, accountId);
++    while (pending.length) {
++      await Promise.all(pending);
++      pending = this.pendingDraftAttachments(headerMessageId, accountId);
++    }
+   }
+ 
+   async _addAttachmentNow({
+     headerMessageId,
++    accountId,
+     filePath,
+     inline,
+     onCreated,
++    acceptedSession,
+   }: {
+     headerMessageId: string;
++    accountId?: string;
+     filePath: string;
+     inline: boolean;
+     onCreated: (file: File) => void;
++    acceptedSession?: DraftEditingSession;
+   }) {
+     try {
+       if (AppEnv.config.get('core.paperReed.enabled')) {
+@@ -524,7 +577,7 @@ class AttachmentStore extends MailspringStore {
+           await this._applySessionChanges(headerMessageId, (files) => {
+             checkAttachmentSize([...files, file]);
+             return [...files, file];
+-          });
++          }, accountId, acceptedSession);
+         } catch (error) { this.deleteFilesOwnedByDraft([file]); throw error; }
+         onCreated(file);
+         return;
+@@ -559,7 +612,7 @@ class AttachmentStore extends MailspringStore {
+           throw new Error(localized(`Sorry, you can't attach more than 25MB of attachments`));
+         }
+         return files.concat([file]);
+-      });
++      }, accountId);
+       onCreated(file);
+     } catch (err) {
+       if (AppEnv.config.get('core.paperReed.enabled')) throw err;
+@@ -594,14 +647,13 @@ class AttachmentStore extends MailspringStore {
+     );
+   }
+ 
+-  _onRemoveAttachment = async (headerMessageId: string, fileToRemove: File) => {
++  _onRemoveAttachment = async (headerMessageId: string, fileToRemove: File, accountId?: string) => {
+     if (!fileToRemove) {
+       return;
+     }
+ 
+     await this._applySessionChanges(headerMessageId, (files) =>
+-      files.filter(({ id }) => id !== fileToRemove.id)
+-    );
++      files.filter(({ id }) => id !== fileToRemove.id), accountId);
+ 
+     // A different editor may still need these bytes to recover its unsaved version.
+     if (AppEnv.config.get('core.paperReed.enabled')) return;
+diff --git a/app/src/flux/stores/draft-editing-session.ts b/app/src/flux/stores/draft-editing-session.ts
+index 58aee154b78d6d55230eda3574afa1d82ab86e4d..a247e4ca720c27a3aaf3a10c534156a90c235c5d 100644
+--- a/app/src/flux/stores/draft-editing-session.ts
++++ b/app/src/flux/stores/draft-editing-session.ts
+@@ -1,5 +1,6 @@
++import type { DraftAccountMove } from '../../draft-identity';
+ import type { DraftSaveReceipt } from '../../services/mail-core';
+-import { saveDraft, getDraft, desktopAccess } from '../../services/mail-core';
++import { saveDraft, getDraft, desktopAccess, moveDraftToAccount } from '../../services/mail-core';
+ import * as Immutable from 'immutable';
+ import MailspringStore from 'mailspring-store';
+ import { Editor, Value, Block, Text } from 'slate';
+@@ -14,12 +15,12 @@ import * as Actions from '../actions';
+ import ContactStore from './contact-store';
+ import DatabaseStore from './database-store';
+ import { AccountStore } from './account-store';
++import AttachmentStore from './attachment-store';
+ import { DraftChangeSet } from './draft-change-set';
+ import { DatabaseChangeRecord } from './database-change-record';
+ import { DestroyDraftTask } from '../tasks/destroy-draft-task';
+ import { Composer as ComposerExtensionRegistry } from '../../registries/extension-registry';
+ import QuotedHTMLTransformer from '../../services/quoted-html-transformer';
+-import { SyncbackDraftTask } from '../tasks/syncback-draft-task';
+ 
+ export type MessageWithEditorState = Message & { bodyEditorState: any };
+ 
+@@ -200,6 +201,7 @@ export class DraftEditingSession extends MailspringStore {
+   _draftPromise: Promise<Message> = null;
+   _destroyed = false;
+   _mountedEditor: Editor | null = null;
++  private saveWithSelectedAccount = false;
+ 
+   headerMessageId: string;
+   changes = new DraftChangeSet({
+@@ -207,7 +209,7 @@ export class DraftEditingSession extends MailspringStore {
+     onCommit: () => this.changeSetCommit(), // for specs
+   });
+ 
+-  constructor(headerMessageId: string, draft: Message = null) {
++  constructor(headerMessageId: string, draft: Message = null, private readonly initialAccountId?: string) {
+     super();
+ 
+     this.headerMessageId = headerMessageId;
+@@ -224,6 +226,7 @@ export class DraftEditingSession extends MailspringStore {
+       this._draftPromise = DatabaseStore.findBy<Message>(Message, {
+         headerMessageId: this.headerMessageId,
+         draft: true,
++        ...(initialAccountId ? { accountId: initialAccountId } : {}),
+       })
+         .include(Message.attributes.body)
+         .then((draft) => {
+@@ -248,6 +251,10 @@ export class DraftEditingSession extends MailspringStore {
+     return this._draft;
+   }
+ 
++  get accountId() {
++    return this._draft?.accountId || this.initialAccountId;
++  }
++
+   prepare() {
+     return this._draftPromise;
+   }
+@@ -265,6 +272,7 @@ export class DraftEditingSession extends MailspringStore {
+     const latest = await getDraft({ accountId: this._draft.accountId, draftId: this.headerMessageId }, desktopAccess);
+     if (this.changes.saving || !unchanged()) throw new Error('draft-edited-after-copy');
+     this._draft = hotwireDraftBodyState(latest, this);
++    this._accountMoved = false;
+     this.changes.resetAfterReload();
+     this.trigger();
+   }
+@@ -433,53 +441,63 @@ export class DraftEditingSession extends MailspringStore {
+     }
+ 
+     if (account.id !== draft.accountId) {
+-      // Create a new draft in the new account (with a new ID).
+-      // Because we use the headerMessageId /exclusively/ as the
+-      // identifier we'll be fine.
+-      //
+-      // Then destroy the old one, since it may be synced to the server
+-      // and require cleanup!
+-      //
+-      const create = new SyncbackDraftTask({
+-        headerMessageId: draft.headerMessageId,
+-        draft: new Message({
+-          from: draft.from,
+-          version: 0,
+-          to: draft.to,
+-          cc: draft.cc,
+-          bcc: draft.bcc,
+-          body: draft.body,
+-          files: draft.files,
+-          replyTo: draft.replyTo,
+-          subject: draft.subject,
+-          // Carry over plugin metadata (open/link tracking, send-later) so toggles the
+-          // user enabled aren't silently reset when the draft moves between accounts.
+-          pluginMetadata: draft.pluginMetadata,
+-          headerMessageId: draft.headerMessageId,
+-          accountId: account.id,
+-          unread: false,
+-          starred: false,
+-          draft: true,
+-        }),
+-      });
+-
+-      const destroy =
+-        draft.id &&
+-        new DestroyDraftTask({
+-          messageIds: [draft.id],
+-          accountId: draft.accountId,
+-        });
++      if (AppEnv.config.get('core.paperReed.enabled')) {
++        this.saveWithSelectedAccount = true;
++        if (!this.changes.isDirty()) this.changes.add({ from: draft.from });
++        await this.changes.commit();
++      } else {
++        await this.moveDraftToAccount(draft, account.id);
++      }
++    }
++    return this;
++  }
+ 
+-      const created = await saveDraft(create.draft, desktopAccess);
+-      this.acceptSaveReceipt(created);
+-      if (destroy) Actions.queueTask(destroy);
++  private async moveDraftToAccount(draft: Message, accountId: string) {
++    // Save the target before removing the old draft. The engine refuses to
++    // replace an existing draft with the same header in the target account.
++    const next = new Message({
++      from: draft.from,
++      version: 0,
++      to: draft.to,
++      cc: draft.cc,
++      bcc: draft.bcc,
++      body: draft.body,
++      files: draft.files,
++      replyTo: draft.replyTo,
++      subject: draft.subject,
++      pluginMetadata: draft.pluginMetadata,
++      headerMessageId: draft.headerMessageId,
++      accountId,
++      unread: false,
++      starred: false,
++      draft: true,
++    });
++    if (AppEnv.config.get('core.paperReed.enabled')) {
++      const move = DraftStore.beginDraftAccountMove(draft, accountId);
++      try {
++        this.acceptSaveReceipt(await moveDraftToAccount(draft, next), move);
++      } finally {
++        DraftStore.cancelDraftAccountMove(move);
++      }
++      return;
+     }
+ 
+-    return this;
++    this.acceptSaveReceipt(await saveDraft(next, desktopAccess));
++    if (draft.id) {
++      Actions.queueTask(new DestroyDraftTask({ messageIds: [draft.id], accountId: draft.accountId }));
++    }
++  }
++
++  private _accountMoved = false;
++
++  markAccountMoved() {
++    this._accountMoved = true;
++    this.changes.saveError = new Error('draft-conflict');
++    this.changes.emit('state');
+   }
+ 
+   _onDraftChanged = (change) => {
+-    if (change === undefined || change.type !== 'persist') {
++    if (this._accountMoved || change === undefined || change.type !== 'persist') {
+       return;
+     }
+     if (!this._draft) {
+@@ -497,7 +515,8 @@ export class DraftEditingSession extends MailspringStore {
+     }
+ 
+     const nextDraft = change.objects
+-      .filter((obj) => obj.headerMessageId === this._draft.headerMessageId)
++      .filter((obj) => obj.draft && obj.accountId === this._draft.accountId &&
++        obj.headerMessageId === this._draft.headerMessageId)
+       .pop();
+ 
+     if (!nextDraft) {
+@@ -535,15 +554,29 @@ export class DraftEditingSession extends MailspringStore {
+     if (this._destroyed || !this._draft) {
+       return;
+     }
+-    this.acceptSaveReceipt(await saveDraft(this._draft, desktopAccess));
++    if (this.saveWithSelectedAccount) {
++      await AttachmentStore.waitForDraftAttachments(this.headerMessageId, this.accountId);
++    }
++    if (this._destroyed || !this._draft) return;
++    const draft = this._draft;
++    const account = this.saveWithSelectedAccount && AccountStore.accountForEmail(draft.from[0]?.email);
++    if (account && account.id !== draft.accountId) {
++      await this.moveDraftToAccount(draft, account.id);
++    } else {
++      this.acceptSaveReceipt(await saveDraft(draft, desktopAccess));
++    }
+   }
+ 
+-  acceptSaveReceipt(saved: DraftSaveReceipt) {
+-    if (this._draft) {
+-      this._draft = fastCloneDraft(this._draft);
+-      this._draft.version = saved.savedDraftRevision;
+-      this._draft.id = saved.savedDraftId;
+-      this._draft.accountId = saved.accountId;
++  acceptSaveReceipt(saved: DraftSaveReceipt, move?: DraftAccountMove) {
++    if (!this._draft) return;
++    const previous = this._draft;
++    this._draft = fastCloneDraft(previous);
++    this._draft.version = saved.savedDraftRevision;
++    this._draft.id = saved.savedDraftId;
++    this._draft.accountId = saved.accountId;
++    if (move) {
++      DraftStore._didChangeDraftAccount(this, move);
++      this.trigger();
+     }
+   }
+ 
+diff --git a/app/src/flux/stores/draft-factory.ts b/app/src/flux/stores/draft-factory.ts
+index 51a99c657c2c5cc6dc1f48644c1bf14da4e3e131..23b705d41de1c21ffaab2056c9027f00607eda11 100644
+--- a/app/src/flux/stores/draft-factory.ts
++++ b/app/src/flux/stores/draft-factory.ts
+@@ -350,7 +350,7 @@ class DraftFactory {
+       DraftStore = DraftStore || require('./draft-store').default;
+       const sessions = await Promise.all(
+         candidateDrafts.map((candidateDraft) =>
+-          DraftStore.sessionForClientId(candidateDraft.headerMessageId)
++          DraftStore.sessionForClientId(candidateDraft.headerMessageId, candidateDraft.accountId)
+         )
+       );
+       return sessions.map((s) => s.draft()).find((d) => d && d.pristine);
+diff --git a/app/src/flux/stores/draft-store.ts b/app/src/flux/stores/draft-store.ts
+index 131f236dd964b2ca46a0b1035caf882f03e5818d..5e7c57d5df0cbd6f59fcc7bfdde3ef084ed845a6 100644
+--- a/app/src/flux/stores/draft-store.ts
++++ b/app/src/flux/stores/draft-store.ts
+@@ -1,5 +1,7 @@
+ import { saveDraft, saveDraftCopy, desktopAccess } from '../../services/mail-core';
+ import { ipcRenderer } from 'electron';
++import { randomUUID } from 'crypto';
++import { draftWindowKey, type DraftAccountChange, type DraftAccountMove } from '../../draft-identity';
+ import MailspringStore from 'mailspring-store';
+ import { DraftEditingSession } from './draft-editing-session';
+ import DraftFactory, { ReplyType, ReplyBehavior } from './draft-factory';
+@@ -9,7 +11,7 @@ import FocusedContentStore from './focused-content-store';
+ import { SyncbackDraftTask } from '../tasks/syncback-draft-task';
+ import { SyncbackMetadataTask } from '../tasks/syncback-metadata-task';
+ import { SendDraftTask } from '../tasks/send-draft-task';
+-import { DestroyDraftTask } from '../tasks/destroy-draft-task';
++import { DestroyDraftTask, DestroyDraftRevisionTask } from '../tasks/destroy-draft-task';
+ import { Thread } from '../models/thread';
+ import { Contact } from '../models/contact';
+ import { Message } from '../models/message';
+@@ -54,6 +56,7 @@ class DraftStore extends MailspringStore {
+     this.listenTo(Actions.composePopoutDraft, this._onPopoutDraft);
+     this.listenTo(Actions.composeNewBlankDraft, this._onPopoutBlankDraft);
+     this.listenTo(Actions.composeNewDraftToRecipient, this._onPopoutNewDraftToRecipient);
++    this.listenTo(Actions.draftAccountChanged, this._onDraftAccountChanged);
+     this.listenTo(Actions.draftDeliveryFailed, this._onSendDraftFailed);
+     this.listenTo(Actions.draftDeliverySucceeded, this._onSendDraftSuccess);
+     this.listenTo(Actions.sendQuickReply, this._onSendQuickReply);
+@@ -93,26 +96,97 @@ class DraftStore extends MailspringStore {
+   @param {String} headerMessageId - The headerMessageId of the draft.
+   @returns {Promise} - Resolves to an {DraftEditingSession} for the draft once it has been prepared
+   */
+-  async sessionForClientId(headerMessageId: string) {
++  async sessionForClientId(headerMessageId: string, accountId?: string) {
+     if (!headerMessageId) {
+       throw new Error('DraftStore::sessionForClientId requires a headerMessageId');
+     }
+-    if (!this._draftSessions[headerMessageId]) {
+-      this._draftSessions[headerMessageId] = this._createSession(headerMessageId);
++    if (AppEnv.config.get('core.paperReed.enabled') && !accountId) {
++      const matches = await DatabaseStore.findAll<Message>(Message)
++        .where({ headerMessageId, draft: true }).limit(2);
++      if (matches.length > 1) throw new Error('ambiguous-draft-account');
++      accountId = matches[0]?.accountId;
+     }
+-    await this._draftSessions[headerMessageId].prepare();
+-    return this._draftSessions[headerMessageId];
++    const session = this.cachedDraftSession(headerMessageId, accountId) ||
++      this._createSession(headerMessageId, undefined, accountId);
++    try {
++      await session.prepare();
++      if (!session.draft()) this._doneWithSession(session);
++      return session;
++    } catch (error) {
++      this._doneWithSession(session);
++      throw error;
++    }
++  }
++
++  cachedDraftSession(headerMessageId: string, accountId?: string) {
++    const session = this._draftSessions[this.draftKey(headerMessageId, accountId)];
++    return session?._destroyed ? undefined : session;
++  }
++
++  private draftKey(headerMessageId: string, accountId?: string) {
++    return accountId && AppEnv.config.get('core.paperReed.enabled')
++      ? JSON.stringify([headerMessageId, accountId]) : headerMessageId;
++  }
++
++  beginDraftAccountMove(draft: Message, accountId: string): DraftAccountMove {
++    const move = {
++      requestId: randomUUID(), headerMessageId: draft.headerMessageId,
++      previousAccountId: draft.accountId, previousMessageId: draft.id, accountId,
++    };
++    // Reserve an open composer before the new account's persisted draft is visible.
++    ipcRenderer.sendSync('composer-draft-account-moving', move);
++    return move;
++  }
++
++  cancelDraftAccountMove(move: DraftAccountMove) {
++    ipcRenderer.send('composer-draft-account-move-cancelled', move);
++  }
++
++  _didChangeDraftAccount(session: DraftEditingSession, move: DraftAccountMove) {
++    if (!AppEnv.config.get('core.paperReed.enabled')) return;
++    const draft = session.draft();
++    const oldKey = this.draftKey(draft.headerMessageId, move.previousAccountId);
++    const newKey = this.draftKey(draft.headerMessageId, draft.accountId);
++    if (this._draftSessions[oldKey] === session) {
++      delete this._draftSessions[oldKey];
++      this._draftSessions[newKey] = session;
++    }
++    if (this._draftsSending[oldKey]) {
++      delete this._draftsSending[oldKey];
++      this._draftsSending[newKey] = true;
++    }
++    const change: DraftAccountChange = { ...move, messageId: draft.id };
++    ipcRenderer.sendSync('composer-draft-account-moved', change);
++    Actions.draftAccountChanged(change);
++  }
++
++  _onDraftAccountChanged = (change: DraftAccountChange) => {
++    if (!AppEnv.config.get('core.paperReed.enabled')) return;
++    const source = this.cachedDraftSession(change.headerMessageId, change.previousAccountId);
++    if (source?.draft()?.id !== change.previousMessageId) return;
++    if (this.hasUnsavedDraftWork(change.headerMessageId, change.previousAccountId)) {
++      source.markAccountMoved();
++    } else {
++      this._doneWithSession(source);
++    }
++  };
++
++  hasUnsavedDraftWork(headerMessageId: string, accountId: string) {
++    const session = this.cachedDraftSession(headerMessageId, accountId);
++    return !!session && (session.changes.isDirty() || AttachmentStore.isSelectingDraftAttachments(session)) ||
++      AttachmentStore.hasPendingDraftAttachments(headerMessageId, accountId);
+   }
+ 
+   // Public: Look up the sending state of the given draft headerMessageId.
+   // In popout windows the existance of the window is the sending state.
+-  isSendingDraft(headerMessageId: string) {
+-    return this._draftsSending[headerMessageId] || false;
++  isSendingDraft(headerMessageId: string, accountId?: string) {
++    return this._draftsSending[this.draftKey(headerMessageId, accountId)] || false;
+   }
+ 
+   _doneWithSession(session: DraftEditingSession) {
+     session.teardown();
+-    delete this._draftSessions[session.headerMessageId];
++    const key = Object.keys(this._draftSessions).find(key => this._draftSessions[key] === session);
++    if (key) delete this._draftSessions[key];
+   }
+ 
+   _cleanupAllSessions() {
+@@ -125,7 +199,7 @@ class DraftStore extends MailspringStore {
+ 
+   async _saveSessionBeforeClose(session: DraftEditingSession) {
+     try {
+-      await AttachmentStore.waitForDraftAttachments(session.headerMessageId);
++      await AttachmentStore.waitForDraftAttachments(session.headerMessageId, session.accountId);
+       await session.changes.commit();
+       if (session.changes.isDirty()) throw new Error(localized('You made more edits while saving. This window will stay open.'));
+       return JSON.stringify(session.draft().toJSON());
+@@ -156,7 +230,8 @@ class DraftStore extends MailspringStore {
+   }
+ 
+   _onBeforeUnload = (readyToUnload: () => void) => {
+-    if (this._closeSaveInProgress) return false;
++    if (this._closeSaveInProgress ||
++        Object.values(this._draftSessions).some(session => AttachmentStore.isSelectingDraftAttachments(session))) return false;
+     const saves = new Map<DraftEditingSession, Promise<string | false>>();
+ 
+     // Normally we'd just append all promises, even the ones already
+@@ -172,16 +247,15 @@ class DraftStore extends MailspringStore {
+       // Only delete pristine drafts if we're in popout composers. From the
+       // main window we can't know if the draft session may also be open in
+       // a popout and have content there.
+-      if (AttachmentStore.hasPendingDraftAttachments(session.headerMessageId)) {
++      if (AttachmentStore.hasPendingDraftAttachments(session.headerMessageId, session.accountId)) {
+         saves.set(session, this._saveSessionBeforeClose(session));
+       } else if (draft.pristine && !AppEnv.isMainWindow()) {
+-        Actions.queueTask(
+-          new DestroyDraftTask({
+-            messageIds: [draft.id],
+-            accountId: draft.accountId,
+-          })
+-        );
+-        if (!AppEnv.config.get('core.paperReed.enabled')) AttachmentStore.deleteFilesOwnedByDraft(draft.files);
++        if (AppEnv.config.get('core.paperReed.enabled') && !process.env.PLAYWRIGHT) {
++          Actions.queueTask(this._destroyRevisionTask(draft));
++        } else {
++          Actions.queueTask(new DestroyDraftTask({ messageIds: [draft.id], accountId: draft.accountId }));
++          if (!AppEnv.config.get('core.paperReed.enabled')) AttachmentStore.deleteFilesOwnedByDraft(draft.files);
++        }
+       } else if (session.changes.isDirty()) {
+         saves.set(session, this._saveSessionBeforeClose(session));
+       }
+@@ -196,7 +270,7 @@ class DraftStore extends MailspringStore {
+           if (saved.some((value) => !value)) return;
+           const snapshots = new Map([...saves.keys()].map((session, i) => [session, saved[i]]));
+           const edited = Object.values(this._draftSessions).some((session) =>
+-            AttachmentStore.hasPendingDraftAttachments(session.headerMessageId) ||
++            AttachmentStore.hasPendingDraftAttachments(session.headerMessageId, session.accountId) ||
+             (snapshots.has(session)
+               ? JSON.stringify(session.draft().toJSON()) !== snapshots.get(session)
+               : session.changes.isDirty())
+@@ -235,10 +309,11 @@ class DraftStore extends MailspringStore {
+     // if the user has canceled an undo send, ensure we no longer show "sending..."
+     // this is a fake status!
+     for (const draft of drafts) {
+-      if (this._draftsSending[draft.headerMessageId]) {
++      const key = this.draftKey(draft.headerMessageId, draft.accountId);
++      if (this._draftsSending[key]) {
+         const m = draft.metadataForPluginId('send-later') as any;
+         if (m && m.isUndoSend && !m.expiration) {
+-          delete this._draftsSending[draft.headerMessageId];
++          delete this._draftsSending[key];
+         }
+       }
+     }
+@@ -260,7 +335,7 @@ class DraftStore extends MailspringStore {
+     draft.pristine = false;
+ 
+     await saveDraft(draft, desktopAccess);
+-    Actions.sendDraft(draft.headerMessageId);
++    Actions.sendDraft(draft.headerMessageId, { accountId: draft.accountId });
+   };
+ 
+   _onComposeReply = async ({
+@@ -314,7 +389,7 @@ class DraftStore extends MailspringStore {
+       },
+       to
+     );
+-    Actions.sendDraft(headerMessageId);
++    Actions.sendDraft(headerMessageId, { accountId: draft.accountId });
+   };
+ 
+   _composeForward = async (
+@@ -397,7 +472,7 @@ class DraftStore extends MailspringStore {
+ 
+     session.acceptSaveReceipt(await saveDraft(draft, desktopAccess));
+     if (popout) {
+-      this._onPopoutDraft(draft.headerMessageId);
++      this._onPopoutDraft(draft.headerMessageId, { accountId: draft.accountId });
+     }
+ 
+     // In Playwright E2E tests, mailsync is not running so the draft is never
+@@ -419,12 +494,15 @@ class DraftStore extends MailspringStore {
+       );
+     }
+ 
+-    return { headerMessageId: draft.headerMessageId, draft };
++    return { headerMessageId: draft.headerMessageId, draft: session.draft() };
+   }
+ 
+-  _createSession(headerMessageId: string, draft?: Message) {
+-    this._draftSessions[headerMessageId] = new DraftEditingSession(headerMessageId, draft);
+-    return this._draftSessions[headerMessageId];
++  _createSession(headerMessageId: string, draft?: Message, accountId = draft?.accountId) {
++    const scoped = AppEnv.config.get('core.paperReed.enabled') && accountId;
++    const key = this.draftKey(headerMessageId, accountId);
++    const session = new DraftEditingSession(headerMessageId, draft, scoped || undefined);
++    this._draftSessions[key] = session;
++    return session;
+   }
+ 
+   _onPopoutNewDraftToRecipient = async (contact: Contact) => {
+@@ -438,15 +516,19 @@ class DraftStore extends MailspringStore {
+     await this._onPopoutDraft(headerMessageId, { newDraft: true });
+   };
+ 
+-  _onPopoutDraft = async (headerMessageId: string, options: { newDraft?: boolean } = {}) => {
++  _onPopoutDraft = async (headerMessageId: string, options: { newDraft?: boolean; accountId?: string } = {}) => {
+     if (headerMessageId == null) {
+       throw new Error('DraftStore::onPopoutDraftId - You must provide a headerMessageId');
+     }
+ 
+-    const session = await this.sessionForClientId(headerMessageId);
+-    if (!session.draft()) return;
++    const session = await this.sessionForClientId(headerMessageId, options.accountId).catch(error => {
++      AppEnv.showErrorDialog(error.message);
++      return null;
++    });
++    if (!session?.draft()) return;
+ 
+     await session.changes.commit();
++    const { accountId } = session.draft();
+     const draftJSON = session.draft().toJSON();
+ 
+     // Since we pass a windowKey, if the popout composer draft already
+@@ -455,8 +537,8 @@ class DraftStore extends MailspringStore {
+     AppEnv.newWindow({
+       hidden: true, // We manually show in ComposerWithWindowProps::onDraftReady
+       windowType: 'composer',
+-      windowKey: `composer-${headerMessageId}`,
+-      windowProps: Object.assign(options, { headerMessageId, draftJSON }),
++      windowKey: draftWindowKey(headerMessageId, AppEnv.config.get('core.paperReed.enabled') ? accountId : undefined),
++      windowProps: { ...options, headerMessageId, accountId, draftJSON },
+       title: options.newDraft ? localized('New Message') : localized('Message'),
+     });
+   };
+@@ -488,21 +570,62 @@ class DraftStore extends MailspringStore {
+       Actions.addAttachment({
+         filePath: path,
+         headerMessageId: headerMessageId,
++        accountId: draft.accountId,
+         onCreated: callback,
+       });
+     });
+   };
+ 
+-  _onDestroyDraft = ({
+-    accountId,
+-    headerMessageId,
+-    id,
+-  }: {
+-    accountId: string;
+-    headerMessageId: string;
+-    id?: string;
+-  }) => {
+-    const session = this._draftSessions[headerMessageId];
++  private _destroyRevisionTask(draft: Message) {
++    const { accountId, headerMessageId, id, version } = draft;
++    const task = new DestroyDraftRevisionTask({ accountId, messageIds: [id] });
++    task.expectedDraft = { aid: accountId, hMsgId: headerMessageId, id, v: version };
++    return task;
++  }
++
++  private _destroyingDrafts = new Set<string>();
++
++  private async _destroyReviewedDraft(draft: Message, session?: DraftEditingSession) {
++    const { accountId, headerMessageId } = draft;
++    const key = this.draftKey(headerMessageId, accountId);
++    if (this._destroyingDrafts.has(key)) return;
++    if (session && (AttachmentStore.isSelectingDraftAttachments(session) ||
++        AttachmentStore.hasPendingDraftAttachments(headerMessageId, accountId))) {
++      await AppEnv.showErrorDialog('请先完成附件选择和导入，再删除草稿。');
++      return;
++    }
++
++    this._destroyingDrafts.add(key);
++    session?.changes.clearDelayedCommit();
++    try {
++      const task = this._destroyRevisionTask(draft);
++      Actions.queueTask(task);
++      const result = await TaskQueue.waitForPerformLocal(task);
++      if ((result.error as any)?.key === 'draft-conflict') {
++        if (session && !session._destroyed) {
++          session.changes.saveError = new Error('draft-conflict');
++          session.changes.emit('state');
++        }
++        await AppEnv.showErrorDialog('草稿已有更新。最新草稿和这里的编辑均已保留。');
++        return;
++      }
++      if (result.error || result.destroyedDraftRevision !== task.expectedDraft.v) {
++        await AppEnv.showErrorDialog('草稿未删除。请检查同步引擎后重试。');
++        return;
++      }
++      if (session && !session._destroyed) this._doneWithSession(session);
++      if (AppEnv.isComposerWindow()) AppEnv.close();
++    } finally {
++      this._destroyingDrafts.delete(key);
++    }
++  }
++
++  _onDestroyDraft = (draft: Message) => {
++    const { accountId, headerMessageId, id } = draft;
++    const session = this.cachedDraftSession(headerMessageId, accountId);
++    if (id && AppEnv.config.get('core.paperReed.enabled') && !process.env.PLAYWRIGHT) {
++      return this._destroyReviewedDraft(draft, session);
++    }
+ 
+     // Immediately reset any pending changes so no saves occur
+     if (session) {
+@@ -511,10 +634,12 @@ class DraftStore extends MailspringStore {
+ 
+     // Stop any pending tasks related to the draft
+     TaskQueue.queue().forEach((task) => {
+-      if (task instanceof SyncbackDraftTask && task.headerMessageId === headerMessageId) {
++      if (task instanceof SyncbackDraftTask && task.headerMessageId === headerMessageId &&
++          task.draft?.accountId === accountId) {
+         Actions.cancelTask(task);
+       }
+-      if (task instanceof SendDraftTask && task.headerMessageId === headerMessageId) {
++      if (task instanceof SendDraftTask && task.headerMessageId === headerMessageId &&
++          task.draft?.accountId === accountId) {
+         Actions.cancelTask(task);
+       }
+     });
+@@ -550,12 +675,13 @@ class DraftStore extends MailspringStore {
+ 
+   _onSendDraft = async (
+     headerMessageId: string,
+-    options: { delay?: number; actionKey?: string } = {}
++    options: { delay?: number; actionKey?: string; accountId?: string } = {}
+   ) => {
+     const { delay = AppEnv.config.get('core.sending.undoSend'), actionKey = DefaultSendActionKey } =
+       options;
+ 
+-    this._draftsSending[headerMessageId] = true;
++    let key = this.draftKey(headerMessageId, options.accountId);
++    this._draftsSending[key] = true;
+ 
+     const sendAction = SendActionsStore.sendActionForKey(actionKey);
+     if (!sendAction) {
+@@ -571,13 +697,21 @@ class DraftStore extends MailspringStore {
+     // get the draft session, apply any last-minute edits and get the final draft.
+     // We need to call `changes.commit` here to ensure the body of the draft is
+     // completely saved and the user won't see old content briefly.
+-    const session = await this.sessionForClientId(headerMessageId);
++    let session: DraftEditingSession;
++    try {
++      session = await this.sessionForClientId(headerMessageId, options.accountId);
++    } catch (error) {
++      this._draftsSending[key] = false;
++      this.trigger({ headerMessageId });
++      AppEnv.showErrorDialog(error.message);
++      return;
++    }
+ 
+     // Collect diagnostic context as we proceed so we can attach it to any error
+     // report if the draft is not found at the end. This helps us understand which
+     // code path was taken without adding overhead to the happy path.
+     const diagnostics: Record<string, unknown> = {
+-      sessionExisted: !!this._draftSessions[headerMessageId],
++      sessionExisted: this.cachedDraftSession(headerMessageId, session.accountId) === session,
+       draftIdBeforeEnsure: session.draft()?.id,
+       draftAccountIdBeforeEnsure: session.draft()?.accountId,
+     };
+@@ -585,12 +719,12 @@ class DraftStore extends MailspringStore {
+     // move the draft to another account if necessary to match the from: field
+     const accountIdBeforeEnsure = session.draft()?.accountId;
+     try {
+-      await AttachmentStore.waitForDraftAttachments(headerMessageId);
++      await AttachmentStore.waitForDraftAttachments(headerMessageId, session.accountId);
+       await session.ensureCorrectAccount();
+     } catch (err) {
+       // Clear the sending flag, or the composer treats the draft as mid-send and
+       // ignores every later click of Send.
+-      this._draftsSending[headerMessageId] = false;
++      this._draftsSending[key] = false;
+       this.trigger({ headerMessageId });
+       if (!session.draft()) {
+         return this._onUnexpectedNotFoundDuringSend(headerMessageId, {
+@@ -611,9 +745,15 @@ class DraftStore extends MailspringStore {
+     diagnostics.draftIdAfterEnsure = session.draft()?.id;
+     diagnostics.draftAccountIdAfterEnsure = session.draft()?.accountId;
+ 
++    const currentKey = this.draftKey(headerMessageId, session.accountId);
++    if (key !== currentKey) {
++      delete this._draftsSending[key];
++      key = currentKey;
++      this._draftsSending[key] = true;
++    }
+     let draft: Message = session.draft();
+     if (!draft) {
+-      this._draftsSending[headerMessageId] = false;
++      this._draftsSending[key] = false;
+       this.trigger({ headerMessageId });
+       return this._onUnexpectedNotFoundDuringSend(headerMessageId, {
+         ...diagnostics,
+@@ -640,12 +780,12 @@ class DraftStore extends MailspringStore {
+     diagnostics.dirtyFieldsBeforeCommit = session.changes.dirtyFields();
+     diagnostics.commitPromiseInFlight = !!(session.changes as any)._commitPromise;
+     try {
+-      await AttachmentStore.waitForDraftAttachments(session.headerMessageId);
++      await AttachmentStore.waitForDraftAttachments(session.headerMessageId, session.accountId);
+       await session.changes.commit();
+-      if (session.changes.isDirty() || AttachmentStore.hasPendingDraftAttachments(headerMessageId))
++      if (session.changes.isDirty() || AttachmentStore.hasPendingDraftAttachments(headerMessageId, session.accountId))
+         throw new Error(localized('You made more edits while saving. Review them before sending.'));
+     } catch (error) {
+-      this._draftsSending[headerMessageId] = false;
++      this._draftsSending[key] = false;
+       this.trigger({ headerMessageId });
+       AppEnv.showErrorDialog(error.message);
+       return;
+@@ -659,7 +799,7 @@ class DraftStore extends MailspringStore {
+       Message.attributes.body
+     );
+     if (!draft) {
+-      this._draftsSending[headerMessageId] = false;
++      this._draftsSending[key] = false;
+       this.trigger({ headerMessageId });
+       return this._onUnexpectedNotFoundDuringSend(headerMessageId, {
+         ...diagnostics,
+@@ -668,7 +808,7 @@ class DraftStore extends MailspringStore {
+     }
+ 
+     if (draft.version !== reviewed.version) {
+-      this._draftsSending[headerMessageId] = false;
++      this._draftsSending[key] = false;
+       this.trigger({ headerMessageId });
+       AppEnv.showErrorDialog(localized('The draft changed before sending. Reload the latest draft and review it.'));
+       return;
+@@ -720,13 +860,13 @@ class DraftStore extends MailspringStore {
+     AppEnv.reportError(err, { headerMessageId, ...diagnostics });
+   };
+ 
+-  _onSendDraftSuccess = ({ headerMessageId }) => {
+-    delete this._draftsSending[headerMessageId];
++  _onSendDraftSuccess = ({ headerMessageId, accountId }) => {
++    delete this._draftsSending[this.draftKey(headerMessageId, accountId)];
+     this.trigger({ headerMessageId });
+   };
+ 
+-  _onSendDraftFailed = ({ headerMessageId, threadId, errorMessage, errorDetail }) => {
+-    this._draftsSending[headerMessageId] = false;
++  _onSendDraftFailed = ({ headerMessageId, accountId, threadId, errorMessage, errorDetail }) => {
++    this._draftsSending[this.draftKey(headerMessageId, accountId)] = false;
+     this.trigger({ headerMessageId });
+ 
+     if (AppEnv.isMainWindow()) {
+@@ -741,7 +881,7 @@ class DraftStore extends MailspringStore {
+         if (threadId && focusedThread && focusedThread.id === threadId) {
+           AppEnv.showErrorDialog(errorMessage, { detail: errorDetail });
+         } else {
+-          Actions.composePopoutDraft(headerMessageId, { errorMessage, errorDetail });
++          Actions.composePopoutDraft(headerMessageId, { accountId, errorMessage, errorDetail });
+         }
+       }, 300);
+     }
+diff --git a/app/src/flux/stores/send-actions-store.ts b/app/src/flux/stores/send-actions-store.ts
+index 728b4d886c6fcfb2622f55197a04502f8c6aae49..eb0deceb20c3aa2d1a0647097323ac62f4aa4ecd 100644
+--- a/app/src/flux/stores/send-actions-store.ts
++++ b/app/src/flux/stores/send-actions-store.ts
+@@ -26,7 +26,7 @@ const DefaultSendAction: ISendAction = {
+       return await submitSend({ accountId: draft.accountId, draftId: draft.headerMessageId },
+         draft.version, randomUUID(), desktopAccess);
+     } catch (error) {
+-      Actions.draftDeliveryFailed({ headerMessageId: draft.headerMessageId, threadId: draft.threadId,
++      Actions.draftDeliveryFailed({ headerMessageId: draft.headerMessageId, accountId: draft.accountId, threadId: draft.threadId,
+         errorMessage: error.message, errorDetail: 'The send request was not confirmed. Check the operation before retrying.' });
+     }
+   },
+diff --git a/app/src/flux/tasks/destroy-draft-task.ts b/app/src/flux/tasks/destroy-draft-task.ts
+index ec57e15aeb8018f5e24113bcedc908fa043d011d..84070cde9a6d749e337111de99164b20d13b89de 100644
+--- a/app/src/flux/tasks/destroy-draft-task.ts
++++ b/app/src/flux/tasks/destroy-draft-task.ts
+@@ -22,3 +22,14 @@ export class DestroyDraftTask extends Task {
+     return localized('Deleting draft');
+   }
+ }
++
++export class DestroyDraftRevisionTask extends DestroyDraftTask {
++  static attributes = {
++    ...DestroyDraftTask.attributes,
++    expectedDraft: Attributes.Obj({ modelKey: 'expectedDraft' }),
++    destroyedDraftRevision: Attributes.Number({ modelKey: 'destroyedDraftRevision' }),
++  };
++
++  expectedDraft: { aid: string; hMsgId: string; id: string; v: number };
++  destroyedDraftRevision: number;
++}
+diff --git a/app/src/flux/tasks/move-draft-task.ts b/app/src/flux/tasks/move-draft-task.ts
+new file mode 100644
+index 0000000000000000000000000000000000000000..1498d4eb229b0372b315dd953dc8e64afefdde49
+--- /dev/null
++++ b/app/src/flux/tasks/move-draft-task.ts
+@@ -0,0 +1,11 @@
++import * as Attributes from '../attributes';
++import { SyncbackDraftTask } from './syncback-draft-task';
++
++export class MoveDraftTask extends SyncbackDraftTask {
++  static attributes = {
++    ...SyncbackDraftTask.attributes,
++    moveSource: Attributes.Obj({ modelKey: 'moveSource' }),
++  };
++
++  moveSource: { accountId: string; headerMessageId: string; messageId: string; revision: number };
++}
+diff --git a/app/src/flux/tasks/send-draft-task.ts b/app/src/flux/tasks/send-draft-task.ts
+index 0deeaf36b40accfcac338196600d8757cd510211..78676845d6cb26f2a3bc5e961065147ceafc6959 100644
+--- a/app/src/flux/tasks/send-draft-task.ts
++++ b/app/src/flux/tasks/send-draft-task.ts
+@@ -215,6 +215,7 @@ export class SendDraftTask extends Task {
+ 
+     Actions.draftDeliveryFailed({
+       threadId: this.draft.threadId,
++      accountId: this.draft.accountId,
+       headerMessageId: this.draft.headerMessageId,
+       errorMessage,
+       errorDetail,
+diff --git a/app/src/global/mailspring-exports.js b/app/src/global/mailspring-exports.js
+index 987838a44407c486ed0255caf73cda760790cd24..0d1e8c7cc97bc1a5b1a8cf82b29b2932f1d9fee3 100644
+--- a/app/src/global/mailspring-exports.js
++++ b/app/src/global/mailspring-exports.js
+@@ -101,11 +101,13 @@ lazyLoadAndRegisterTask(`EventRSVPTask`, 'event-rsvp-task');
+ lazyLoadAndRegisterTask(`SendDraftTask`, 'send-draft-task');
+ lazyLoadAndRegisterTask(`ChangeMailTask`, 'change-mail-task');
+ lazyLoadAndRegisterTask(`DestroyDraftTask`, 'destroy-draft-task');
++lazyLoadAndRegisterTask(`DestroyDraftRevisionTask`, 'destroy-draft-task');
+ lazyLoadAndRegisterTask(`ChangeLabelsTask`, 'change-labels-task');
+ lazyLoadAndRegisterTask(`ChangeFolderTask`, 'change-folder-task');
+ lazyLoadAndRegisterTask(`ChangeUnreadTask`, 'change-unread-task');
+ lazyLoadAndRegisterTask(`DestroyModelTask`, 'destroy-model-task');
+ lazyLoadAndRegisterTask(`SyncbackDraftTask`, 'syncback-draft-task');
++lazyLoadAndRegisterTask(`MoveDraftTask`, 'move-draft-task');
+ lazyLoadAndRegisterTask(`ChangeStarredTask`, 'change-starred-task');
+ lazyLoadAndRegisterTask(`SyncbackEventTask`, 'syncback-event-task');
+ lazyLoadAndRegisterTask(`DestroyEventTask`, 'destroy-event-task');
+diff --git a/app/src/services/mail-core/index.ts b/app/src/services/mail-core/index.ts
+index f23ad077bd4ba741ace07b027253aea1ba95613f..25297f3ffd87289efe4aefe5fc47fae952efedd6 100644
+--- a/app/src/services/mail-core/index.ts
++++ b/app/src/services/mail-core/index.ts
+@@ -4,6 +4,7 @@ import TaskQueue from '../../flux/stores/task-queue';
+ import { AccountStore } from '../../flux/stores/account-store';
+ import { Message } from '../../flux/models/message';
+ import { SyncbackDraftTask } from '../../flux/tasks/syncback-draft-task';
++import { MoveDraftTask } from '../../flux/tasks/move-draft-task';
+ import { SendDraftTask } from '../../flux/tasks/send-draft-task';
+ import * as Actions from '../../flux/actions';
+ import { Contact } from '../../flux/models/contact';
+@@ -57,17 +58,33 @@ export async function saveDraft(draft: Message, access: Access, recoverySource?:
+   }
+   const task = new SyncbackDraftTask({ draft, recoverySource });
+   access.check(draft.accountId, 'draft');
++  return waitForDraftSave(task);
++}
++
++export async function moveDraftToAccount(source: Message, draft: Message): Promise<DraftSaveReceipt> {
++  desktopAccess.check(source.accountId, 'draft');
++  desktopAccess.check(draft.accountId, 'draft');
++  const task = new MoveDraftTask({ draft });
++  task.moveSource = {
++    accountId: source.accountId, headerMessageId: source.headerMessageId,
++    messageId: source.id, revision: source.version,
++  };
++  return waitForDraftSave(task);
++}
++
++async function waitForDraftSave(task: SyncbackDraftTask): Promise<DraftSaveReceipt> {
+   Actions.queueTask(task);
+   const saved = await TaskQueue.waitForPerformLocal(task);
+   if (saved.error) throw new Error((saved.error as any).key || 'draft-save-failed');
+   saved.assertSaved();
+   if (!saved.savedDraftId || !Number.isSafeInteger(saved.savedDraftRevision) || saved.savedDraftRevision < 1)
+-    throw new Error('draft-save-receipt-missing');
++    throw new Error(task instanceof MoveDraftTask ? 'draft-move-engine-update-required' : 'draft-save-receipt-missing');
+   return { savedDraftId: saved.savedDraftId, savedDraftRevision: saved.savedDraftRevision, accountId: saved.draft.accountId };
+ }
+ 
+ export type DraftRecoveryInfo = {
+-  accountId: string; copyDraftId: string; sourceDraftId: string; sourceRevision: number; createdAt: number; copyNumber: number;
++  accountId: string; copyDraftId: string; sourceAccountId: string; sourceDraftId: string;
++  sourceRevision: number; createdAt: number; copyNumber: number; copyLabel: string; sourceAvailable: 0 | 1;
+ };
+ 
+ // Local provenance is written by the engine, in the same transaction as the copy.
+@@ -75,13 +92,39 @@ export async function desktopDraftRecoveryInfo(drafts: Message[]): Promise<Draft
+   if (!drafts.length) return [];
+   const accounts = [...new Set(drafts.map(d => d.accountId))];
+   accounts.forEach(id => desktopAccess.check(id, 'read'));
+-  const schema = await DatabaseStore._query("SELECT name FROM sqlite_master WHERE type = 'table' AND name = 'PaperReedDraftRecovery'");
+-  if (!schema.length) return [];
+-  const rows = await DatabaseStore._query(`SELECT r.* FROM PaperReedDraftRecovery r
++  const columns = await DatabaseStore._query("SELECT name FROM pragma_table_info('PaperReedDraftRecovery')");
++  if (!columns.length) return [];
++  const sourceAccount = columns.some(column => column.name === 'sourceAccountId')
++    ? "COALESCE(NULLIF(r.sourceAccountId, ''), r.accountId)" : 'r.accountId';
++  const hasLineage = columns.some(column => column.name === 'sourceLineageId');
++  const sourceAvailable = hasLineage
++    ? `EXISTS (
++        SELECT 1 FROM Message origin
++        WHERE origin.accountId = ${sourceAccount} AND origin.headerMessageId = r.sourceDraftId AND origin.draft = 1
++          AND r.sourceLineageId = (
++            SELECT lineageId FROM PaperReedDraftLineage
++            WHERE accountId = origin.accountId AND headerMessageId = origin.headerMessageId AND firstRevision <= origin.version
++            ORDER BY firstRevision DESC LIMIT 1
++          )
++      )` : '1';
++  // Include retired copies in the order so deleting one does not rename the others.
++  const copyLabel = hasLineage
++    ? `CAST(r.copyNumber AS TEXT) || COALESCE((
++        SELECT '-' || SUM((peer.createdAt, peer.copyDraftId, peer.accountId) <= (r.createdAt, r.copyDraftId, r.accountId))
++        FROM PaperReedDraftRecovery peer
++        WHERE r.sourceLineageId != '' AND peer.sourceLineageId = r.sourceLineageId AND peer.copyNumber = r.copyNumber
++        HAVING COUNT(*) > 1
++      ), '')` : 'CAST(r.copyNumber AS TEXT)';
++  const placeholders = accounts.map(() => '?').join(',');
++  const rows = await DatabaseStore._query(`SELECT r.accountId, r.copyDraftId, r.sourceDraftId, r.sourceRevision, r.createdAt, r.copyNumber,
++           ${sourceAccount} AS sourceAccountId, ${sourceAvailable} AS sourceAvailable, ${copyLabel} AS copyLabel
++    FROM PaperReedDraftRecovery r
+     INNER JOIN Message m ON m.accountId = r.accountId AND m.headerMessageId = r.copyDraftId AND m.draft = 1
+-    WHERE r.accountId IN (${accounts.map(() => '?').join(',')})`, accounts);
+-  return rows.filter(r => drafts.some(d => d.accountId === r.accountId &&
+-    (d.headerMessageId === r.copyDraftId || d.headerMessageId === r.sourceDraftId))) as DraftRecoveryInfo[];
++    WHERE r.accountId IN (${placeholders}) OR ${sourceAccount} IN (${placeholders})
++  `, [...accounts, ...accounts]) as DraftRecoveryInfo[];
++  return rows.filter(r => drafts.some(d =>
++    (d.accountId === r.accountId && d.headerMessageId === r.copyDraftId) ||
++    (r.sourceAvailable && d.accountId === r.sourceAccountId && d.headerMessageId === r.sourceDraftId)));
+ }
+ 
+ // Recovery copies get a new identity; they never overwrite or send the source draft.

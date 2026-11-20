@@ -47,6 +47,7 @@ try:
     if a.workspace and any(os.environ.get(name) for name in (
         'PAPER_REED_COMPOSE_PAGE_CHECK', 'PAPER_REED_SEARCH_PAGE_CHECK', 'PAPER_REED_SNOOZE_PAGE_CHECK',
         'PAPER_REED_PINNED_PAGE_CHECK',
+        'PAPER_REED_DRAFT_LIST_CHECK',
     )):
         assert not sent, len(sent)
         result_path=Path(os.environ['PAPER_REED_UI_OUTPUT'])/'result.json'
