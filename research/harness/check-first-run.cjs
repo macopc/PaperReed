@@ -15,12 +15,81 @@ async function start(){
  const env={...process.env,PAPER_REED_CLI_BIN_DIR:path.join(work,'bin'),PAPER_REED_GOOGLE_CLIENT_FILE:path.join(work,'missing-google-client.json')};delete env.PLAYWRIGHT;delete env.ELECTRON_RUN_AS_NODE;delete env.PAPER_REED_MICROSOFT_CLIENT_ID;
  app=await _electron.launch({executablePath:packaged||r('electron'),args:[...(packaged?[]:[path.join(upstream,'app'),'--dev']),'--no-sandbox','--config-dir-path',config],env,timeout:45000});
  app.process().stderr.on('data',b=>fs.appendFileSync(path.join(work,'electron.log'),b));
- app.on('window',p=>{p.on('dialog',()=>{});p.on('console',msg=>fs.appendFileSync(path.join(work,'renderer.log'),msg.type()+': '+msg.text()+'\n'));});
+ // Electron handles beforeunload, including in startup windows created before launch resolves.
+ app.context().on('dialog',()=>{});
+ app.on('window',p=>p.on('console',msg=>fs.appendFileSync(path.join(work,'renderer.log'),msg.type()+': '+msg.text()+'\n')));
 }
 async function selectWindow(kind){main=await until(async()=>app.windows().find(w=>type(w)===kind),kind+' window');cdp=await app.context().newCDPSession(main);}
 async function shot(name){const image=await cdp.send('Page.captureScreenshot',{format:'png',fromSurface:true});fs.writeFileSync(path.join(out,name+'.png'),Buffer.from(image.data,'base64'));}
 async function click(selector){await main.locator(selector).first().click();}
 async function stop(){const process=app.process();await app.evaluate(({app})=>app.quit());await until(async()=>process.exitCode!==null,'normal quit');app=null;}
+async function checkDeletedGoogleReconnect() {
+ const mailbox=main,mailboxSession=cdp;
+ await run(`(async()=>{
+  const {AccountStore,KeyManager}=require('mailspring-exports');
+  const alias=AccountStore.accountForId('fixture-google-alias');
+  await KeyManager.replacePassword(alias.emailAddress+'-imap','old-alias-password');
+  require('electron').ipcRenderer.send('command','application:add-account',{
+   existingAccountJSON:alias.toJSON(),
+  });
+  return true;
+ })()`);
+ await selectWindow('onboarding');
+ const onboarding=main;
+ await main.locator('[data-google-connect]').waitFor();
+ await run(`(()=>{
+  const auth=require(${onboardingLib}+'paper-reed-google-auth');
+  const {MailsyncProcess}=require('mailspring-exports');
+  auth.authorizeGoogle=async()=>({emailAddress:'te.st@gmail.com',settings:{refresh_token:'fixture-google-race-grant'}});
+  MailsyncProcess.prototype.test=async()=>{};
+  window.reconnectErrors=[];
+  AppEnv.showErrorDialog=options=>window.reconnectErrors.push(options.message);
+  return true;
+ })()`);
+ await app.evaluate(({app})=>{
+  const {secureStorage}=process.mainModule.require(app.getAppPath()+'/src/browser/credential-store');
+  const encrypt=secureStorage.encrypt;
+  global.reconnectRace={restore:()=>{secureStorage.encrypt=encrypt;}};
+  secureStorage.encrypt=async text=>{
+   if(text.includes('fixture-google-race-grant')){
+    await new Promise(resolve=>{global.reconnectRace.release=resolve;});
+   }
+   return encrypt(text);
+  };
+ });
+ try{
+  await main.locator('[data-google-connect]').click();
+  await until(()=>app.evaluate(()=>!!global.reconnectRace.release),'Google account save reached encryption');
+  await checkAccountSaveLocked();
+  await evaluate(mailboxSession,`(()=>{
+   const {Actions}=require('mailspring-exports');
+   const reset=AppEnv.mailsyncBridge.resetCacheForAccount.bind(AppEnv.mailsyncBridge);
+   AppEnv.mailsyncBridge.resetCacheForAccount=(account,options)=>{
+    if(account.id!=='fixture-google-alias')return reset(account,options);
+    return new Promise(resolve=>{window.finishAliasCacheCleanup=resolve;});
+   };
+   Actions.removeAccount('fixture-google-alias');
+   return true;
+  })()`);
+  const aliasExists=()=>app.evaluate(()=>global.application.config.get('accounts').some(a=>a.id==='fixture-google-alias'));
+  await until(async()=>!await aliasExists(),'other window removed Gmail alias');
+  await app.evaluate(()=>global.reconnectRace.release());
+  await until(async()=>onboarding.isClosed()||await run(`${onboardingStore}.accountSaveState()!=='saving'`),'reconnect save settled');
+  const keys=await evaluate(mailboxSession,`require('mailspring-exports').KeyManager._getKeyHash()`);
+  assert.equal(await aliasExists(),false,'a stale Google reconnect must never recreate a deleted account');
+  assert(!onboarding.isClosed(),'a rejected save must leave onboarding open');
+  assert.equal(keys['test@googlemail.com-refresh-token'],undefined,'the rejected grant must never reach the credential store');
+  assert.deepEqual(await run('window.reconnectErrors'),['此邮箱账号已变更。请关闭此窗口后重新连接。']);
+  await evaluate(mailboxSession,'window.finishAliasCacheCleanup();true');
+  await until(async()=>!(await evaluate(mailboxSession,`require('mailspring-exports').KeyManager.getPassword('test@googlemail.com-imap')`)),'removed account credentials cleared');
+  assert.equal(await evaluate(mailboxSession,`require('mailspring-exports').KeyManager.getPassword('te.st@gmail.com-imap')`),'other-account-password');
+  console.log('PASS account deletion from another window wins during real credential encryption without persisting the new grant');
+ }finally{
+  await app.evaluate(()=>{global.reconnectRace.release?.();global.reconnectRace.restore();delete global.reconnectRace;});
+  await evaluate(mailboxSession,'window.finishAliasCacheCleanup?.();true');
+  main=mailbox;cdp=mailboxSession;
+ }
+}
 async function checkAbandonedSetup(store) {
  const active=main.locator('.page-container:not([inert])');
  const back=main.getByRole('button',{name:'返回上一步',exact:true});
@@ -90,7 +159,7 @@ async function checkAbandonedSetup(store) {
 }
 async function checkAccountSaveLocked() {
  const active=main.locator('.page-container:not([inert])');
- const back=main.getByRole('button',{name:'返回上一步',exact:true});
+ const back=main.getByRole('button',{name:/^返回(上一步|邮箱选择)$/});
  await active.getByRole('status').getByText('正在保存邮箱账号…',{exact:true}).waitFor({timeout:2500});
  assert(await back.isDisabled(),'Back is disabled while the account is saved');
  const target=await back.boundingBox();
@@ -143,7 +212,7 @@ async function checkAccountSaveFailure() {
   await until(()=>run('window.prFailedSave.error?.title==="无法保存邮箱账号"'),'save failure reported');
   await google.waitFor();
   assert(await google.isEnabled(),'Google setup is usable again after a failed save');
-  const back=main.getByRole('button',{name:'返回上一步',exact:true});
+  const back=main.getByRole('button',{name:'返回邮箱选择',exact:true});
   assert(await back.isEnabled());
   await back.click();
   await active.locator('[data-provider=gmail]').waitFor();
@@ -258,8 +327,339 @@ async function checkProviderPicker(phase) {
  fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(result,null,2)+'\n');
  console.log('PASS provider picker',JSON.stringify(result));
 }
+async function checkGoogleNativeDiagnostics(startAttempt, alert) {
+ const requests=[];
+ let responseStatus=503;
+ const server=require('node:http').createServer((req,res)=>{
+  if(req.method!=='POST' || req.url!=='/token'){
+   res.writeHead(404).end();
+   return;
+  }
+  requests.push(responseStatus);
+  if(responseStatus===0){
+   req.socket.destroy();
+   return;
+  }
+  req.resume();
+  if(responseStatus==='partial-503'){
+   res.writeHead(503,{'Content-Type':'application/json','Content-Length':'64','Connection':'close'});
+   res.end('{"error":');
+   return;
+  }
+  res.writeHead(responseStatus,{'Content-Type':'application/json'});
+  res.end(JSON.stringify({error:'temporarily_unavailable'}));
+ });
+ server.listen(0,'127.0.0.1');
+ await require('node:events').once(server,'listening');
+ try{
+  const url=`http://127.0.0.1:${server.address().port}/token`;
+  await run(`(()=>{
+   const helpers=require(${onboardingLib}+'onboarding-helpers');
+   const {Account}=require('mailspring-exports');
+   const build=helpers.buildPaperReedGmailAccount;
+   const previous=process.env.GMAIL_OAUTH_TOKEN_URL;
+   process.env.GMAIL_OAUTH_TOKEN_URL=${JSON.stringify(url)};
+   helpers.buildPaperReedGmailAccount=()=>{
+    // Keep the mail servers on loopback while the actual engine refreshes the Gmail token.
+    const account=new Account({}).fromJSON(${JSON.stringify(fixture)});
+    account.provider='gmail';
+    Object.assign(account.settings,{gmail_api_send:true,gmail_client_id:'paper-reed-fixture',
+     gmail_client_secret:'fixture-secret',refresh_token:'fixture-refresh'});
+    return helpers.finalizeAndValidateAccount(account);
+   };
+   window.prRestoreNativeGoogle=()=>{
+    helpers.buildPaperReedGmailAccount=build;
+    if(previous===undefined)delete process.env.GMAIL_OAUTH_TOKEN_URL;
+    else process.env.GMAIL_OAUTH_TOKEN_URL=previous;
+   };
+   return true;
+  })()`);
+  for(const [status,message] of [
+   [503,'暂时无法连接 Gmail 服务器。请稍后重试。'],
+   [429,'暂时无法连接 Gmail 服务器。请稍后重试。'],
+   ['partial-503','暂时无法连接 Gmail 服务器。请稍后重试。'],
+   [0,'网络连接中断。请检查网络后重试。'],
+  ]){
+   responseStatus=status;
+   const attempt=await startAttempt();
+   await run(`window.prGoogleFixture.authorizations[${attempt}].pass();true`);
+   await alert.waitFor();
+   assert.equal(await alert.textContent(),message,`native Gmail validation diagnostic for HTTP status ${status || 'unavailable'}`);
+   if(status===503)await shot('after-google-service-error');
+  }
+  assert.deepEqual(requests,[503,429,'partial-503',0]);
+  console.log('PASS native Gmail token refresh distinguishes complete HTTP errors, truncated 503, and no response');
+ }finally{
+  try{await run('window.prRestoreNativeGoogle?.();delete window.prRestoreNativeGoogle;true');}
+  finally{
+   server.closeAllConnections();
+   await new Promise(resolve=>server.close(resolve));
+  }
+ }
+}
+async function checkGoogleSavedSender(active) {
+ const back=main.getByRole('button',{name:'返回上一步',exact:true});
+ await back.click();
+ await back.click();
+ await active.locator('[data-provider=imap]').click();
+ const name='Gmail fixture',emailAddress='intended@googlemail.com',verifiedEmail='in.tended@gmail.com';
+ await active.locator('#name').fill(name);
+ await active.locator('#emailAddress').fill(emailAddress);
+ await active.locator('[data-use-google]').click();
+ await run(`(()=>{
+  const auth=require(${onboardingLib}+'paper-reed-google-auth');
+  const {AccountStore,MailsyncProcess}=require('mailspring-exports');
+  const store=${onboardingStore};
+  const original={authorize:auth.authorizeGoogle,test:MailsyncProcess.prototype.test,
+   save:AccountStore.addAccount,complete:store._onOnboardingComplete};
+  const probe=window.prGoogleSave={accounts:[],completed:0};
+  auth.authorizeGoogle=async emailAddress=>{
+   probe.requestedEmail=emailAddress;
+   return {emailAddress:${JSON.stringify(verifiedEmail)},settings:{}};
+  };
+  MailsyncProcess.prototype.test=async()=>{};
+  AccountStore.addAccount=async account=>{
+   probe.accounts.push({name:account.name,emailAddress:account.emailAddress,provider:account.provider});
+   return account;
+  };
+  store._onOnboardingComplete=()=>{probe.completed++;};
+  probe.restore=()=>{
+   auth.authorizeGoogle=original.authorize;MailsyncProcess.prototype.test=original.test;
+   AccountStore.addAccount=original.save;store._onOnboardingComplete=original.complete;
+   delete window.prGoogleSave;
+  };
+  return true;
+ })()`);
+ try{
+  await active.getByRole('button',{name:'使用 Google 登录',exact:true}).click();
+  await until(()=>run('window.prGoogleSave.completed===1'),'Google setup reached account save');
+  assert.equal(await run('window.prGoogleSave.requestedEmail'),emailAddress);
+  assert.deepEqual(await run('window.prGoogleSave.accounts'),[{name,emailAddress:verifiedEmail,provider:'gmail'}],
+   'first Google connection saves the entered sender name');
+ }finally{
+  await run('window.prGoogleSave.restore();true');
+ }
+}
+async function checkGooglePage(phase) {
+ const active=main.locator('.page-container:not([inert])');
+ const login=active.locator('[data-google-connect]');
+ const stable=async()=>{await run('new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)))');};
+ await active.locator('[data-provider=gmail]').click();
+ await active.and(main.locator('.alpha-fade-enter-done')).locator('[data-google-connect]').waitFor();
+ await until(()=>run('document.fonts.status==="loaded"'),'Google page fonts');
+ await shot(`${phase}-google-desktop`);
+ await run('require("@electron/remote").getCurrentWindow().setContentSize(420,500);true');
+ await until(()=>run('innerWidth===420 && innerHeight===500'),'native Google window 420 × 500');
+ await stable();
+ await shot(`${phase}-google-narrow`);
+ await login.focus();await main.keyboard.press('Enter');
+ const alert=active.getByRole('alert');
+ await alert.filter({hasText:'Google 登录尚未配置'}).waitFor();
+ await stable();
+ await shot(`${phase}-google-missing-config`);
+ if(phase==='before'){
+  console.log('PASS Google sign-in baseline at native desktop and 420 × 500');
+  return;
+ }
+ assert.equal(await active.locator('input').count(),0);
+ const retry=active.getByRole('button',{name:'重试 Google 登录',exact:true});
+ assert(await run('document.activeElement.matches("[data-google-connect]")'));
+ const position=await login.boundingBox();
+ assert(position.width>=160 && position.height>=36);
+ assert.equal(await main.getByRole('button',{name:'返回邮箱选择',exact:true}).count(),1);
+
+ await run(`(()=>{
+  const auth=require(${onboardingLib}+'paper-reed-google-auth');
+  const helpers=require(${onboardingLib}+'onboarding-helpers');
+  const {Account,AccountStore}=require('mailspring-exports');
+  const original={authorize:auth.authorizeGoogle,build:helpers.buildPaperReedGmailAccount,save:AccountStore.addAccount,accounts:AccountStore.accounts};
+  const probe=window.prGoogleFixture={authorizations:[],verifications:[],saves:0};
+  auth.authorizeGoogle=(email,signal)=>new Promise((resolve,reject)=>probe.authorizations.push({
+   email,signal,pass:()=>resolve({emailAddress:'fixture@gmail.com',settings:{}}),
+   fail:(message='Google 未授予收发邮件权限，请重新授权并勾选邮件权限。')=>reject(new auth.GoogleAuthorizationError(message)),
+  }));
+  helpers.buildPaperReedGmailAccount=authorization=>new Promise((resolve,reject)=>probe.verifications.push(diagnostic=>{
+   if(diagnostic)reject(Object.assign(new Error('fixture internal diagnostic'),diagnostic));
+   else resolve(new Account({provider:'gmail',emailAddress:authorization.emailAddress,settings:{}}));
+  }));
+  AccountStore.addAccount=()=>{probe.saves++;};
+  probe.restore=()=>{
+   auth.authorizeGoogle=original.authorize;helpers.buildPaperReedGmailAccount=original.build;
+   AccountStore.addAccount=original.save;AccountStore.accounts=original.accounts;
+   delete window.prGoogleFixture;
+  };
+  return true;
+ })()`);
+ try {
+  const status=active.getByRole('status');
+  const cancel=active.getByRole('button',{name:'取消连接',exact:true});
+  const startAttempt=async()=>{
+   await login.focus();await main.keyboard.press('Enter');
+   await status.getByText('等待浏览器中的授权。完成后请返回 Paper Reed。',{exact:true}).waitFor();
+   assert(await login.isDisabled());
+   assert(await run('document.activeElement.matches("[data-google-connect]")'));
+   return await run('window.prGoogleFixture.authorizations.length-1');
+  };
+  await startAttempt();
+  await main.keyboard.press('Enter');
+  assert.equal(await run('window.prGoogleFixture.authorizations.length'),1,'Enter cannot open a second request');
+  await stable();
+  assert.deepEqual(await login.boundingBox(),position,'feedback does not move the main action');
+  await shot('after-google-authorizing');
+  await main.keyboard.press('Tab');
+  assert(await run('document.activeElement.textContent.trim()==="取消连接"'));
+  await main.keyboard.down('Enter');
+  await main.keyboard.down('Enter');
+  await main.keyboard.up('Enter');
+  assert(await run('document.activeElement.matches("[data-google-connect]")'));
+  assert.equal(await run('window.prGoogleFixture.authorizations.length'),1,'holding Enter after Cancel must not start a new authorization');
+  assert(await run('window.prGoogleFixture.authorizations[0].signal.aborted'));
+  await run('window.prGoogleFixture.authorizations[0].pass();true');
+  await stable();
+  assert.equal(await run('window.prGoogleFixture.verifications.length'),0);
+
+  await startAttempt();
+  await run('window.prGoogleFixture.authorizations[1].pass();true');
+  await status.getByText('已收到 Google 授权，正在验证邮箱连接…',{exact:true}).waitFor();
+  assert(await run('(() => {const page=document.querySelector(".page-container:not([inert]) .pr-google-setup"); return page.scrollWidth<=page.clientWidth+1 && page.scrollHeight<=page.clientHeight+1;})()'));
+  assert.deepEqual(await login.boundingBox(),position);
+  await shot('after-google-verifying');
+  await cancel.click();
+  await startAttempt();
+  await run('window.prGoogleFixture.verifications[0]();true');
+  await stable();
+  assert.equal(await run('window.prGoogleFixture.saves'),0);
+  await status.getByText('等待浏览器中的授权。完成后请返回 Paper Reed。',{exact:true}).waitFor();
+  await run('window.prGoogleFixture.authorizations[2].fail();true');
+  await alert.filter({hasText:'Google 未授予收发邮件权限'}).waitFor();
+  assert(await retry.isEnabled());
+  assert(await run('document.activeElement.matches("[data-google-connect]")'));
+  await shot('after-google-permission-error');
+  for(const [diagnostic,message] of [
+   [{errorCode:'ErrorGmailIMAPNotEnabled',isNetworkError:false},'工作或学校邮箱请联系管理员启用 IMAP'],
+   [{errorCode:'ErrorConnection',isNetworkError:true},'网络连接中断。请检查网络后重试。'],
+   [{errorCode:'ErrorConnection',isNetworkError:false},'暂时无法连接 Gmail 服务器。请稍后重试。'],
+   [{errorCode:'UnknownFixtureError'},'Google 已授权，但未能连接邮箱。请重试。'],
+  ]){
+   const attempt=await startAttempt();
+   await run(`window.prGoogleFixture.authorizations[${attempt}].pass();true`);
+   await status.getByText('已收到 Google 授权，正在验证邮箱连接…',{exact:true}).waitFor();
+   await run(`window.prGoogleFixture.verifications.at(-1)(${JSON.stringify(diagnostic)});true`);
+   await alert.waitFor();
+   const text=await alert.textContent();
+   assert(text.includes(message),`expected "${message}" for ${diagnostic.errorCode}, got "${text}"`);
+   assert.doesNotMatch(text,/fixture internal diagnostic/);
+   assert(await retry.isEnabled());
+   if(diagnostic.errorCode==='ErrorGmailIMAPNotEnabled')await shot('after-google-imap-error');
+  }
+  await checkGoogleNativeDiagnostics(startAttempt,alert);
+  const backAttempt=await startAttempt();
+  const back=main.getByRole('button',{name:'返回邮箱选择',exact:true});
+  const backBox=await back.boundingBox();
+  await back.click();
+  await until(()=>run(`window.prGoogleFixture.authorizations[${backAttempt}].signal.aborted`),'going back ends Google authorization');
+  assert(await run('document.activeElement.dataset.provider==="gmail"'));
+  await main.mouse.click(backBox.x+backBox.width/2,backBox.y+backBox.height/2);
+  assert.equal(await run(`${onboardingStore}.page()`),'account-choose','a second Back click cannot select a mailbox provider');
+
+  await active.locator('[data-provider=imap]').click();
+  const intendedAddress='intended@gmail.com';
+  const senderName='Gmail fixture';
+  await active.locator('#name').fill(senderName);
+  await active.locator('#emailAddress').fill(intendedAddress);
+  await active.locator('[data-use-google]').click();
+  await login.waitFor();
+  assert.equal(await active.locator('.pr-google-account').count(),1,'explicit Google handoff must keep the entered email');
+  assert.equal(await active.locator('.pr-google-account').textContent(),intendedAddress);
+  const explicitAttempt=await startAttempt();
+  assert.equal(await run(`window.prGoogleFixture.authorizations[${explicitAttempt}].email`),intendedAddress);
+  const mismatch='授权的 Google 账号与当前邮箱不同，请选择对应账号。';
+  await run(`window.prGoogleFixture.authorizations[${explicitAttempt}].fail(${JSON.stringify(mismatch)});true`);
+  await alert.filter({hasText:mismatch}).waitFor();
+  assert.equal(await run('window.prGoogleFixture.saves'),0);
+  const previous=main.getByRole('button',{name:'返回上一步',exact:true});
+  await previous.click();
+  assert.equal(await active.locator('#emailAddress').inputValue(),intendedAddress);
+  assert.equal(await active.locator('#name').inputValue(),senderName);
+  await previous.click();
+
+  await active.locator('[data-provider=gmail]').click();
+  const address='Long.Reconnect.Account.Fixture@workspace.example.test';
+  await run(`(()=>{
+   const {Account,AccountStore}=require('mailspring-exports');
+   const actions=require(${onboardingLib}+'onboarding-actions');
+   const account=new Account({provider:'gmail',emailAddress:${JSON.stringify(address)},settings:{}});
+   AccountStore.accounts=()=>[new Account({provider:'gmail',emailAddress:account.emailAddress.toLowerCase(),settings:{}})];
+   actions.setAccount(account);
+   return true;
+  })()`);
+  await active.getByRole('heading',{name:'重新连接 Google 邮箱'}).waitFor();
+  await active.and(main.locator('.alpha-fade-enter-done')).locator('[data-google-connect]').waitFor();
+  assert.equal(await active.locator('.pr-google-account').textContent(),address);
+  assert(await run('(() => {const page=document.querySelector(".page-container:not([inert]) .pr-google-setup"); return page.scrollWidth<=page.clientWidth+1;})()'));
+  await stable();
+  await shot('after-google-reconnect');
+ }finally{
+  await run('window.prGoogleFixture.restore();true');
+ }
+ await main.getByRole('button',{name:'返回邮箱选择',exact:true}).click();
+ await active.locator('[data-provider=imap]').click();
+ const workspaceAddress='detected@workspace.example.test';
+ await active.locator('#name').fill('Workspace fixture');
+ await active.locator('#emailAddress').fill(workspaceAddress);
+ await active.locator('[id="settings.imap_password"]').fill('fixture-password');
+ await run(`(()=>{
+  const dns=require('dns'),resolveMx=dns.resolveMx;
+  dns.resolveMx=(domain,callback)=>{
+   if(domain!=='workspace.example.test')return resolveMx(domain,callback);
+   callback(null,[{priority:1,exchange:'aspmx.l.google.com'}]);
+  };
+  window.prRestoreGoogleMx=()=>{dns.resolveMx=resolveMx;};
+  return true;
+ })()`);
+ try{
+  await active.getByRole('button',{name:'下一步',exact:true}).click();
+  await login.waitFor();
+ }finally{
+  await run('window.prRestoreGoogleMx();true');
+ }
+ assert.equal(await active.locator('.pr-google-account').textContent(),workspaceAddress);
+ const detectedBack=main.locator('button.pr-onboarding-window-action.back');
+ assert.equal(await detectedBack.getAttribute('aria-label'),'返回上一步','Back should name the IMAP form as the previous step');
+ await detectedBack.focus();await main.keyboard.press('Enter');
+ assert.equal(await active.locator('#emailAddress').inputValue(),workspaceAddress,'return preserves the IMAP form email');
+ const correctedAddress='corrected@fastmail.com';
+ await active.locator('#emailAddress').fill(correctedAddress);
+ await active.getByRole('button',{name:'下一步',exact:true}).click();
+ await until(()=>run(`${onboardingStore}.page()!=='account-settings'`),'corrected address routed');
+ assert.equal(await run(`${onboardingStore}.page()`),'account-settings-imap','a changed mailbox must not reuse the discovered Gmail host');
+ const imapHost=active.locator('[id="settings.imap_host"]');
+ assert.equal(await imapHost.inputValue(),'imap.fastmail.com');
+ assert.equal(await active.locator('[id="settings.imap_username"]').inputValue(),correctedAddress);
+ await imapHost.fill('imap.custom.example.test');
+ await active.getByRole('button',{name:'返回',exact:true}).click();
+ await active.locator('[data-manual-setup]').click();
+ assert.equal(await imapHost.inputValue(),'imap.custom.example.test','manual settings stay attached to the same mailbox');
+ await active.getByRole('button',{name:'返回',exact:true}).click();
+ await active.locator('#emailAddress').fill('manual@other.example.test');
+ await active.locator('[data-manual-setup]').click();
+ assert.equal(await imapHost.inputValue(),'','manual setup for a different mailbox starts with a blank host');
+ assert.equal(await active.locator('[id="settings.imap_username"]').inputValue(),'manual@other.example.test');
+ await checkGoogleSavedSender(active);
+ assert.equal(await run('require("mailspring-exports").AccountStore.accounts().length'),0);
+ const result={nativeCompact:true,browserHandoff:true,missingConfigFeedback:true,stableAction:true,
+  keyboardCancelRestoresFocus:true,heldEnterDoesNotRestart:true,duplicateLoginPrevented:true,
+  abandonedVerificationIgnored:true,permissionRetry:true,verificationDiagnosticGuidance:true,nativeRefreshDiagnosticGuidance:true,
+  returnAbortsAuthorization:true,reconnectIdentityShown:true,discoveredGoogleBackReturnsToIMAP:true,
+  correctedMailboxUsesNewSettings:true,explicitGoogleHandoffPreservesMailbox:true,firstGoogleSaveKeepsSenderName:true,
+  expectedSMTPSubmissions:0};
+ fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(result,null,2)+'\n');
+ console.log('PASS Google sign-in',JSON.stringify(result));
+}
 (async()=>{
  assert(!fs.existsSync(config));await start();await selectWindow('onboarding');
+ const googlePhase=process.env.PAPER_REED_GOOGLE_PAGE_CHECK;
+ if(googlePhase){await checkGooglePage(googlePhase);await stop();return;}
  const pickerPhase=process.env.PAPER_REED_PROVIDER_PICKER_CHECK;
  if(pickerPhase){await checkProviderPicker(pickerPhase);await stop();return;}
  const activePage=main.locator('.page-container:not([inert])');
@@ -270,7 +670,7 @@ async function checkProviderPicker(phase) {
  assert.equal(await activePage.locator('input[type=password]').count(),0);
  await activePage.locator('[data-google-connect]').click();
  await activePage.getByRole('alert').filter({hasText:'Google 登录尚未配置'}).waitFor();
- await activePage.getByRole('button',{name:'返回邮箱选择',exact:true}).click();
+ await main.getByRole('button',{name:'返回邮箱选择',exact:true}).click();
  console.log('PASS Google login without password or JSON picker; missing project config reported');
  assert.equal(await activePage.locator('[data-provider=office365]').count(),0);
  await activePage.locator('[data-provider=imap]').click();
@@ -279,7 +679,11 @@ async function checkProviderPicker(phase) {
  assert.equal(await activePage.locator('input[type=password]').count(),0);
  await activePage.locator('[data-use-google]').click();
  await activePage.locator('[data-google-connect]').waitFor();
- await activePage.getByRole('button',{name:'返回邮箱选择',exact:true}).click();
+ assert.equal(await activePage.locator('.pr-google-account').textContent(),'fixture@gmail.com');
+ const previous=main.getByRole('button',{name:'返回上一步',exact:true});
+ await previous.click();
+ assert.equal(await activePage.locator('#emailAddress').inputValue(),'fixture@gmail.com');
+ await previous.click();
  await activePage.locator('[data-provider=icloud]').click();
  await activePage.locator('#name').fill('iCloud fixture');
  await activePage.locator('#emailAddress').fill('fixture@icloud.com');
@@ -316,14 +720,32 @@ async function checkProviderPicker(phase) {
    await activePage.locator(`[id="settings.${protocol}_security"]`).selectOption('none');
    await activePage.locator(`[id="settings.${protocol}_username"]`).fill(fixture.settings[protocol+'_username']);
  }
- await activePage.getByRole('button',{name:'连接邮箱',exact:true}).click();
- await until(()=>run('!!document.querySelector(".message.error") && document.body.innerText.includes("Authentication Error")'),'wrong password shown');
- assert((await activePage.locator('.message.error').first().innerText()).includes('Authentication Error'));
+ await run(`(()=>{
+  const {MailsyncProcess}=require('mailspring-exports');
+  const test=MailsyncProcess.prototype.test;
+  MailsyncProcess.prototype.test=async function(){
+   try{return await test.call(this);}
+   catch(error){
+    window.prFixtureDiagnostic={code:error.errorCode,network:error.isNetworkError};
+    throw error;
+   }
+  };
+  window.prRestoreMailsyncTest=()=>{MailsyncProcess.prototype.test=test;};
+  return true;
+ })()`);
+ try{
+  await activePage.getByRole('button',{name:'连接邮箱',exact:true}).click();
+  await until(()=>run('!!document.querySelector(".message.error") && document.body.innerText.includes("Authentication Error")'),'wrong password shown');
+  assert((await activePage.locator('.message.error').first().innerText()).includes('Authentication Error'));
+  assert.deepEqual(await run('window.prFixtureDiagnostic'),{code:'ErrorAuthentication',network:false});
+ }finally{
+  await run('window.prRestoreMailsyncTest();true');
+ }
  assert.equal((JSON.parse(fs.readFileSync(path.join(config,'config.json')))['*'].accounts||[]).length,0);
  const layout=await run('({x:document.querySelector(".pr-onboarding").getBoundingClientRect().x,errorY:document.querySelector(".message.error").getBoundingClientRect().y})');
  assert.equal(layout.x,0);assert(layout.errorY>=0&&layout.errorY<780);
  await shot('connection-error');
- console.log('PASS failed authentication leaves no saved account');
+ console.log('PASS failed authentication preserves the native diagnostic and leaves no saved account');
  for(const protocol of ['imap','smtp'])await activePage.locator(`[id="settings.${protocol}_password"]`).fill(fixture.settings[protocol+'_password']);
  await run(`(()=>{
   const ipc=require('electron').ipcRenderer,invoke=ipc.invoke;
@@ -429,7 +851,42 @@ async function checkProviderPicker(phase) {
  })()`);
  assert.deepEqual(migrated,{sameId:true,provider:'gmail',tokenRestored:true,noPassword:true,oneAccount:true,noPlaintext:true});
  console.log('PASS actual account store reconnect updates provider and encrypts the shared grant');
- const result={blankProfile:true,productName:'Paper Reed',independentProfile:true,noInjectedAccountsOrCredentials:true,wrongPasswordLeavesNoAccount:true,GUIAccountSetup:true,noUpstreamIdentity:true,upstreamUpdaterDisabled:true,firstSync:true,normalRestart:true,credentialsPersist:true,expiredCredentialsReconnect:true,GUIReplySaved:true,replyRestoredAfterRestart:true,GUISend:true,GUIArchive:true,installedCLI:true,noCLIConnectionEnvironment:true,CLIReadSameMail:true,readOnlyAgentAccess:true,packaged:!!packaged,googleLoginNoPassword:true,googleMissingConfig:true,microsoftEntryRemoved:true,gmailFromIMAP:true,fastProviderReentry:true,accountSaveNavigationLocked:true,reconnectProviderAndCredentials:true};
+ const aliasCredentials=await run(`(async()=>{
+  const {AccountStore,KeyManager,MailsyncProcess}=require('mailspring-exports');
+  const {buildPaperReedGmailAccount}=require(${onboardingLib}+'onboarding-helpers');
+  const original=AccountStore.accounts()[0];
+  const alias=original.clone();Object.assign(alias,{id:'fixture-google-alias',emailAddress:'test@googlemail.com'});
+  Object.assign(alias.settings,{imap_password:'old-imap',smtp_password:'old-smtp',gmail_refresh_token:'old-grant'});
+  const canonical=original.clone();Object.assign(canonical,{id:'fixture-google-canonical',emailAddress:'te.st@gmail.com'});
+  canonical.settings.imap_password='other-account-password';
+  await AccountStore.addAccount(canonical);
+  const storedAlias=await AccountStore.addAccount(alias);
+  const originalTest=MailsyncProcess.prototype.test;
+  let replacement;
+  try{
+   MailsyncProcess.prototype.test=async()=>{};
+   replacement=await buildPaperReedGmailAccount({emailAddress:canonical.emailAddress,settings:{refresh_token:'new-alias-grant'}},storedAlias);
+  }finally{MailsyncProcess.prototype.test=originalTest;}
+  const stored=await (AccountStore.reconnectAccount
+   ? AccountStore.reconnectAccount(replacement,storedAlias)
+   : AccountStore.addAccount(replacement));
+  const restored=await KeyManager.insertAccountSecrets(stored);
+  const result={sameAccount:stored.id===alias.id&&stored.emailAddress===alias.emailAddress,
+   verifiedUsername:stored.settings.imap_username===canonical.emailAddress&&stored.settings.smtp_username===canonical.emailAddress,
+   replaced:restored.settings.refresh_token==='new-alias-grant'&&!restored.settings.imap_password&&
+    !restored.settings.smtp_password&&!restored.settings.gmail_refresh_token};
+  await KeyManager.deleteAccountSecrets(stored);
+  const keys=await KeyManager._getKeyHash();
+  result.deleted=Object.keys(keys).every(key=>!key.startsWith(alias.emailAddress+'-'));
+  result.otherAccountUnchanged=AccountStore.accountForId(canonical.id)?.emailAddress===canonical.emailAddress&&
+   keys[canonical.emailAddress+'-imap']==='other-account-password'&&!keys[canonical.emailAddress+'-refresh-token'];
+  return result;
+ })()`);
+ assert.deepEqual(aliasCredentials,{sameAccount:true,verifiedUsername:true,replaced:true,deleted:true,otherAccountUnchanged:true});
+ console.log('PASS Gmail alias reconnect replaces stored credentials, deletion clears them, and the other record is untouched');
+ await checkDeletedGoogleReconnect();
+ const result={blankProfile:true,productName:'Paper Reed',independentProfile:true,noInjectedAccountsOrCredentials:true,wrongPasswordLeavesNoAccount:true,GUIAccountSetup:true,noUpstreamIdentity:true,upstreamUpdaterDisabled:true,firstSync:true,normalRestart:true,credentialsPersist:true,expiredCredentialsReconnect:true,GUIReplySaved:true,replyRestoredAfterRestart:true,GUISend:true,GUIArchive:true,installedCLI:true,noCLIConnectionEnvironment:true,CLIReadSameMail:true,readOnlyAgentAccess:true,packaged:!!packaged,googleLoginNoPassword:true,googleMissingConfig:true,microsoftEntryRemoved:true,gmailFromIMAP:true,fastProviderReentry:true,accountSaveNavigationLocked:true,reconnectProviderAndCredentials:true,aliasReconnectCredentials:true};
+ result.deletionWinsOverGoogleReconnect=true;
  fs.writeFileSync(path.join(out,'result.json'),JSON.stringify(result,null,2)+'\n');console.log('PASS',JSON.stringify(result));
  await stop();
 })().catch(async error=>{console.error(error);if(main&&!main.isClosed()){fs.writeFileSync(path.join(work,'failure-dom.txt'),await main.locator('body').innerText().catch(()=>''));await shot('failure').catch(()=>{});}process.exitCode=1;}).finally(()=>{if(app)app.process().kill('SIGKILL');});

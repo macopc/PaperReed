@@ -52,6 +52,12 @@ results = []
 def run_case(mode, unified=False):
     requests = []
     refreshes = []
+    mailbox_check = {
+        'alias-reconnect': ('t.est+paper@googlemail.com', 'test@gmail.com', True),
+        'other-mailbox': ('t.est+paper@googlemail.com', 'other@gmail.com', False),
+        'workspace-dot-mismatch': ('t.est@workspace.example.test', 'test@workspace.example.test', False),
+    }.get(mode)
+    verified_email = mailbox_check[1] if mailbox_check else 'test@example.test'
     class Google(BaseHTTPRequestHandler):
         def log_message(self, *args):
             pass
@@ -67,7 +73,7 @@ def run_case(mode, unified=False):
         def do_GET(self):
             assert self.path == '/userinfo'
             assert self.headers['Authorization'] == 'Bearer fixture-access'
-            self.reply(200, {'email': 'test@example.test', 'email_verified': True})
+            self.reply(200, {'email': verified_email, 'email_verified': True})
 
         def do_POST(self):
             body = self.rfile.read(int(self.headers['Content-Length']))
@@ -115,7 +121,7 @@ def run_case(mode, unified=False):
     thread.start()
     server = FakeServer('gmail', smtp=True)
     if unified:
-        server.imap.oauth_tokens = {'fixture-access': 'test@example.test'}
+        server.imap.oauth_tokens = {'fixture-access': verified_email}
     server.append('INBOX', message(1))
     server.start()
     ms = None
@@ -130,20 +136,33 @@ def run_case(mode, unified=False):
             account['settings']['refresh_token'] = account['settings'].pop('gmail_refresh_token')
             account['settings'].pop('imap_password', None)
             account['settings'].pop('smtp_password', None)
+        if mailbox_check:
+            account['emailAddress'] = mailbox_check[0]
+            account['settings']['imap_username'] = verified_email
         base = f'http://127.0.0.1:{google.server_port}'
         ms = MailsyncProcess(account, case, binary=args.binary.resolve(), env={
             'GMAIL_OAUTH_TOKEN_URL': base + '/token', 'GMAIL_USERINFO_URL': base + '/userinfo',
             'GMAIL_API_URL': base + '/gmail/v1',
         })
+        if mailbox_check:
+            check = ms.run_mode('test')
+            assert (check.returncode == 0) == mailbox_check[2], check.stdout
+            if not mailbox_check[2]:
+                error = json.loads(check.stdout.strip().splitlines()[-1])
+                assert error['error'] == 'ErrorAuthentication', error
+            assert not requests and not server.sent_messages()
+            results.append({'case': case_name, 'outcome': 'connected' if mailbox_check[2] else 'wrong-mailbox', 'api_submissions': 0, 'smtp_submissions': 0})
+            print('PASS', case_name, flush=True)
+            return
         if unified and mode in ('refresh-rejected', 'refresh-outage'):
             check = ms.run_mode('test')
-            assert check.returncode != 0, 'Revoked grant must fail account validation'
+            assert check.returncode != 0, 'A failed token refresh must fail account validation'
             error = json.loads(check.stdout.strip().splitlines()[-1])
             assert error['error'] == ('ErrorAuthentication' if mode == 'refresh-rejected' else 'ErrorConnection'), error
-            assert error['error_offline'] == (mode == 'refresh-outage'), error
+            assert error['error_offline'] is False, error
             assert not requests
             assert not server.sent_messages()
-            results.append({'case': case_name, 'outcome': 'authentication-failed' if mode == 'refresh-rejected' else 'connection-interrupted', 'api_submissions': 0, 'smtp_submissions': 0})
+            results.append({'case': case_name, 'outcome': 'authentication-failed' if mode == 'refresh-rejected' else 'provider-unavailable', 'api_submissions': 0, 'smtp_submissions': 0})
             print('PASS', case_name, flush=True)
             return
         if mode == 'accepted':
@@ -224,7 +243,7 @@ def run_case(mode, unified=False):
 for mode in ('accepted', 'rewritten-message-id', 'late-sent-copy', 'rejected', 'lost-response', 'invalid-receipt', 'server-error', 'refresh-rejected'):
     if not args.case or args.case == 'legacy-' + mode:
         run_case(mode)
-for mode in ('accepted', 'late-sent-copy', 'refresh-rejected', 'refresh-outage'):
+for mode in ('accepted', 'late-sent-copy', 'refresh-rejected', 'refresh-outage', 'alias-reconnect', 'other-mailbox', 'workspace-dot-mismatch'):
     if not args.case or args.case == 'oauth-' + mode:
         run_case(mode, unified=True)
 (work / 'results.json').write_text(json.dumps(results, indent=2) + '\n')

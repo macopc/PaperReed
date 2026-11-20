@@ -11,7 +11,7 @@ import subprocess
 ROOT = Path(__file__).resolve().parent.parent
 DESKTOP = '535f13dd463536f36728bce3efb4ae0d51ab3f19'
 NATIVE = '8681eae1d217d993e4d4dc7de17ae8b91fc3da49'
-NATIVE_PATCHES = {'0001-mail-core-guards.patch', '0008-recovery-provenance.patch', '0023-independent-engine-path.patch', '0024-gmail-https-send.patch', '0026-gmail-mailbox-actions.patch', '0028-microsoft-send-boundary.patch', '0032-send-result-reconciliation.patch', '0034-targeted-sent-copy-confirmation.patch', '0036-gmail-shared-oauth.patch'}
+NATIVE_PATCHES = {'0001-mail-core-guards.patch', '0008-recovery-provenance.patch', '0023-independent-engine-path.patch', '0024-gmail-https-send.patch', '0026-gmail-mailbox-actions.patch', '0028-microsoft-send-boundary.patch', '0032-send-result-reconciliation.patch', '0034-targeted-sent-copy-confirmation.patch', '0036-gmail-shared-oauth.patch', '0065-google-validation-http-diagnostics.patch'}
 
 
 def run(*args, cwd=None):

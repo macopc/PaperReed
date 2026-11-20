@@ -29,16 +29,16 @@ try:
         time.sleep(0.1)
     if run.returncode: raise RuntimeError(f'UI check failed: {run.returncode}')
     sent=server.sent_messages()
-    picker_phase=os.environ.get('PAPER_REED_PROVIDER_PICKER_CHECK')
-    assert len(sent)==(0 if picker_phase else 1), len(sent)
-    if not picker_phase:
+    scoped_phase=os.environ.get('PAPER_REED_PROVIDER_PICKER_CHECK') or os.environ.get('PAPER_REED_GOOGLE_PAGE_CHECK')
+    assert len(sent)==(0 if scoped_phase else 1), len(sent)
+    if not scoped_phase:
         assert b'Paper Reed first run reply' in sent[0].raw
     result_path=args.output.resolve()/'result.json'
-    if picker_phase!='before':
+    if scoped_phase!='before':
         result=json.loads(result_path.read_text());result['observedSMTPSubmissions']=len(sent)
         result_path.write_text(json.dumps(result,indent=2)+'\n')
-    if picker_phase:
-        print('PASS isolated provider picker; SMTP=0')
+    if scoped_phase:
+        print('PASS isolated onboarding screen; SMTP=0')
     else:
         print('PASS blank profile, normal onboarding, restart and installed CLI; SMTP=1')
 finally:

@@ -1,0 +1,91 @@
+diff --git a/MailSync/NetworkRequestUtils.cpp b/MailSync/NetworkRequestUtils.cpp
+index fa138f3..ad1ad03 100644
+--- a/MailSync/NetworkRequestUtils.cpp
++++ b/MailSync/NetworkRequestUtils.cpp
+@@ -21,6 +21,8 @@
+ #include <cstdlib>
+ #include <cstring>
+ #include <algorithm>
++#include <cctype>
++#include <regex>
+ #include <thread>
+ #include <chrono>
+ #include <ctime>
+@@ -389,15 +391,18 @@ static json gmailRequest(const string & url, const string & method, const string
+     curl_easy_getinfo(handle, CURLINFO_RESPONSE_CODE, &status);
+     CleanupCurlRequest(handle);
+     if (result != CURLE_OK) {
+-        throw SyncException(sending ? "send-unknown" : "gmail-authorization-failed",
++        SyncException error(sending ? "send-unknown" : "gmail-authorization-failed",
+                             "Google HTTPS transport failed: " + string(curl_easy_strerror(result)), !sending, !sending);
++        error.httpStatus = status;
++        throw error;
+     }
+     if (status < 200 || status >= 300) {
+         bool rejected = status >= 400 && status < 500;
+-        throw SyncException(sending ? (rejected ? "send-rejected" : "send-unknown") : "gmail-authorization-failed",
+-                            "Google HTTPS returned HTTP " + to_string(status),
+-                            !sending && (status == 429 || status >= 500),
+-                            !sending && (status == 429 || status >= 500));
++        bool retryable = !sending && (status == 429 || status >= 500);
++        SyncException error(sending ? (rejected ? "send-rejected" : "send-unknown") : "gmail-authorization-failed",
++                            "Google HTTPS returned HTTP " + to_string(status), retryable, retryable);
++        error.httpStatus = status;
++        throw error;
+     }
+     return json::parse(response, nullptr, false);
+ }
+@@ -423,14 +428,23 @@ string GmailSendAccessToken(shared_ptr<Account> account) {
+     return token;
+ }
+ 
++static string GoogleMailboxKey(string email) {
++    transform(email.begin(), email.end(), email.begin(), [](unsigned char c) { return std::tolower(c); });
++    static const std::regex personal(R"(([a-z0-9.]+)(?:\+[^@\s]+)?@(?:gmail\.com|googlemail\.com))");
++    std::smatch match;
++    if (!std::regex_match(email, match, personal)) return email;
++
++    string username = match[1].str();
++    username.erase(remove(username.begin(), username.end(), '.'), username.end());
++    return username + "@gmail.com";
++}
++
+ void ValidateGmailSendAuthorization(shared_ptr<Account> account) {
+     string token = GmailSendAccessToken(account);
+     auto identity = gmailRequest(gmailEndpoint("GMAIL_USERINFO_URL", "https://openidconnect.googleapis.com/v1/userinfo"), "GET", token, "");
+     string email = JSONString(identity, "email");
+-    string expected = account->emailAddress();
+-    transform(email.begin(), email.end(), email.begin(), ::tolower);
+-    transform(expected.begin(), expected.end(), expected.begin(), ::tolower);
+-    if (email != expected || !identity.is_object() || identity.value("email_verified", false) != true) {
++    if (email.empty() || GoogleMailboxKey(email) != GoogleMailboxKey(account->emailAddress()) ||
++        !identity.is_object() || identity.value("email_verified", false) != true) {
+         throw SyncException("gmail-authorization-failed", "Google authorization belongs to a different mailbox. Reauthorize Gmail sending.", false);
+     }
+ }
+diff --git a/MailSync/SyncException.hpp b/MailSync/SyncException.hpp
+index 71f60ff..1ec04de 100644
+--- a/MailSync/SyncException.hpp
++++ b/MailSync/SyncException.hpp
+@@ -33,6 +33,7 @@ public:
+     SyncException(mailcore::ErrorCode c, string di);
+     string key;
+     string debuginfo;
++    long httpStatus = 0;
+     bool isRetryable();
+     bool isOffline();
+     json toJSON();
+diff --git a/MailSync/main.cpp b/MailSync/main.cpp
+index 8a2e1a4..036f265 100644
+--- a/MailSync/main.cpp
++++ b/MailSync/main.cpp
+@@ -475,7 +475,8 @@ int runTestAuthReportingExceptions(shared_ptr<Account> account) {
+         // isRetryable() already separates a network problem from refused credentials, and
+         // those are the two codes the client has localized strings for.
+         error = ex.isRetryable() ? "ErrorConnection" : "ErrorAuthentication";
+-        offline = ex.isOffline();
++        // A response may trigger background backoff even though the server was reachable.
++        offline = ex.isOffline() && ex.httpStatus == 0;
+         alogger.log("\n\n" + ex.key + ": " + ex.debuginfo + "\n");
+     } catch (std::exception & ex) {
+         // Unclassified, so pass it through unrecognized and let the client report it.

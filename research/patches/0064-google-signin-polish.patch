@@ -1,0 +1,701 @@
+diff --git a/app/internal_packages/onboarding/lib/onboarding-helpers.ts b/app/internal_packages/onboarding/lib/onboarding-helpers.ts
+index 2ca1fbb..127c75f 100644
+--- a/app/internal_packages/onboarding/lib/onboarding-helpers.ts
++++ b/app/internal_packages/onboarding/lib/onboarding-helpers.ts
+@@ -769,18 +769,21 @@ async function getThunderbirdAutoconfig(url: string) {
+ // Reconnect keeps account identity and local metadata; authorization alone never persists it.
+ export async function buildPaperReedGmailAccount(
+   authorization: { emailAddress: string; settings: Pick<Account['settings'], 'gmail_api_send' | 'gmail_client_id' | 'gmail_client_secret' | 'refresh_token'> },
+-  existing?: Account
++  existing?: Account,
++  senderName?: string
+ ) {
+   const account = existing ? existing.clone() : new Account({
+-    name: authorization.emailAddress.split('@')[0], emailAddress: authorization.emailAddress, settings: {},
++    name: senderName?.trim() || authorization.emailAddress.split('@')[0],
++    emailAddress: authorization.emailAddress,
++    settings: {},
+   });
+   account.provider = 'gmail';
+   account.settings = {
+     ...account.settings,
+     imap_host: 'imap.gmail.com', imap_port: 993, imap_security: 'SSL / TLS',
+-    imap_username: account.emailAddress, imap_allow_insecure_ssl: false,
++    imap_username: authorization.emailAddress, imap_allow_insecure_ssl: false,
+     smtp_host: 'smtp.gmail.com', smtp_port: 465, smtp_security: 'SSL / TLS',
+-    smtp_username: account.emailAddress, smtp_allow_insecure_ssl: false,
++    smtp_username: authorization.emailAddress, smtp_allow_insecure_ssl: false,
+     create_helper_folders: false,
+     ...authorization.settings,
+   };
+diff --git a/app/internal_packages/onboarding/lib/onboarding-root.tsx b/app/internal_packages/onboarding/lib/onboarding-root.tsx
+index 8c9970a..35f5371 100644
+--- a/app/internal_packages/onboarding/lib/onboarding-root.tsx
++++ b/app/internal_packages/onboarding/lib/onboarding-root.tsx
+@@ -40,6 +40,7 @@ const PageComponents = {
+ interface OnboardingRootState {
+   pageDepth: number;
+   page: string;
++  previousPage?: string;
+   pageVisit: number;
+   accountSaveState: AccountSaveState;
+   returningToPicker: boolean;
+@@ -76,6 +77,7 @@ export default class OnboardingRoot extends React.Component<
+   _getStateFromStore = () => {
+     return {
+       page: OnboardingStore.page(),
++      previousPage: OnboardingStore.previousPage(),
+       pageDepth: OnboardingStore.pageDepth(),
+       pageVisit: OnboardingStore.pageVisit(),
+       accountSaveState: OnboardingStore.accountSaveState(),
+@@ -138,6 +140,8 @@ export default class OnboardingRoot extends React.Component<
+           allowMoveBack={!['initial-preferences', 'account-choose'].includes(this.state.page)}
+           disableClose={paperReed && this.state.returningToPicker}
+           disableNavigation={!!accountSaveState}
++          backLabel={this.state.page === 'paper-reed-google' && this.state.previousPage === 'account-choose'
++            ? '返回邮箱选择' : undefined}
+         />
+         <TransitionGroup component={null}>
+           <CSSTransition
+diff --git a/app/internal_packages/onboarding/lib/onboarding-store.ts b/app/internal_packages/onboarding/lib/onboarding-store.ts
+index 8504be1..4729288 100644
+--- a/app/internal_packages/onboarding/lib/onboarding-store.ts
++++ b/app/internal_packages/onboarding/lib/onboarding-store.ts
+@@ -197,7 +197,7 @@ class OnboardingStore extends MailspringStore {
+     }, 1000);
+   };
+ 
+-  _onFinishAndAddAccount = async (account: Account) => {
++  _onFinishAndAddAccount = async (account: Account, existing?: Account) => {
+     if (this._accountSaveState) return;
+     const paperReed = AppEnv.config.get('core.paperReed.enabled');
+     if (paperReed) {
+@@ -213,9 +213,12 @@ class OnboardingStore extends MailspringStore {
+       (a) => a.id === account.id || a.emailAddress === account.emailAddress
+     );
+ 
++    let stored: Account | null;
+     try {
+-      const stored = await AccountStore.addAccount(account);
+-      if (isReconnect) {
++      stored = existing
++        ? await AccountStore.reconnectAccount(account, existing)
++        : await AccountStore.addAccount(account);
++      if (stored && (existing || isReconnect)) {
+         // The account's sync process is still running with its old settings.
+         Actions.restartAccountSync(stored);
+       }
+@@ -241,6 +244,16 @@ class OnboardingStore extends MailspringStore {
+       return;
+     }
+ 
++    if (!stored) {
++      this._accountSaveState = null;
++      this.trigger();
++      AppEnv.showErrorDialog({
++        title: '无法保存邮箱账号',
++        message: '此邮箱账号已变更。请关闭此窗口后重新连接。',
++      });
++      return;
++    }
++
+     if (paperReed) {
+       this._accountSaveState = 'opening';
+       this.trigger();
+@@ -264,6 +277,10 @@ class OnboardingStore extends MailspringStore {
+     return this._pageStack[this._pageStack.length - 1];
+   }
+ 
++  previousPage() {
++    return this._pageStack[this._pageStack.length - 2];
++  }
++
+   pageDepth() {
+     return this._pageStack.length;
+   }
+diff --git a/app/internal_packages/onboarding/lib/page-account-settings.tsx b/app/internal_packages/onboarding/lib/page-account-settings.tsx
+index 165baea..e02b003 100644
+--- a/app/internal_packages/onboarding/lib/page-account-settings.tsx
++++ b/app/internal_packages/onboarding/lib/page-account-settings.tsx
+@@ -18,6 +18,8 @@ interface AccountBasicSettingsFormProps {
+ export class AccountBasicSettingsForm extends React.Component<AccountBasicSettingsFormProps> {
+   static displayName = 'AccountBasicSettingsForm';
+ 
++  private readonly initialEmailAddress = this.props.account.emailAddress;
++
+   static submitLabel = (account: Account) => {
+     if (AppEnv.config.get('core.paperReed.enabled')) return localized('Continue');
+     return account.provider === 'imap' ? localized('Continue') : localized('Connect Account');
+@@ -74,10 +76,18 @@ export class AccountBasicSettingsForm extends React.Component<AccountBasicSettin
+   };
+ 
+   async submit(manual = false) {
+-    if (AppEnv.config.get('core.paperReed.enabled')) {
++    const { account: current } = this.props;
++    const { name, emailAddress, provider, settings: { imap_password } } = current;
++    const paperReed = AppEnv.config.get('core.paperReed.enabled');
++    // Server settings apply to the address they were discovered or entered for.
++    const entered = paperReed && emailAddress === this.initialEmailAddress
++      ? current.clone()
++      : new Account({ name, emailAddress, provider, settings: { imap_password } });
++
++    if (paperReed) {
+       const expanded = manual
+-        ? { account: this.props.account.clone(), confirmServers: false }
+-        : await expandAccountForSetup(this.props.account);
++        ? { account: entered, confirmServers: false }
++        : await expandAccountForSetup(entered);
+       if (this.props.isCurrentVisit?.() === false) return;
+       const account = expanded.account;
+       account.settings = {
+@@ -99,16 +109,7 @@ export class AccountBasicSettingsForm extends React.Component<AccountBasicSettin
+       OnboardingActions.moveToPage('account-settings-imap');
+       return;
+     }
+-    // create a new account with expanded settings and just the three fields
+-    const {
+-      name,
+-      emailAddress,
+-      provider,
+-      settings: { imap_password },
+-    } = this.props.account;
+-    const { account, confirmServers } = await expandAccountForSetup(
+-      new Account({ name, emailAddress, provider, settings: { imap_password } })
+-    );
++    const { account, confirmServers } = await expandAccountForSetup(entered);
+     OnboardingActions.setAccount(account, { confirmServers });
+ 
+     if (account.settings.imap_host && account.settings.smtp_host && !confirmServers) {
+@@ -142,7 +143,10 @@ export class AccountBasicSettingsForm extends React.Component<AccountBasicSettin
+           <p>这是 Google 邮箱，请通过 Google 登录连接，无需填写应用专用密码。</p>
+           <button type="button" className="btn btn-add-account" data-use-google
+             disabled={this.props.submitting}
+-            onClick={() => OnboardingActions.chooseAccountProvider('gmail')}>使用 Google 登录</button>
++            onClick={() => {
++              OnboardingActions.setAccount(this.props.account);
++              OnboardingActions.moveToPage('paper-reed-google');
++            }}>使用 Google 登录</button>
+         </div> : <FormField
+           field="settings.imap_password"
+           title={
+diff --git a/app/internal_packages/onboarding/lib/page-top-bar.tsx b/app/internal_packages/onboarding/lib/page-top-bar.tsx
+index e815bba..04ff8c7 100644
+--- a/app/internal_packages/onboarding/lib/page-top-bar.tsx
++++ b/app/internal_packages/onboarding/lib/page-top-bar.tsx
+@@ -8,6 +8,7 @@ const PageTopBar = (props: {
+   allowMoveBack?: boolean;
+   disableClose?: boolean;
+   disableNavigation?: boolean;
++  backLabel?: string;
+ }) => {
+   const { pageDepth } = props;
+   const paperReed = AppEnv.config.get('core.paperReed.enabled');
+@@ -44,7 +45,7 @@ const PageTopBar = (props: {
+         key={closeClass}
+         type="button"
+         className={closeClass + ' pr-onboarding-window-action'}
+-        aria-label={pageDepth > 1 ? '返回上一步' : hasAccounts ? '关闭邮箱设置' : '退出 Paper Reed'}
++        aria-label={pageDepth > 1 ? props.backLabel || '返回上一步' : hasAccounts ? '关闭邮箱设置' : '退出 Paper Reed'}
+         disabled={props.disableNavigation || (pageDepth <= 1 && props.disableClose)}
+         onClick={closeAction}
+         style={buttonStyle}
+diff --git a/app/internal_packages/onboarding/lib/paper-reed-google-auth.ts b/app/internal_packages/onboarding/lib/paper-reed-google-auth.ts
+index b982b15..0277cdc 100644
+--- a/app/internal_packages/onboarding/lib/paper-reed-google-auth.ts
++++ b/app/internal_packages/onboarding/lib/paper-reed-google-auth.ts
+@@ -6,6 +6,18 @@ import path from 'path';
+ 
+ const MAIL_SCOPE = 'https://mail.google.com/';
+ 
++export class GoogleAuthorizationError extends Error {}
++
++function googleMailboxKey(address: string) {
++  const email = address.toLowerCase();
++  const personal = /^([a-z0-9.]+)(?:\+[^@\s]+)?@(?:gmail\.com|googlemail\.com)$/.exec(email);
++  return personal ? `${personal[1].replace(/\./g, '')}@gmail.com` : email;
++}
++
++export function sameGoogleMailbox(a: string, b: string) {
++  return googleMailboxKey(a) === googleMailboxKey(b);
++}
++
+ // Configured once by the distributor, never selected by each mailbox owner.
+ export async function authorizeGoogle(email: string, signal: AbortSignal) {
+   const clientFile = process.env.PAPER_REED_GOOGLE_CLIENT_FILE ||
+@@ -14,10 +26,10 @@ export async function authorizeGoogle(email: string, signal: AbortSignal) {
+   try {
+     client = JSON.parse(await fs.promises.readFile(clientFile, 'utf8')).installed;
+   } catch {
+-    throw new Error('Google 登录尚未配置。请由维护者配置 Paper Reed 的 Google 桌面应用。');
++    throw new GoogleAuthorizationError('Google 登录尚未配置。请联系维护者。');
+   }
+   if (!client?.client_id || !client?.client_secret) {
+-    throw new Error('Google 登录配置无效，需要 Google OAuth「桌面应用」客户端。');
++    throw new GoogleAuthorizationError('Google 登录配置无效。请联系维护者。');
+   }
+   signal.throwIfAborted();
+   const verifier = crypto.randomBytes(32).toString('base64url');
+@@ -42,7 +54,7 @@ export async function authorizeGoogle(email: string, signal: AbortSignal) {
+       res.setHeader('Cache-Control', 'no-store');
+       if (url.searchParams.get('error') || !url.searchParams.get('code')) {
+         res.end('授权未完成，请返回 Paper Reed 重试。');
+-        reject(new Error('Google 授权已取消或未完成。'));
++        reject(new GoogleAuthorizationError('Google 授权已取消或未完成。'));
+       } else {
+         res.end('已收到 Google 授权，请返回 Paper Reed。');
+         resolve(url.searchParams.get('code'));
+@@ -59,7 +71,7 @@ export async function authorizeGoogle(email: string, signal: AbortSignal) {
+       server.listen(0, '127.0.0.1', resolve);
+     });
+     redirect = `http://127.0.0.1:${(server.address() as import('net').AddressInfo).port}/oauth/callback`;
+-    timer = setTimeout(() => rejectCode(new Error('Google 授权等待超时，请重试。')), 10 * 60 * 1000);
++    timer = setTimeout(() => rejectCode(new GoogleAuthorizationError('Google 授权等待超时，请重试。')), 10 * 60 * 1000);
+     const params = new URLSearchParams({
+       client_id: client.client_id,
+       redirect_uri: redirect,
+@@ -87,19 +99,20 @@ export async function authorizeGoogle(email: string, signal: AbortSignal) {
+       }).toString(),
+       signal: AbortSignal.any([signal, AbortSignal.timeout(30000)]),
+     });
+-    if (!response.ok) throw new Error(`Google 授权交换失败（HTTP ${response.status}）。`);
++    if (!response.ok) throw new GoogleAuthorizationError(`Google 授权未能完成（HTTP ${response.status}）。请重试。`);
+     const token = await response.json();
+     if (!token.access_token || !token.refresh_token || !token.scope?.split(' ').includes(MAIL_SCOPE)) {
+-      throw new Error('Google 未授予收发邮件权限，请重新授权并勾选邮件权限。');
++      throw new GoogleAuthorizationError('Google 未授予收发邮件权限，请重新授权并勾选邮件权限。');
+     }
+     const identityResponse = await fetch('https://openidconnect.googleapis.com/v1/userinfo', {
+       headers: { Authorization: `Bearer ${token.access_token}` },
+       signal: AbortSignal.any([signal, AbortSignal.timeout(30000)]),
+     });
+-    if (!identityResponse.ok) throw new Error('无法核对 Google 账号，请重试。');
++    if (!identityResponse.ok) throw new GoogleAuthorizationError('无法核对 Google 账号，请重试。');
+     const identity = await identityResponse.json();
+-    if (!identity.email_verified || !identity.email || (email && identity.email.toLowerCase() !== email.toLowerCase())) {
+-      throw new Error('授权的 Google 账号与当前邮箱不同，请选择对应账号。');
++    if (!identity.email_verified || typeof identity.email !== 'string' || !identity.email ||
++        (email && !sameGoogleMailbox(email, identity.email))) {
++      throw new GoogleAuthorizationError('授权的 Google 账号与当前邮箱不同，请选择对应账号。');
+     }
+     return {
+       emailAddress: identity.email as string,
+diff --git a/app/internal_packages/onboarding/lib/paper-reed-google-page.tsx b/app/internal_packages/onboarding/lib/paper-reed-google-page.tsx
+index 15ee72e..050f82a 100644
+--- a/app/internal_packages/onboarding/lib/paper-reed-google-page.tsx
++++ b/app/internal_packages/onboarding/lib/paper-reed-google-page.tsx
+@@ -1,62 +1,144 @@
+ import React from 'react';
+ import { Account, AccountStore } from 'mailspring-exports';
+ import * as OnboardingActions from './onboarding-actions';
+-import { authorizeGoogle } from './paper-reed-google-auth';
++import { authorizeGoogle, GoogleAuthorizationError, sameGoogleMailbox } from './paper-reed-google-auth';
+ import { buildPaperReedGmailAccount } from './onboarding-helpers';
+ 
++const mailboxErrors = new Map([
++  ['ErrorConnection', '暂时无法连接 Gmail 服务器。请稍后重试。'],
++  ['ErrorGmailIMAPNotEnabled', 'Gmail 拒绝了 IMAP 访问。工作或学校邮箱请联系管理员启用 IMAP。个人邮箱请先确认可在网页版正常使用。'],
++  ['ErrorInvalidAccount', '找不到收件箱或「所有邮件」。请在 Gmail 网页版确认邮箱可用，并检查相关文件夹是否允许通过 IMAP 访问。'],
++  ['ErrorAuthentication', 'Gmail 拒绝了登录。请重新选择对应的 Google 账号并授权。'],
++  ['ErrorGmailExceededBandwidthLimit', '此邮箱已达到 Gmail 的传输限额。请稍后重试。'],
++  ['ErrorGmailTooManySimultaneousConnections', '此邮箱的连接数已达到上限。请关闭其他邮件客户端后重试。'],
++  ['ErrorCertificate', '无法验证 Gmail 服务器的证书。请检查是否有网络软件拦截安全连接。'],
++]);
++
++function googleConnectionErrorMessage(error: unknown, connecting: boolean) {
++  if (error instanceof GoogleAuthorizationError) return error.message;
++  const diagnostic = error as { errorCode?: string; isNetworkError?: boolean } | null;
++  if (diagnostic?.isNetworkError === true) return '网络连接中断。请检查网络后重试。';
++  return mailboxErrors.get(diagnostic?.errorCode) || (connecting
++    ? 'Google 已授权，但未能连接邮箱。请重试。'
++    : '未能完成 Google 登录。请重试。');
++}
++
+ export default class PaperReedGooglePage extends React.Component<{
+   account: Account;
+   isCurrentVisit?: () => boolean;
+ }> {
+   state = { phase: 'idle', error: '' };
+   authorization?: AbortController;
++  loginButton = React.createRef<HTMLButtonElement>();
++  cancelButton = React.createRef<HTMLButtonElement>();
+ 
+   componentWillUnmount() {
+     this.authorization?.abort();
+   }
+ 
+   connect = async () => {
++    if (this.authorization || this.props.isCurrentVisit?.() === false) return;
+     const controller = new AbortController();
+-    const isCurrent = () => !controller.signal.aborted && this.props.isCurrentVisit?.() !== false;
++    const isCurrent = () =>
++      this.authorization === controller && !controller.signal.aborted &&
++      this.props.isCurrentVisit?.() !== false;
+     this.authorization = controller;
+     this.setState({ phase: 'authorizing', error: '' });
++    const requested = this.props.account;
++    const windowAccountId = AppEnv.getWindowProps().existingAccountJSON?.id;
++    const reconnectId = requested.id === windowAccountId ? windowAccountId : undefined;
+     try {
+-      const authorization = await authorizeGoogle(this.props.account.emailAddress, controller.signal);
++      const authorization = await authorizeGoogle(requested.emailAddress, controller.signal);
+       if (!isCurrent()) return;
+       this.setState({ phase: 'connecting' });
+-      const existing = AccountStore.accounts().find(a =>
+-        a.emailAddress.toLowerCase() === authorization.emailAddress.toLowerCase()
+-      );
+-      const account = await buildPaperReedGmailAccount(authorization, existing);
++      const accounts = AccountStore.accounts();
++      const verifiedEmail = authorization.emailAddress;
++      const reconnecting = reconnectId && accounts.find(a => a.id === reconnectId);
++      if (reconnectId && (!reconnecting || !sameGoogleMailbox(reconnecting.emailAddress, verifiedEmail))) {
++        throw new GoogleAuthorizationError('要重新连接的邮箱已变更。请关闭此窗口后重新连接。');
++      }
++      const byAddress = (email: string) => accounts.find(a => a.emailAddress === email) ||
++        accounts.find(a => a.emailAddress.toLowerCase() === email.toLowerCase());
++      const entered = sameGoogleMailbox(requested.emailAddress, verifiedEmail) && byAddress(requested.emailAddress);
++      const existing = reconnecting || entered || byAddress(verifiedEmail) ||
++        accounts.find(a => sameGoogleMailbox(a.emailAddress, verifiedEmail));
++      const account = await buildPaperReedGmailAccount(authorization, existing, requested.name);
+       if (!isCurrent()) return;
+-      OnboardingActions.finishAndAddAccount(account);
++      if (existing && !AccountStore.accounts().some(a =>
++        a.id === account.id && a.emailAddress === account.emailAddress
++      )) {
++        throw new GoogleAuthorizationError('要重新连接的邮箱已变更。请关闭此窗口后重新连接。');
++      }
++      OnboardingActions.finishAndAddAccount(account, existing);
+     } catch (error) {
+-      if (isCurrent()) this.setState({ error: error.message });
++      if (isCurrent()) {
++        this.setState({ error: googleConnectionErrorMessage(error, this.state.phase === 'connecting') });
++      }
+     } finally {
+-      if (isCurrent()) this.setState({ phase: 'idle' });
++      if (isCurrent()) {
++        this.authorization = undefined;
++        const restoreFocus = this.cancelButton.current &&
++          (document.activeElement === this.cancelButton.current || document.activeElement === document.body);
++        this.setState({ phase: 'idle' }, () => {
++          if (restoreFocus) this.loginButton.current?.focus();
++        });
++      }
+     }
+   };
+ 
++  cancel = () => {
++    this.authorization?.abort();
++    this.authorization = undefined;
++    this.setState({ phase: 'idle', error: '' }, () => this.loginButton.current?.focus());
++  };
++
+   render() {
+-    const busy = this.state.phase !== 'idle';
+-    const reconnect = AccountStore.accounts().some(a => a.emailAddress === this.props.account.emailAddress);
+-    return <div className="page account-setup">
+-      <div className="pr-onboarding-brand">Paper Reed<span>让邮件回归从容</span></div>
+-      <h2>{reconnect ? '重新连接 Google 邮箱' : '连接 Google 邮箱'}</h2>
+-      <p className="message">{this.props.account.emailAddress || 'Gmail 和 Google Workspace'}<br />
+-        在浏览器中登录 Google，一次授权即可收发邮件。</p>
+-      {busy && <p className="message" role="status">{this.state.phase === 'authorizing'
+-        ? '请在浏览器中完成 Google 登录。完成后将自动返回连接流程。'
+-        : 'Google 已授权，正在连接邮件服务器…'}</p>}
+-      {this.state.error && <p className="message error" role="alert">{this.state.error}</p>}
+-      <div className="pr-onboarding-actions">
+-        <button className="btn btn-large" onClick={() => OnboardingActions.moveToPreviousPage()}>{busy ? '取消连接' : '返回邮箱选择'}</button>
+-        {' '}
+-        <button className="btn btn-large btn-add-account" data-google-connect disabled={busy} onClick={this.connect}>
+-          {busy ? '连接中…' : '使用 Google 登录'}
+-        </button>
++    const { phase, error } = this.state;
++    const busy = phase !== 'idle';
++    const { emailAddress } = this.props.account;
++    const reconnect = AccountStore.accounts().some(account => sameGoogleMailbox(account.emailAddress, emailAddress));
++    return (
++      <div className="page account-setup pr-google-setup">
++        <div className="pr-onboarding-brand">Paper Reed</div>
++        <section className="pr-google-content">
++          <h2>{reconnect ? '重新连接 Google 邮箱' : '连接 Google 邮箱'}</h2>
++          {emailAddress && <p className="pr-google-account">{emailAddress}</p>}
++          <p className="pr-google-handoff">
++            {emailAddress ? '在浏览器中选择上方的 Google 账号。' : '在浏览器中登录 Gmail 或 Google Workspace。'}
++            <br />
++            允许 Paper Reed 收发邮件。
++          </p>
++          <button
++            type="button"
++            className="btn btn-large btn-add-account"
++            data-google-connect
++            ref={this.loginButton}
++            aria-disabled={busy}
++            onClick={this.connect}
++            onKeyDown={event => {
++              if (event.repeat && event.key === 'Enter') event.preventDefault();
++            }}
++          >
++            {error ? '重试 Google 登录' : '使用 Google 登录'}
++          </button>
++          <div className="pr-google-status" role="status">
++            {phase === 'authorizing' && '等待浏览器中的授权。完成后请返回 Paper Reed。'}
++            {phase === 'connecting' && '已收到 Google 授权，正在验证邮箱连接…'}
++          </div>
++          {busy && (
++            <button
++              type="button"
++              className="btn btn-large"
++              ref={this.cancelButton}
++              onClick={this.cancel}
++            >
++              取消连接
++            </button>
++          )}
++          {error && <p className="pr-google-error" role="alert">{error}</p>}
++          <p className="pr-onboarding-note">登录凭据加密保存在本机。</p>
++        </section>
+       </div>
+-      <p className="pr-onboarding-note">凭据加密保存在本机</p>
+-    </div>;
++    );
+   }
+ }
+diff --git a/app/internal_packages/onboarding/styles/onboarding.less b/app/internal_packages/onboarding/styles/onboarding.less
+index 30a703e..d6d1426 100644
+--- a/app/internal_packages/onboarding/styles/onboarding.less
++++ b/app/internal_packages/onboarding/styles/onboarding.less
+@@ -934,4 +934,31 @@ body.platform-win32 {
+     font-size: 11px;
+     margin-top: 25px;
+   }
++  .pr-google-setup {
++    padding-inline: 24px;
++    .pr-onboarding-brand { margin-bottom: 12px; }
++    .pr-google-content { max-width: 440px; margin: 0 auto; overflow-wrap: anywhere; }
++    .pr-google-account { margin: 0 0 4px; font-weight: 600; }
++    .pr-google-handoff { margin: 0 0 16px; color: #626b60; line-height: 22px; }
++    .btn { min-height: 36px; }
++    .btn-add-account { min-width: 160px; }
++    .btn-add-account[aria-disabled='true'] {
++      background: #edf0e8;
++      border-color: #d9ddd4;
++      color: #586650;
++      cursor: default;
++    }
++    .btn:focus-visible { outline: 2px solid #4b634f; outline-offset: 2px; }
++    .pr-google-status:not(:empty) { margin: 16px 0 8px; color: #586650; line-height: 22px; }
++    .pr-google-error {
++      margin: 16px auto 0;
++      padding: 8px 12px;
++      border-left: 2px solid #a56a60;
++      background: #f5ede8;
++      color: #813f36;
++      line-height: 22px;
++      text-align: left;
++    }
++    .pr-onboarding-note { margin-top: 16px; color: #626b60; }
++  }
+ }
+diff --git a/app/src/browser/application.ts b/app/src/browser/application.ts
+index 61b3c4a..cfbb732 100644
+--- a/app/src/browser/application.ts
++++ b/app/src/browser/application.ts
+@@ -1,4 +1,4 @@
+-import { CredentialStore } from './credential-store';
++import { CredentialStore, type AccountReconnect } from './credential-store';
+ /* eslint global-require: "off" */
+ 
+ import '../safe-shell';
+@@ -992,6 +992,36 @@ export default class Application extends EventEmitter {
+     handleFromMailspringWindows(ipcMain, 'credentials:update', (_event, change) =>
+       credentials.update(change)
+     );
++    handleFromMailspringWindows(
++      ipcMain,
++      'credentials:reconnect-account',
++      (_event, request: AccountReconnect) => credentials.update({ set: request.secrets }, encrypted => {
++        const accounts = this.config.get('accounts') || [];
++        const { id, emailAddress, authedAt } = request.expected;
++        const index = accounts.findIndex(account =>
++          account.id === id && account.emailAddress === emailAddress &&
++          Number(account.authedAt ?? 0) === (authedAt ?? 0)
++        );
++        if (index === -1) return false;
++
++        accounts[index] = {
++          ...accounts[index],
++          provider: request.provider,
++          settings: request.settings,
++          authedAt: request.authedAt,
++          syncState: 'ok',
++        };
++        delete accounts[index].sync_error;
++        // Publish the account and its encrypted credentials together, after the last await.
++        this.configPersistenceManager.setSettings({
++          ...this.configPersistenceManager.settings,
++          accounts,
++          accountsVersion: (this.config.get('accountsVersion') || 0) + 1,
++          credentials: encrypted.toJSON(),
++        }, undefined);
++        return true;
++      })
++    );
+     registerQuickpreviewIPCHandlers(ipcMain);
+     registerNotificationIPCHandlers(ipcMain);
+     registerViewSessionIPCHandlers(ipcMain);
+diff --git a/app/src/browser/credential-store.ts b/app/src/browser/credential-store.ts
+index c7e799a..387adcd 100644
+--- a/app/src/browser/credential-store.ts
++++ b/app/src/browser/credential-store.ts
+@@ -2,6 +2,13 @@ import { safeStorage } from 'electron';
+ 
+ export type KeySet = Record<string, string>;
+ export type CredentialChange = { set?: KeySet; remove?: string[]; removePrefix?: string };
++export type AccountReconnect = {
++  expected: { id: string; emailAddress: string; authedAt: number | null };
++  settings: Record<string, unknown>;
++  provider: string;
++  authedAt: number;
++  secrets: KeySet;
++};
+ 
+ export const secureStorage = {
+   isAvailable: () => safeStorage.isAsyncEncryptionAvailable(),
+@@ -30,7 +37,9 @@ export class CredentialStore {
+     return this.serial(() => this.readKeys());
+   }
+ 
+-  update(change: CredentialChange): Promise<void> {
++  update(change: CredentialChange): Promise<void>;
++  update(change: CredentialChange, commit: (encrypted: Buffer) => boolean): Promise<boolean>;
++  update(change: CredentialChange, commit?: (encrypted: Buffer) => boolean): Promise<void | boolean> {
+     return this.serial(async () => {
+       if (change.removePrefix !== undefined && !change.removePrefix)
+         throw new Error('Credential removal requires a non-empty prefix.');
+@@ -40,7 +49,9 @@ export class CredentialStore {
+       if (change.removePrefix)
+         for (const key of Object.keys(keys))
+           if (key.startsWith(change.removePrefix)) delete keys[key];
+-      await this.writeKeys(keys);
++      const encrypted = await this.encryptKeys(keys);
++      if (commit) return commit(encrypted);
++      this.config.set('credentials', encrypted);
+     });
+   }
+ 
+@@ -60,7 +71,7 @@ export class CredentialStore {
+     if (decoded.shouldReEncrypt && !this.reEncryptAttempted) {
+       this.reEncryptAttempted = true;
+       try {
+-        await this.writeKeys(keys);
++        this.config.set('credentials', await this.encryptKeys(keys));
+       } catch {
+         // Successfully read credentials remain usable if an optional migration fails.
+         console.warn('Could not migrate saved credentials to the current keychain provider.');
+@@ -69,7 +80,7 @@ export class CredentialStore {
+     return keys;
+   }
+ 
+-  private async writeKeys(keys: KeySet) {
++  private async encryptKeys(keys: KeySet) {
+     if (!(await this.storage.isAvailable()))
+       throw new Error(
+         'Secure credential storage is unavailable. Unlock your system keychain and restart.'
+@@ -77,6 +88,6 @@ export class CredentialStore {
+     const bytes = await this.storage.encrypt(JSON.stringify(keys));
+     if (process.platform === 'linux' && bytes.subarray(0, 3).toString() === 'v10')
+       throw new Error('The desktop keyring is unavailable; refusing the plaintext fallback key.');
+-    this.config.set('credentials', bytes);
++    return bytes;
+   }
+ }
+diff --git a/app/src/flux/stores/account-store.ts b/app/src/flux/stores/account-store.ts
+index f1a4e87..52b69af 100644
+--- a/app/src/flux/stores/account-store.ts
++++ b/app/src/flux/stores/account-store.ts
+@@ -239,6 +239,12 @@ class _AccountStore extends MailspringStore {
+     AppEnv.config.set(configСontainerFolderDefaultKey, this._containerFolderDefault);
+   };
+ 
++  reconnectAccount = async (account: Account, existing: Account): Promise<Account | null> => {
++    if (!(await KeyManager.reconnectAccount(account, existing))) return null;
++    AppEnv.config.load();
++    return this.accountForId(existing.id) || null;
++  };
++
+   // Returns the stored account: an account reconnected under a new id keeps its existing one.
+   addAccount = async (account: Account) => {
+     if (!account.emailAddress || !account.provider || !(account instanceof Account)) {
+diff --git a/app/src/key-manager.ts b/app/src/key-manager.ts
+index d1ad4c5..c9ad6c2 100644
+--- a/app/src/key-manager.ts
++++ b/app/src/key-manager.ts
+@@ -1,7 +1,7 @@
+ import { localized } from './intl';
+ import { Account } from 'mailspring-exports';
+ import { ipcRenderer } from 'electron';
+-import type { KeySet, CredentialChange } from './browser/credential-store';
++import type { AccountReconnect, KeySet, CredentialChange } from './browser/credential-store';
+ 
+ const accountKeys = (email: string) =>
+   ['imap', 'smtp', 'refresh-token', 'gmail-refresh-token', 'gmail-client-secret'].map(
+@@ -15,6 +15,14 @@ const secretFields = [
+   'gmail_client_secret',
+ ];
+ 
++function splitAccountSecrets(account: Account) {
++  const keys = accountKeys(account.emailAddress);
++  const set = Object.fromEntries(keys.map((key, i) => [key, account.settings[secretFields[i]]]));
++  const clean = account.clone();
++  secretFields.forEach(field => delete clean.settings[field]);
++  return { clean, set };
++}
++
+ class KeyManager {
+   private _fatalErrorReported = false;
+ 
+@@ -31,13 +39,27 @@ class KeyManager {
+   }
+ 
+   async extractAndStoreAccountSecrets(account: Account) {
+-    const keys = accountKeys(account.emailAddress);
+-    await this.update({
+-      set: Object.fromEntries(keys.map((key, i) => [key, account.settings[secretFields[i]]])),
+-    });
+-    const next = account.clone();
+-    secretFields.forEach((field) => delete next.settings[field]);
+-    return next;
++    const { clean, set } = splitAccountSecrets(account);
++    await this.update({ set });
++    return clean;
++  }
++
++  async reconnectAccount(account: Account, existing: Account): Promise<boolean> {
++    const { clean, set } = splitAccountSecrets(account);
++    const { id, emailAddress, authedAt } = existing.toJSON();
++    const next = clean.toJSON();
++    const request: AccountReconnect = {
++      expected: { id, emailAddress, authedAt: authedAt ?? null },
++      provider: next.provider,
++      settings: next.settings,
++      authedAt: next.authedAt,
++      secrets: set,
++    };
++    try {
++      return await ipcRenderer.invoke('credentials:reconnect-account', request);
++    } catch (err) {
++      this._reportFatalError(err);
++    }
+   }
+ 
+   async insertAccountSecrets(account: Account, keys: KeySet = null) {
+diff --git a/app/src/mailsync-process.ts b/app/src/mailsync-process.ts
+index 79295f0..1fb2c14 100644
+--- a/app/src/mailsync-process.ts
++++ b/app/src/mailsync-process.ts
+@@ -345,7 +345,7 @@ export class MailsyncProcess extends EventEmitter {
+             if (response.error_advice) {
+               msg = `${msg} ${response.error_advice}`;
+             }
+-            const error = new Error(msg);
++            const error = Object.assign(new Error(msg), { errorCode: response.error });
+             (error as any).rawLog = this._stripSecrets(response.log);
+             (error as any).errorAdvice = response.error_advice || null;
+             // Certificates that failed validation, for the user to review and accept.

@@ -9,9 +9,19 @@ const ts = require(path.join(root, 'node_modules/typescript'));
 const source = fs.readFileSync(path.join(root, 'app/internal_packages/onboarding/lib/paper-reed-google-auth.ts'), 'utf8');
 const js = ts.transpileModule(source, { compilerOptions: { module: ts.ModuleKind.CommonJS, target: ts.ScriptTarget.ES2022, esModuleInterop: true } }).outputText;
 const scope = 'https://mail.google.com/';
+const addressCases = {
+  'gmail-dots': { email: 'johnsmith@gmail.com', returned: 'john.smith@gmail.com', accepted: true },
+  'googlemail-alias': { email: 'johnsmith@googlemail.com', returned: 'johnsmith@gmail.com', accepted: true },
+  'gmail-plus': { email: 'john.smith+work@gmail.com', returned: 'johnsmith@gmail.com', accepted: true },
+  'different-gmail': { email: 'johnsmith@gmail.com', returned: 'jane.smith@gmail.com', accepted: false },
+  'workspace-dots': { email: 'johnsmith@workspace.example.test', returned: 'john.smith@workspace.example.test', accepted: false },
+};
 (async () => {
-  for (const mode of ['success', 'new-account', 'missing-config', 'cancel-consent', 'wrong-account', 'missing-scope', 'send-only-scope', 'no-refresh', 'token-error', 'abort']) {
+  for (const mode of ['success', 'new-account', 'missing-config', 'cancel-consent', 'wrong-account', 'missing-scope', 'send-only-scope', 'no-refresh', 'token-error', 'abort', ...Object.keys(addressCases)]) {
     let authURL, tokenRequests = 0;
+    const addressCase = addressCases[mode];
+    const email = mode === 'new-account' ? '' : addressCase?.email || 'test@example.test';
+    const returned = mode === 'wrong-account' ? 'another@example.test' : addressCase?.returned || 'test@example.test';
     const controller = new AbortController();
     const exports = {};
     const mocks = {
@@ -26,6 +36,7 @@ const scope = 'https://mail.google.com/';
         const p = authURL.searchParams;
         if (mode === 'abort') { controller.abort(); return; }
         assert.equal(p.get('client_id'), 'own-client');
+        assert.equal(p.get('login_hint'), email);
         assert.equal(p.get('scope'), `openid email ${scope}`);
         assert.equal(p.get('code_challenge_method'), 'S256');
         const callback = new URL(p.get('redirect_uri'));
@@ -53,19 +64,20 @@ const scope = 'https://mail.google.com/';
         }
         assert.equal(url, 'https://openidconnect.googleapis.com/v1/userinfo');
         assert.equal(options.headers.Authorization, 'Bearer fixture-access');
-        return { ok: true, json: async () => ({ email: mode === 'wrong-account' ? 'another@example.test' : 'test@example.test', email_verified: true }) };
+        return { ok: true, json: async () => ({ email: returned, email_verified: true }) };
       },
     });
-    const authorize = () => exports.authorizeGoogle(mode === 'new-account' ? '' : 'test@example.test', controller.signal);
-    if (mode === 'success' || mode === 'new-account') {
+    const authorize = () => exports.authorizeGoogle(email, controller.signal);
+    if (mode === 'success' || mode === 'new-account' || addressCase?.accepted) {
       const result = await authorize();
-      assert.equal(result.emailAddress, 'test@example.test');
+      assert.equal(result.emailAddress, returned);
       assert.equal(result.settings.gmail_api_send, true);
       assert.equal(result.settings.refresh_token, 'fixture-refresh');
       assert.equal(result.settings.gmail_refresh_token, undefined);
       assert.equal(result.settings.access_token, undefined, 'Access tokens are not persisted');
     } else {
-      await assert.rejects(authorize());
+      const mismatch = mode === 'wrong-account' || addressCase?.accepted === false;
+      await assert.rejects(authorize(), mismatch ? /授权的 Google 账号与当前邮箱不同/ : undefined);
       if (mode === 'missing-config' || mode === 'abort') assert.equal(tokenRequests, 0);
     }
     console.log('PASS', mode);

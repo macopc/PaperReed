@@ -6,9 +6,10 @@ const root = path.resolve(process.argv[2]), r = createRequire(path.join(root,'ap
 const ts = r('typescript');
 const folder = path.join(root,'app/internal_packages/onboarding/lib');
 let ownClient = 'paper-reed-test-client', mode = 'success', tested = [], exchanged = 0;
+let existingAccountJSON;
 const requests = [], results = [];
 const AppEnv = {config:{get:key=>key==='core.paperReed.enabled'?true:key==='core.paperReed.microsoftClientId'?ownClient:undefined},
- getLoadSettings:()=>({}),focus(){},showErrorDialog(e){throw Error(e.message)},reportError(){}};
+ getLoadSettings:()=>({}),getWindowProps:()=>({existingAccountJSON}),focus(){},showErrorDialog(e){throw Error(e.message)},reportError(){}};
 class Account {
  constructor(data){Object.assign(this,data);this.settings=data.settings||{}}
  clone(){return new Account(JSON.parse(JSON.stringify(this)))}
@@ -61,28 +62,67 @@ async function waitFor(fn){const end=Date.now()+10000;while(Date.now()<end){if(f
  tested=[];
  const gmail=await helpers.buildPaperReedGmailAccount(googleGrant);
  assert.equal(gmail.provider,'gmail');assert.equal(gmail.settings.imap_host,'imap.gmail.com');
+ assert.equal(gmail.name,'test');
  assert.equal(gmail.settings.refresh_token,'full-mail-refresh');assert.equal(gmail.settings.imap_password,undefined);
  assert.equal(tested.length,1);
  const old=new Account({id:'stable-local-id',emailAddress:'test@example.test',name:'My mailbox',color:'#556677',
   provider:'imap',settings:{imap_password:'old-password',smtp_password:'old-password',gmail_refresh_token:'old-send-grant'}});
- const reconnected=await helpers.buildPaperReedGmailAccount(googleGrant,old);
+ const reconnected=await helpers.buildPaperReedGmailAccount(googleGrant,old,'Other name');
  assert.equal(reconnected.id,old.id);assert.equal(tested[1].id,old.id);
  assert.equal(reconnected.name,old.name);assert.equal(reconnected.color,old.color);
  assert.equal(reconnected.settings.gmail_refresh_token,undefined);assert.equal(reconnected.settings.smtp_password,undefined);
  assert.equal(old.settings.imap_password,'old-password','Failed validation must leave existing account untouched');
  pass('Gmail new login and legacy reconnect keep identity, replace password/send-only grant');
+ const manuallyNamed=await helpers.buildPaperReedGmailAccount(googleGrant,undefined,'  Gmail fixture  ');
+ assert.equal(manuallyNamed.name,'Gmail fixture');
+ assert.equal((await helpers.buildPaperReedGmailAccount(googleGrant,undefined,'   ')).name,'test');
+ pass('Gmail first login keeps a supplied sender name and reconnect preserves the stored name');
+ const alias = new Account({id:'legacy-mailbox',emailAddress:'johnsmith@googlemail.com',name:'My Gmail',settings:{}});
+ const verifiedGrant = {...googleGrant,emailAddress:'john.smith@gmail.com'};
+ const aliasReconnected=await helpers.buildPaperReedGmailAccount(verifiedGrant,alias);
+ assert.equal(aliasReconnected.id,alias.id);
+ assert.equal(aliasReconnected.name,alias.name);
+ assert.equal(aliasReconnected.emailAddress,alias.emailAddress);
+ assert.equal(aliasReconnected.settings.imap_username,verifiedGrant.emailAddress);
+ assert.equal(aliasReconnected.settings.smtp_username,verifiedGrant.emailAddress);
+ pass('Gmail alias reconnect keeps the stored address and uses the verified email for server validation');
+ const canonical = new Account({id:'canonical-mailbox',emailAddress:verifiedGrant.emailAddress,name:'Other Gmail'});
+ let savedAccounts = [canonical, alias];
+ existingAccountJSON = {id:alias.id};
  let finishCount=0, finishValidation;
+ const googleAuth=load('paper-reed-google-auth.ts',{electron:{}});
  const GooglePage=load('paper-reed-google-page.tsx',{
-  './paper-reed-google-auth':{authorizeGoogle:async()=>googleGrant},
-  './onboarding-helpers':{buildPaperReedGmailAccount:()=>new Promise(resolve=>{finishValidation=resolve})},
+  './paper-reed-google-auth':{...googleAuth,authorizeGoogle:async()=>verifiedGrant},
+  './onboarding-helpers':{buildPaperReedGmailAccount:(_grant,existing)=>new Promise(resolve=>{
+   assert.equal(existing,alias);
+   finishValidation=resolve;
+  })},
   './onboarding-actions':{finishAndAddAccount:()=>finishCount++},
-  'mailspring-exports':{...exportsMock,AccountStore:{accounts:()=>[old]}},
+  'mailspring-exports':{...exportsMock,AccountStore:{accounts:()=>savedAccounts}},
  }).default;
- const googlePage=new GooglePage({account:old});googlePage.setState=next=>Object.assign(googlePage.state,next);
+ const googlePage=new GooglePage({account:alias});googlePage.setState=next=>Object.assign(googlePage.state,next);
+ const reconnecting=googlePage.connect();await waitFor(()=>finishValidation);
+ finishValidation(aliasReconnected);await reconnecting;
+ assert.equal(finishCount,1);
+ pass('Explicit reconnect updates the chosen Gmail alias even with another saved address for that mailbox');
+ finishValidation=undefined;
  const connecting=googlePage.connect();await waitFor(()=>finishValidation);
  assert.equal(googlePage.state.phase,'connecting');
- googlePage.componentWillUnmount();finishValidation(reconnected);await connecting;
- assert.equal(finishCount,0);pass('Leaving Google login during connection validation cannot save the account');
+ googlePage.componentWillUnmount();finishValidation(aliasReconnected);await connecting;
+ assert.equal(finishCount,1);pass('Leaving Google login during connection validation cannot save the account');
+ finishValidation=undefined;
+ const removedPage=new GooglePage({account:alias});removedPage.setState=next=>Object.assign(removedPage.state,next);
+ const removed=removedPage.connect();await waitFor(()=>finishValidation);
+ savedAccounts=[canonical];finishValidation(aliasReconnected);await removed;
+ assert.match(removedPage.state.error,/邮箱已变更/);
+ assert.equal(finishCount,1);pass('Removing the selected account during validation does not recreate it');
+ existingAccountJSON=undefined;
+ savedAccounts=[canonical,alias];finishValidation=undefined;
+ const handoff=new GooglePage({account:new Account({emailAddress:alias.emailAddress})});
+ handoff.setState=next=>Object.assign(handoff.state,next);
+ const validatingHandoff=handoff.connect();await waitFor(()=>finishValidation);
+ finishValidation(aliasReconnected);await validatingHandoff;
+ assert.equal(finishCount,2);pass('IMAP handoff updates the record matching the typed address');
  ownClient='';assert.throws(()=>helpers.buildO365AuthURL(),/未配置/);assert.equal(exchanged,0);
  ownClient='paper-reed-test-client';
  const auth=new URL(helpers.buildO365AuthURL());
