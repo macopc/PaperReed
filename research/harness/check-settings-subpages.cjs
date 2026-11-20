@@ -1,5 +1,8 @@
 const fs = require('node:fs'), path = require('node:path'), assert = require('node:assert/strict');
-module.exports = async ({main, cdp, account, evaluate, until}) => {
+module.exports = async ({main, cdp, account, evaluate, until, work, restartDesktop}) => {
+  if (process.env.PAPER_REED_SUBPAGES_CHECK === 'general') {
+    return require('./check-general-settings.cjs')({main, cdp, evaluate, until, work, restartDesktop});
+  }
   const out = path.resolve(__dirname, '../subpages-validation-2026-11-16');
   fs.mkdirSync(out, {recursive:true});
   const run = s => evaluate(cdp,s), action = s => main.locator(s).first().click();

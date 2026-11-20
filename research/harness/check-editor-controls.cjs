@@ -41,7 +41,7 @@ c.commit()
   if (process.env.PAPER_REED_CLI_ONBOARDING_CHECK) { await require('./check-cli-onboarding.cjs')({main,cdp,account,cli,draft,work,evaluate,until}); return; }
   if (process.env.PAPER_REED_TEMPLATE_AGENT_CHECK) { await require('./check-template-agent-settings.cjs')({main,cdp,account,cli,draft,work,evaluate,until}); return; }
   if (process.env.PAPER_REED_ORGANIZATION_CHECK) { await require('./check-organization-settings.cjs')({main,cdp,account,evaluate,until}); return; }
-  if (process.env.PAPER_REED_SUBPAGES_CHECK) { await require('./check-settings-subpages.cjs')({main,cdp,account,evaluate,until}); return; }
+  if (process.env.PAPER_REED_SUBPAGES_CHECK) { await require('./check-settings-subpages.cjs')({main,cdp,account,evaluate,until,work,restartDesktop}); return; }
   if (process.env.PAPER_REED_SETTINGS_CHECK) { await require('./check-settings-details.cjs')({main,cdp,work,account,cli,click,evaluate,until,draft}); return; }
   await action('.to-field input[role=combobox]');
   await main.keyboard.insertText('Maya');

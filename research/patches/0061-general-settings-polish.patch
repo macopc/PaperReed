@@ -1,0 +1,361 @@
+diff --git a/app/internal_packages/paper-reed/styles/paper-reed.less b/app/internal_packages/paper-reed/styles/paper-reed.less
+index b51e8c5..09b1e04 100644
+--- a/app/internal_packages/paper-reed/styles/paper-reed.less
++++ b/app/internal_packages/paper-reed/styles/paper-reed.less
+@@ -390,12 +390,22 @@
+   .pr-settings-group[open] > summary, .pr-settings-group > h2 { margin-bottom:14px; }
+   .pr-settings-group > section { padding:0; }
+   .pr-general .pr-settings-group > section > h6 { display:none; }
+-  .pr-general .item { padding:8px 0; line-height:22px; }
+-  .pr-general .item:has(select) { display:flex; align-items:center; flex-wrap:wrap; gap:8px; }
+-  .pr-general .item:has(select) > label { flex:1; }
+-  .pr-general .item:has(select) > select { margin:0; max-width:60%; }
+-  .pr-general .item .platform-note { margin-left:20px; }
+-  .pr-local-data button + button { margin-left:8px; }
++  .pr-general .pr-settings-group { padding:14px 0; }
++  .pr-general .pr-settings-group:first-child { padding-top:0; }
++  .pr-general .pr-settings-group[open] > summary, .pr-general .pr-settings-group > h2 { margin-bottom:8px; }
++  .pr-general .item { padding:5px 0; line-height:22px; }
++  .pr-general .item:has(> select) { display:flex; align-items:center; flex-wrap:wrap; gap:4px 12px; }
++  .pr-general .item:has(> select) > label { flex:1 0 116px; }
++  .pr-general .item > select { flex:0 1 206px; min-width:0; min-height:34px; max-width:100%; margin:0; }
++  .pr-general .item .platform-note { margin:2px 0 4px 20px; }
++  .pr-general .item:has(> select) > .platform-note { flex:0 0 100%; margin-left:0; }
++  .pr-recipient-warnings { display:flex; align-items:center; flex-wrap:wrap; gap:8px 12px; margin-top:8px; }
++  .pr-recipient-warnings [role=status] { color:#4b634f; font-size:12px; }
++  .pr-local-data-action { display:flex; align-items:center; justify-content:space-between; flex-wrap:wrap; gap:6px 12px; padding:6px 0; }
++  .pr-local-data-action + .pr-local-data-action { margin-top:6px; border-top:1px solid #dfe2d9; padding-top:12px; }
++  .pr-local-data-action p { flex:1 1 170px; margin:0; color:#626b60; }
++  .pr-settings-page .pr-local-data .pr-reset-settings { color:#9a433e; border-color:#e6ceca; }
++  .pr-settings-page .pr-local-data .pr-reset-settings:hover { background:#f7eeea; }
+   .pr-settings-page .accounts-content { display:grid; grid-template-columns:220px minmax(0,1fr); gap:28px; }
+   .pr-settings-page .accounts-content .account-list { width:auto; min-width:0; border:0; background:transparent; }
+   .pr-settings-page .accounts-content .account-details { width:auto; min-width:0; padding:0 0 0 28px; border:0; border-left:1px solid #dfe2d9; background:transparent; }
+diff --git a/app/internal_packages/preferences/lib/tabs/config-schema-item.tsx b/app/internal_packages/preferences/lib/tabs/config-schema-item.tsx
+index 2cb78ba..7574db8 100644
+--- a/app/internal_packages/preferences/lib/tabs/config-schema-item.tsx
++++ b/app/internal_packages/preferences/lib/tabs/config-schema-item.tsx
+@@ -3,6 +3,16 @@ import _ from 'underscore';
+ import _str from 'underscore.string';
+ import { ConfigLike, ConfigSchemaLike } from '../types';
+ 
++const paperReedOptions: Record<string, Record<string, string>> = {
++  'core.reading.markAsReadDelay': { 0: '立即', 500: '0.5 秒后', 2000: '2 秒后', '-1': '手动标为已读' },
++  'core.reading.emailRenderMode': { light: '浅色', dark: '深色' },
++  'core.sending.defaultSendType': { send: '发送', 'send-and-archive': '发送并归档' },
++  'core.sending.defaultReplyType': { reply: '回复', 'reply-all': '回复全部' },
++  'core.sending.undoSend': { 0: '关闭', 5000: '5 秒', 15000: '15 秒', 30000: '30 秒', 60000: '60 秒' },
++  'core.sending.defaultAccountIdForSend': { 'selected-mailbox': '自动选择' },
++  'core.notifications.countBadge': { hide: '隐藏角标', unread: '显示未读数', total: '显示邮件总数' },
++};
++
+ /*
+ This component renders input controls for a subtree of the Mailspring config-schema
+ and reads/writes current values using the `config` prop, which is expected to
+@@ -67,7 +77,7 @@ class ConfigSchemaItem extends React.Component<ConfigSchemaItemProps> {
+       'core.sending.defaultSendType': '默认发送方式',
+       'core.sending.defaultReplyType': '默认回复方式',
+       'core.sending.undoSend': '允许撤销发送的时间',
+-      'core.sending.defaultAccountIdForSend': '新邮件默认发件账号',
++      'core.sending.defaultAccountIdForSend': '默认发件账号',
+       'core.notifications.enabled': '收到未读邮件时提醒',
+       'core.notifications.enabledForRepeatedTrackingEvents': '重复打开或点击邮件时提醒',
+       'core.notifications.sounds': '收到新邮件时播放声音',
+@@ -80,11 +90,12 @@ class ConfigSchemaItem extends React.Component<ConfigSchemaItemProps> {
+     const title = (paperReed && titles[this.props.keyPath]) || this.props.configSchema.title;
+     const noteText =
+       paperReed && this.props.keyPath === 'core.sending.defaultAccountIdForSend'
+-        ? '用于全部邮箱视图中新建邮件。单账号视图使用该账号；回复使用原邮件账号。'
++        ? '在「全部邮箱」写新邮件或打开独立写信窗口时，优先使用所选账号。单邮箱内的「写邮件」使用当前账号。「全部邮箱」选「自动选择」时会用首个账号。回复沿用原邮件账号。'
+         : paperReed && this.props.keyPath === 'core.composing.html'
+           ? '按住 Option 新建或回复，可临时使用纯文本。'
+           : this.props.configSchema.note;
+-    const note = noteText ? <div className="platform-note">{noteText}</div> : null;
++    const noteId = paperReed && noteText ? `${this.props.keyPath}-note` : undefined;
++    const note = noteText ? <div id={noteId} className="platform-note">{noteText}</div> : null;
+     if (this.props.configSchema.type === 'object') {
+       return (
+         <section>
+@@ -102,20 +113,22 @@ class ConfigSchemaItem extends React.Component<ConfigSchemaItemProps> {
+         </section>
+       );
+     } else if (this.props.configSchema.enum) {
++      const options = paperReed ? paperReedOptions[this.props.keyPath] : undefined;
+       return (
+         <div className="item">
+-          <label htmlFor={this.props.keyPath} style={{ paddingRight: 8 }}>
+-            {title}:
++          <label htmlFor={this.props.keyPath} style={paperReed ? undefined : { paddingRight: 8 }}>
++            {paperReed ? title : `${title}:`}
+           </label>
+           <select
+             id={this.props.keyPath}
++            aria-describedby={noteId}
+             onChange={this._onChangeValue}
+             value={this.props.config.get(this.props.keyPath)}
+           >
+             {_.zip(this.props.configSchema.enum, this.props.configSchema.enumLabels).map(
+               ([value, label]) => (
+                 <option key={value} value={value}>
+-                  {label}
++                  {options?.[String(value)] ?? label}
+                 </option>
+               )
+             )}
+@@ -129,6 +142,7 @@ class ConfigSchemaItem extends React.Component<ConfigSchemaItemProps> {
+           <input
+             id={this.props.keyPath}
+             type="checkbox"
++            aria-describedby={noteId}
+             onChange={this._onChangeChecked}
+             checked={!!this.props.config.get(this.props.keyPath)}
+           />
+diff --git a/app/internal_packages/preferences/lib/tabs/language-section.tsx b/app/internal_packages/preferences/lib/tabs/language-section.tsx
+index 13b64de..cf0b1e5 100644
+--- a/app/internal_packages/preferences/lib/tabs/language-section.tsx
++++ b/app/internal_packages/preferences/lib/tabs/language-section.tsx
+@@ -1,17 +1,22 @@
+ import React from 'react';
+-import { localized, getAvailableLanguages } from 'mailspring-exports';
++import { app } from '@electron/remote';
++import { localized, getAvailableLanguages, getCurrentLocale } from 'mailspring-exports';
+ 
+ const LanguageSection = ({ config }: { config?: any; configSchema?: any }) => {
+-  const { automatic, current, verified, experimental } = getAvailableLanguages();
++  const paperReed = AppEnv.config.get('core.paperReed.enabled');
++  const { automatic, automaticLocale, verified, experimental } = getAvailableLanguages();
+ 
+   const configValue = config.get('core.intl.language');
+-  const relaunchRequiredToSet = configValue && current.key !== configValue;
+-  const relaunchRequiredToUnset = !configValue && current.key !== automatic.key;
+-  const relaunchRequired = relaunchRequiredToSet || relaunchRequiredToUnset;
++  const relaunchRequired = getCurrentLocale() !== (configValue || automaticLocale);
+ 
+   const onChangeValue = (event: React.ChangeEvent<HTMLSelectElement>) => {
+     config.set('core.intl.language', event.target.value);
+-    event.target.blur();
++    if (!paperReed) event.target.blur();
++  };
++
++  const relaunch = () => {
++    app.relaunch();
++    app.quit();
+   };
+ 
+   return (
+@@ -20,7 +25,7 @@ const LanguageSection = ({ config }: { config?: any; configSchema?: any }) => {
+ 
+       <div className="item">
+         <label htmlFor="interface-language" className="sr-only">
+-          {localized('Interface Language')}
++          {paperReed ? '界面语言' : localized('Interface Language')}
+         </label>
+         <select
+           id="interface-language"
+@@ -29,11 +34,11 @@ const LanguageSection = ({ config }: { config?: any; configSchema?: any }) => {
+           style={{ marginLeft: 0, marginRight: 0 }}
+         >
+           <option key="auto" value="">
+-            {localized('Automatic')} ({automatic.name})
++            {paperReed ? '跟随系统' : localized('Automatic')} ({automatic.name})
+           </option>
+           <option key="sep1" disabled />
+           <option key="subtitle1" disabled>
+-            {localized('Contributed:')}
++            {paperReed ? '社区翻译' : localized('Contributed:')}
+           </option>
+           {verified.map(({ key, name }) => (
+             <option key={key} value={key}>
+@@ -42,7 +47,7 @@ const LanguageSection = ({ config }: { config?: any; configSchema?: any }) => {
+           ))}
+           <option key="sep2" disabled />
+           <option key="subtitle2" disabled>
+-            {localized('Experimental:')}
++            {paperReed ? '试验性翻译' : localized('Experimental:')}
+           </option>
+           {experimental.map(({ key, name }) => (
+             <option key={key} value={key}>
+@@ -50,19 +55,17 @@ const LanguageSection = ({ config }: { config?: any; configSchema?: any }) => {
+             </option>
+           ))}
+         </select>
+-        {relaunchRequired && (
++        {relaunchRequired && (paperReed ? (
++          <button type="button" onClick={relaunch}>重启以应用</button>
++        ) : (
+           <div
+             className="btn btn-small"
+             style={{ marginLeft: 9, marginRight: 9 }}
+-            onClick={() => {
+-              console.log('lang section relaunch');
+-              require('@electron/remote').app.relaunch();
+-              require('@electron/remote').app.quit();
+-            }}
++            onClick={relaunch}
+           >
+             {localized('Relaunch')}
+           </div>
+-        )}
++        ))}
+       </div>
+     </section>
+   );
+diff --git a/app/internal_packages/preferences/lib/tabs/preferences-general.tsx b/app/internal_packages/preferences/lib/tabs/preferences-general.tsx
+index 353f6de..551c041 100644
+--- a/app/internal_packages/preferences/lib/tabs/preferences-general.tsx
++++ b/app/internal_packages/preferences/lib/tabs/preferences-general.tsx
+@@ -1,6 +1,7 @@
+ /* eslint global-require: 0*/
+ import React from 'react';
+ import fs from 'fs';
++import { app, dialog, getCurrentWindow } from '@electron/remote';
+ import { localized } from 'mailspring-exports';
+ import ConfigSchemaItem from './config-schema-item';
+ import WorkspaceSection from './workspace-section';
+@@ -8,33 +9,61 @@ import SendingSection from './sending-section';
+ import LanguageSection from './language-section';
+ import { ConfigLike, ConfigSchemaLike } from '../types';
+ 
++const localMailDataLoss =
++  '本机规则、标签、置顶、稍后处理和手动分类会被清除。尚未同步的草稿和待处理的邮件操作可能丢失。服务商上的邮件会保留。';
++
+ class PreferencesGeneral extends React.Component<{
+   config: ConfigLike;
+   configSchema: ConfigSchemaLike;
+ }> {
+   static displayName = 'PreferencesGeneral';
+ 
++  state = { recipientWarningsRestored: false };
++
+   _onReboot = () => {
+-    console.log('general relaunch');
+-    const app = require('@electron/remote').app;
+     app.relaunch();
+     app.quit();
+   };
+ 
+   _onResetEmailsThatIgnoreWarnings = () => {
+     localStorage.removeItem('recipientWarningBlacklist');
++    this.setState({ recipientWarningsRestored: true });
+   };
+ 
++  _confirmLocalReset(message: string, detail: string, action: string) {
++    return dialog.showMessageBoxSync(getCurrentWindow(), {
++      type: 'warning',
++      message,
++      detail,
++      buttons: ['取消', action],
++      defaultId: 0,
++      cancelId: 0,
++    }) === 1;
++  }
++
+   _onResetAccountsAndSettings = () => {
+-    const chosen = require('@electron/remote').dialog.showMessageBoxSync({
+-      type: 'info',
+-      message: localized('Are you sure?'),
+-      buttons: [localized('Cancel'), localized('Reset')],
+-    });
++    const paperReed = AppEnv.config.get('core.paperReed.enabled');
++    const confirmed = paperReed
++      ? this._confirmLocalReset(
++          '重置账号与设置？',
++          `Paper Reed 会清除本机资料目录，包括账号及登录配置、快捷键、邮件缓存、签名、模板、Agent 连接，以及存于该目录的附件、自定义词典和模型。重启后需要重新添加账号并接入 Agent。\n\n${localMailDataLoss}`,
++          '重置账号与设置'
++        )
++      : dialog.showMessageBoxSync({
++          type: 'info',
++          message: localized('Are you sure?'),
++          buttons: [localized('Cancel'), localized('Reset')],
++        }) === 1;
+ 
+-    if (chosen === 1) {
++    if (confirmed) {
+       fs.rm(AppEnv.getConfigDirPath(), { recursive: true, force: true }, (err) => {
+         if (err) {
++          if (paperReed) {
++            return AppEnv.showErrorDialog({
++              title: '无法重置账号与设置',
++              message: '未能清除全部本机数据。',
++            }, { detail: err.message });
++          }
+           return AppEnv.showErrorDialog(
+             localized(
+               `Could not reset accounts and settings. Please delete the folder %@ manually.\n\n%@`,
+@@ -49,6 +78,14 @@ class PreferencesGeneral extends React.Component<{
+   };
+ 
+   _onResetEmailCache = () => {
++    if (
++      AppEnv.config.get('core.paperReed.enabled') &&
++      !this._confirmLocalReset(
++        '重建邮件缓存？',
++        `Paper Reed 会重启并重新同步邮件。${localMailDataLoss}`,
++        '重建邮件缓存'
++      )
++    ) return;
+     const ipc = require('electron').ipcRenderer;
+     ipc.send('command', 'application:reset-database', {});
+   };
+@@ -77,9 +114,12 @@ class PreferencesGeneral extends React.Component<{
+           <details className="pr-settings-group">
+             <summary>发送</summary>
+             <SendingSection config={config} configSchema={configSchema} />
+-            <button type="button" onClick={this._onResetEmailsThatIgnoreWarnings}>
+-              恢复收件人警告
+-            </button>
++            <div className="pr-recipient-warnings">
++              <button type="button" onClick={this._onResetEmailsThatIgnoreWarnings}>
++                恢复收件人警告
++              </button>
++              <span role="status">{this.state.recipientWarningsRestored ? '已恢复收件人警告' : ''}</span>
++            </div>
+           </details>
+           {group('notifications', '通知与声音')}
+           {group('attachments', '附件')}
+@@ -89,13 +129,18 @@ class PreferencesGeneral extends React.Component<{
+           </details>
+           <details className="pr-settings-group pr-local-data">
+             <summary>本机数据</summary>
+-            <p>重置缓存会重新同步邮件；重置账号与设置会清除本机配置。</p>
+-            <button type="button" onClick={this._onResetEmailCache}>
+-              重置邮件缓存
+-            </button>
+-            <button type="button" onClick={this._onResetAccountsAndSettings}>
+-              重置账号与设置…
+-            </button>
++            <div className="pr-local-data-action">
++              <p id="pr-rebuild-cache-detail">清除本机规则、标签等整理数据后重新同步。</p>
++              <button type="button" aria-describedby="pr-rebuild-cache-detail" onClick={this._onResetEmailCache}>
++                重建邮件缓存…
++              </button>
++            </div>
++            <div className="pr-local-data-action">
++              <p id="pr-reset-settings-detail">清除本机资料目录，需重新添加账号。</p>
++              <button type="button" className="pr-reset-settings" aria-describedby="pr-reset-settings-detail" onClick={this._onResetAccountsAndSettings}>
++                重置账号与设置…
++              </button>
++            </div>
+           </details>
+         </div>
+       );
+diff --git a/app/src/intl.ts b/app/src/intl.ts
+index 86008d3..92f91ee 100644
+--- a/app/src/intl.ts
++++ b/app/src/intl.ts
+@@ -72,6 +72,7 @@ const LANG_NAMES = {
+   dsb: 'Lower Sorbian',
+   el: 'Greek',
+   en: 'English',
++  'en-gb': 'English (United Kingdom)',
+   eo: 'Esperanto',
+   es: 'Spanish',
+   es_419: 'Spanish - Latin America',
+@@ -283,6 +284,7 @@ export function getAvailableLanguages() {
+   return {
+     current: localeToItem(currentLang),
+     automatic: localeToItem(automaticLang),
++    automaticLocale,
+     verified: VERIFIED_LANGS.map(localeToItem),
+     experimental: langsFiles.filter((f) => !VERIFIED_LANGS.includes(f)).map(localeToItem),
+   };
