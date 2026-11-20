@@ -45,6 +45,10 @@ async function startDesktop(){
    return;
  }
  if(mode==='workspace') {
+   if (process.env.PAPER_REED_SNOOZE_PAGE_CHECK) {
+     await require('./check-snooze-page.cjs')({main,cdp,evaluate,until,account,cli});
+     return;
+   }
    if (process.env.PAPER_REED_SEARCH_PAGE_CHECK) {
      await require('./check-search-page.cjs')({main,cdp,evaluate,until,account});
      return;

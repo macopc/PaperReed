@@ -17,6 +17,11 @@ try:
         samples=[('Maya Chen','Design review · final notes','The revised layouts are ready. Please review the inbox spacing and reply flow.'),('Alex Morgan','Project kickoff — Thursday','Could you confirm the agenda and attendees for Thursday?'),('Billing','Your monthly receipt','Your receipt is ready. This is an isolated test message.'),('Weekly Digest','This week in product design','Three articles about typography, accessibility, and writing tools.'),('Lin Wei','Paper Reed 首版体验走查','我们先看收件箱、阅读和回复的连续体验，再检查异常状态。'),('Jordan Park','Re: Release checklist','The checklist is updated. Let me know which items need another pass.'),('Support','Account notification','Your test account is ready.'),('Sam Lee','A deliberately long subject to check how the inbox handles truncation and competing metadata','Does the row keep sender, date and unread status easy to scan?')]
         for i,(name,subject,body) in enumerate(samples):
             server.append('INBOX',message(i+1,sender=(name,f'sender{i}@example.test'),subject=Header(subject,'utf-8').encode(),body=body, **({'attachment':('incoming.txt',b'Incoming attachment bytes\n'),'extra_headers':{'Cc':'Team <team@example.test>'}} if os.environ.get('PAPER_REED_ATTACHMENTS_CHECK') and i==0 else {})))
+        if os.environ.get('PAPER_REED_SNOOZE_PAGE_CHECK') == 'pagination':
+            count = int(os.environ.get('PAPER_REED_SNOOZE_FIXTURE_COUNT', '51'))
+            assert count in (51, 52, 101, 102)
+            for i in range(len(samples), count):
+                server.append('INBOX', message(i+1, subject=f'Reminder fixture {i+1}'))
     else:
         server.append('INBOX',message(1))
     if os.environ.get('PAPER_REED_ORGANIZATION_CHECK'):
@@ -36,7 +41,9 @@ try:
     sent=server.sent_messages()
     (work/'smtp-result.json').write_text(json.dumps({'submissions':len(sent),'subjects':[m.header('Subject') for m in sent]}))
     assert run.returncode==0
-    if a.workspace and (os.environ.get('PAPER_REED_COMPOSE_PAGE_CHECK') or os.environ.get('PAPER_REED_SEARCH_PAGE_CHECK')):
+    if a.workspace and any(os.environ.get(name) for name in (
+        'PAPER_REED_COMPOSE_PAGE_CHECK', 'PAPER_REED_SEARCH_PAGE_CHECK', 'PAPER_REED_SNOOZE_PAGE_CHECK',
+    )):
         assert not sent, len(sent)
         result_path=Path(os.environ['PAPER_REED_UI_OUTPUT'])/'result.json'
         result=json.loads(result_path.read_text())
