@@ -1,0 +1,564 @@
+diff --git a/app/internal_packages/onboarding/lib/decorators/create-page-for-form.tsx b/app/internal_packages/onboarding/lib/decorators/create-page-for-form.tsx
+index c87b691..6c6acf9 100644
+--- a/app/internal_packages/onboarding/lib/decorators/create-page-for-form.tsx
++++ b/app/internal_packages/onboarding/lib/decorators/create-page-for-form.tsx
+@@ -113,7 +113,7 @@ const CreatePageForForm = (FormComponent: React.ComponentType<any> & Record<stri
+ 
+     onSubmit = () => {
+       if (this.state.submitting || !this._isValid()) return;
+-      OnboardingActions.setAccount(this.state.account);
++      OnboardingActions.setAccount(this.state.account, { confirmServers: this.props.confirmServers });
+       if (this._formEl.submit) {
+         this.setState({ submitting: true });
+         Promise.resolve(this._formEl.submit()).catch(err => {
+@@ -135,7 +135,7 @@ const CreatePageForForm = (FormComponent: React.ComponentType<any> & Record<stri
+     };
+ 
+     onBack = () => {
+-      OnboardingActions.setAccount(this.state.account);
++      OnboardingActions.setAccount(this.state.account, { confirmServers: this.props.confirmServers });
+       OnboardingActions.moveToPreviousPage();
+     };
+ 
+@@ -242,11 +242,7 @@ const CreatePageForForm = (FormComponent: React.ComponentType<any> & Record<stri
+ 
+     _renderButton() {
+       const { account, submitting } = this.state;
+-      const buttonLabel =
+-        AppEnv.config.get('core.paperReed.enabled') &&
+-        FormComponent.displayName === 'AccountBasicSettingsForm'
+-          ? '下一步'
+-          : FormComponent.submitLabel(account);
++      const buttonLabel = FormComponent.submitLabel(account);
+ 
+       // We're not on the last page.
+       if (submitting) {
+diff --git a/app/internal_packages/onboarding/lib/onboarding-root.tsx b/app/internal_packages/onboarding/lib/onboarding-root.tsx
+index 62ad0e6..cc7bd94 100644
+--- a/app/internal_packages/onboarding/lib/onboarding-root.tsx
++++ b/app/internal_packages/onboarding/lib/onboarding-root.tsx
+@@ -2,6 +2,7 @@ import React from 'react';
+ import { CSSTransition, TransitionGroup } from 'react-transition-group';
+ import { Account } from 'mailspring-exports';
+ import OnboardingStore, { AccountSaveState, isGmail } from './onboarding-store';
++import * as OnboardingActions from './onboarding-actions';
+ import PageTopBar from './page-top-bar';
+ 
+ import WelcomePage from './page-welcome';
+@@ -19,6 +20,7 @@ import AccountSettingsPageOutlook from './page-account-settings-outlook';
+ import AccountCertificatePage from './page-account-certificate';
+ import PaperReedGooglePage from './paper-reed-google-page';
+ import PaperReedICloudPage from './paper-reed-icloud-page';
++import PaperReedIMAPPage from './paper-reed-imap-page';
+ import { RejectedCertificate } from './certificate-review';
+ 
+ const PageComponents = {
+@@ -59,6 +61,7 @@ export default class OnboardingRoot extends React.Component<
+   static containerRequired = false;
+ 
+   unsubscribe?: () => void;
++  private serverForm: React.ElementRef<typeof AccountSettingsPageIMAP>;
+ 
+   constructor(props) {
+     super(props);
+@@ -115,14 +118,24 @@ export default class OnboardingRoot extends React.Component<
+   };
+ 
+   render() {
+-    const { pageVisit, accountSaveState } = this.state;
+-    const Component = accountSaveState ? AccountOnboardingSuccess : PageComponents[this.state.page];
++    const { page, pageVisit, accountSaveState } = this.state;
+     const paperReed = AppEnv.config.get('core.paperReed.enabled');
++    const activePage = paperReed && page === 'account-settings' ? PaperReedIMAPPage : PageComponents[page];
++    const Component = accountSaveState ? AccountOnboardingSuccess : activePage;
++    const preserveServerDraft = paperReed && !accountSaveState &&
++      page === 'account-settings-imap' && this.state.previousPage === 'account-settings';
+     // Returning before a fade ends must open a fresh form with the current account.
+     const transitionKey = accountSaveState ? 'saving-account' : paperReed ? pageVisit : this.state.page;
+     const isCurrentVisit = paperReed
+       ? () => !!this.unsubscribe && OnboardingStore.pageVisit() === pageVisit
+       : undefined;
++    const pageProps = {
++      account: this.state.account,
++      confirmServers: this.state.confirmServers,
++      rejectedCertificates: this.state.rejectedCertificates,
++      isCurrentVisit,
++      saving: accountSaveState === 'saving',
++    };
+     if (!Component) {
+       throw new Error(`Cannot find component for page: ${this.state.page}`);
+     }
+@@ -142,6 +155,9 @@ export default class OnboardingRoot extends React.Component<
+           allowMoveBack={!['initial-preferences', 'account-choose'].includes(this.state.page)}
+           disableClose={paperReed && this.state.returningToPicker}
+           disableNavigation={!!accountSaveState}
++          onBack={preserveServerDraft
++            ? () => (this.serverForm?.onBack || OnboardingActions.moveToPreviousPage)()
++            : undefined}
+           backLabel={this.state.page === 'paper-reed-google' && this.state.previousPage === 'account-choose'
+             ? '返回邮箱选择' : undefined}
+         />
+@@ -154,13 +170,11 @@ export default class OnboardingRoot extends React.Component<
+             onEntered={paperReed && this.state.page === 'account-choose' ? this._restoreProviderFocus : undefined}
+           >
+             <div className="page-container">
+-              <Component
+-                account={this.state.account}
+-                confirmServers={this.state.confirmServers}
+-                rejectedCertificates={this.state.rejectedCertificates}
+-                isCurrentVisit={isCurrentVisit}
+-                saving={accountSaveState === 'saving'}
+-              />
++              {preserveServerDraft ? (
++                <AccountSettingsPageIMAP {...pageProps} ref={form => {
++                  if (OnboardingStore.pageVisit() === pageVisit) this.serverForm = form;
++                }} />
++              ) : <Component {...pageProps} />}
+             </div>
+           </CSSTransition>
+         </TransitionGroup>
+diff --git a/app/internal_packages/onboarding/lib/page-account-settings.tsx b/app/internal_packages/onboarding/lib/page-account-settings.tsx
+index 8f7b49b..c91a226 100644
+--- a/app/internal_packages/onboarding/lib/page-account-settings.tsx
++++ b/app/internal_packages/onboarding/lib/page-account-settings.tsx
+@@ -10,7 +10,6 @@ interface AccountBasicSettingsFormProps {
+   account: Account;
+   errorFieldNames: string[];
+   submitting: boolean;
+-  isCurrentVisit?: () => boolean;
+   onConnect: (account: Account) => void;
+   onFieldChange: (event: { target: { id: string; value: any } }) => void;
+   onFieldKeyPress: () => void;
+@@ -18,10 +17,7 @@ interface AccountBasicSettingsFormProps {
+ export class AccountBasicSettingsForm extends React.Component<AccountBasicSettingsFormProps> {
+   static displayName = 'AccountBasicSettingsForm';
+ 
+-  private readonly initialEmailAddress = this.props.account.emailAddress;
+-
+   static submitLabel = (account: Account) => {
+-    if (AppEnv.config.get('core.paperReed.enabled')) return localized('Continue');
+     return account.provider === 'imap' ? localized('Continue') : localized('Connect Account');
+   };
+ 
+@@ -30,7 +26,6 @@ export class AccountBasicSettingsForm extends React.Component<AccountBasicSettin
+     displayNameShort?: string;
+     displayName: string;
+   }) => {
+-    if (AppEnv.config.get('core.paperReed.enabled')) return '连接你的邮箱';
+     return (
+       providerConfig.title ||
+       localized(
+@@ -41,8 +36,6 @@ export class AccountBasicSettingsForm extends React.Component<AccountBasicSettin
+   };
+ 
+   static subtitleLabel = (providerConfig: { note?: React.ReactNode }) => {
+-    if (AppEnv.config.get('core.paperReed.enabled'))
+-      return '填写发件人姓名和邮箱。下一步连接你的收信与发信服务器。';
+     return (
+       providerConfig.note ||
+       localized(
+@@ -75,40 +68,9 @@ export class AccountBasicSettingsForm extends React.Component<AccountBasicSettin
+     return { errorMessage, errorFieldNames, populated: true };
+   };
+ 
+-  async submit(manual = false) {
+-    const { account: current } = this.props;
+-    const { name, emailAddress, provider, settings: { imap_password } } = current;
+-    const paperReed = AppEnv.config.get('core.paperReed.enabled');
+-    // Server settings apply to the address they were discovered or entered for.
+-    const entered = paperReed && emailAddress === this.initialEmailAddress
+-      ? current.clone()
+-      : new Account({ name, emailAddress, provider, settings: { imap_password } });
+-
+-    if (paperReed) {
+-      const expanded = manual
+-        ? { account: entered, confirmServers: false }
+-        : await expandAccountForSetup(entered);
+-      if (this.props.isCurrentVisit?.() === false) return;
+-      const account = expanded.account;
+-      account.settings = {
+-        imap_username: account.emailAddress,
+-        smtp_username: account.emailAddress,
+-        smtp_password: account.settings.imap_password,
+-        imap_port: 993,
+-        smtp_port: 465,
+-        imap_security: 'SSL / TLS',
+-        smtp_security: 'SSL / TLS',
+-        imap_allow_insecure_ssl: false,
+-        smtp_allow_insecure_ssl: false,
+-        container_folder: '',
+-        create_helper_folders: false,
+-        smtp_verification: 'login',
+-        ...account.settings,
+-      };
+-      OnboardingActions.setAccount(account, { confirmServers: expanded.confirmServers });
+-      OnboardingActions.moveToPage('account-settings-imap');
+-      return;
+-    }
++  async submit() {
++    const { name, emailAddress, provider, settings: { imap_password } } = this.props.account;
++    const entered = new Account({ name, emailAddress, provider, settings: { imap_password } });
+     const { account, confirmServers } = await expandAccountForSetup(entered);
+     OnboardingActions.setAccount(account, { confirmServers });
+ 
+@@ -122,43 +84,25 @@ export class AccountBasicSettingsForm extends React.Component<AccountBasicSettin
+   }
+ 
+   render() {
+-    const google = AppEnv.config.get('core.paperReed.enabled') &&
+-      this.props.account.provider === 'imap' && /@(gmail|googlemail)\.com$/i.test(this.props.account.emailAddress.trim());
+     return (
+       <form className="settings">
+         <FormField
+           field="name"
+-          title={AppEnv.config.get('core.paperReed.enabled') ? '发件人姓名' : localized('Name')}
++          title={localized('Name')}
+           {...this.props}
+         />
+ 
+         <FormField
+           field="emailAddress"
+-          title={AppEnv.config.get('core.paperReed.enabled') ? '邮箱地址' : localized('Email')}
++          title={localized('Email')}
+           {...this.props}
+         />
+-        {google ? <div>
+-          <p>这是 Google 邮箱，请通过 Google 登录连接，无需填写应用专用密码。</p>
+-          <button type="button" className="btn btn-add-account" data-use-google
+-            disabled={this.props.submitting}
+-            onClick={() => {
+-              OnboardingActions.setAccount(this.props.account);
+-              OnboardingActions.moveToPage('paper-reed-google');
+-            }}>使用 Google 登录</button>
+-        </div> : <FormField
++        <FormField
+           field="settings.imap_password"
+-          title={
+-            AppEnv.config.get('core.paperReed.enabled')
+-              ? '密码或应用专用密码'
+-              : localized('Password')
+-          }
++          title={localized('Password')}
+           type="password"
+           {...this.props}
+-        />}
+-        {!google && AppEnv.config.get('core.paperReed.enabled') && this.props.account.provider === 'imap' &&
+-          <button type="button" className="btn" data-manual-setup
+-            disabled={this.props.submitting || (!AccountBasicSettingsForm.validateAccount(this.props.account).populated || this.props.errorFieldNames.length > 0)}
+-            onClick={() => this.submit(true)}>手动填写服务器</button>}
++        />
+       </form>
+     );
+   }
+diff --git a/app/internal_packages/onboarding/lib/page-top-bar.tsx b/app/internal_packages/onboarding/lib/page-top-bar.tsx
+index 04ff8c7..8e8b449 100644
+--- a/app/internal_packages/onboarding/lib/page-top-bar.tsx
++++ b/app/internal_packages/onboarding/lib/page-top-bar.tsx
+@@ -9,6 +9,7 @@ const PageTopBar = (props: {
+   disableClose?: boolean;
+   disableNavigation?: boolean;
+   backLabel?: string;
++  onBack?: () => void;
+ }) => {
+   const { pageDepth } = props;
+   const paperReed = AppEnv.config.get('core.paperReed.enabled');
+@@ -26,7 +27,7 @@ const PageTopBar = (props: {
+     if (webview && webview.canGoBack()) {
+       webview.goBack();
+     } else if (pageDepth > 1) {
+-      OnboardingActions.moveToPreviousPage();
++      (props.onBack || OnboardingActions.moveToPreviousPage)();
+     } else {
+       if (AccountStore.accounts().length === 0) {
+         AppEnv.quit();
+diff --git a/app/internal_packages/onboarding/lib/paper-reed-imap-page.tsx b/app/internal_packages/onboarding/lib/paper-reed-imap-page.tsx
+new file mode 100644
+index 0000000..41cd363
+--- /dev/null
++++ b/app/internal_packages/onboarding/lib/paper-reed-imap-page.tsx
+@@ -0,0 +1,177 @@
++import React, { useEffect, useRef, useState } from 'react';
++import { Account, RegExpUtils } from 'mailspring-exports';
++import * as OnboardingActions from './onboarding-actions';
++import { expandAccountForSetup } from './onboarding-helpers';
++
++const fields = [
++  { key: 'name', id: 'name', label: '发件人姓名', autoComplete: 'name' },
++  { key: 'email', id: 'emailAddress', label: '邮箱地址', type: 'email', autoComplete: 'email' },
++  { key: 'password', id: 'settings.imap_password', label: '密码或应用专用密码', type: 'password' },
++] as const;
++type Field = typeof fields[number]['key'];
++type Problem = { field?: Field; message: string };
++
++export default function PaperReedIMAPPage({ account, confirmServers, isCurrentVisit }: {
++  account: Account;
++  confirmServers?: boolean;
++  isCurrentVisit?: () => boolean;
++}) {
++  const [values, setValues] = useState({
++    name: account.name || '',
++    email: account.emailAddress || '',
++    password: account.settings.imap_password || '',
++  });
++  const [searching, setSearching] = useState(false);
++  const [problem, setProblem] = useState<Problem>();
++  const form = useRef<HTMLFormElement>(null);
++  const errorMessage = useRef<HTMLParagraphElement>(null);
++  const pending = useRef(false);
++  const email = values.email.trim();
++  const validEmail = RegExpUtils.emailRegex({ matchTailOfString: true, allowPunycodeTLD: true })
++    .exec(email)?.[0] === email;
++  const google = validEmail && /@(gmail|googlemail)\.com$/i.test(email);
++  const current = () => isCurrentVisit?.() !== false;
++  const focusField = (field: Field) =>
++    (form.current?.elements.namedItem(field) as HTMLInputElement | null)?.focus();
++
++  useEffect(() => {
++    const firstEmpty = fields.find(({ key }) => !values[key] && (!google || key !== 'password'));
++    focusField(firstEmpty?.key || 'name');
++  }, []);
++
++  useEffect(() => {
++    const message = errorMessage.current;
++    if (problem && message && message.getBoundingClientRect().bottom > window.innerHeight) {
++      message.scrollIntoView({ block: 'nearest' });
++    }
++  }, [problem]);
++
++  const continueSetup = async (manual = false) => {
++    if (!current() || (pending.current && !manual)) return;
++    const name = values.name.trim();
++    const { password } = values;
++    const invalid = ([
++      { field: 'name', missing: !google && !name, message: '请填写发件人姓名。' },
++      { field: 'email', missing: !validEmail, message: '请填写完整的邮箱地址。' },
++      { field: 'password', missing: !google && !password, message: '请填写邮箱密码或应用专用密码。' },
++    ] as const).find(field => field.missing);
++    if (invalid) {
++      setProblem(invalid);
++      focusField(invalid.field);
++      return;
++    }
++
++    // Only the manual path reuses its draft. Discovery supplies its own server parameters.
++    const reuseDraft = manual && email === account.emailAddress;
++    const entered = reuseDraft
++      ? account.clone()
++      : new Account({ emailAddress: email, provider: 'imap', settings: {} });
++    entered.name = name;
++    if (entered.settings.smtp_password === entered.settings.imap_password) {
++      entered.settings.smtp_password = password;
++    }
++    entered.settings.imap_password = password;
++    if (google) {
++      OnboardingActions.setAccount(entered);
++      OnboardingActions.moveToPage('paper-reed-google');
++      return;
++    }
++
++    setProblem(undefined);
++    if (!manual) {
++      pending.current = true;
++      setSearching(true);
++    }
++    try {
++      const expanded = manual ? { account: entered, confirmServers: false } : await expandAccountForSetup(entered);
++      if (!current()) return;
++      const draft = expanded.account;
++      draft.settings = {
++        imap_username: draft.emailAddress,
++        smtp_username: draft.emailAddress,
++        smtp_password: draft.settings.imap_password,
++        imap_port: 993,
++        smtp_port: 465,
++        imap_security: 'SSL / TLS',
++        smtp_security: 'SSL / TLS',
++        imap_allow_insecure_ssl: false,
++        smtp_allow_insecure_ssl: false,
++        container_folder: '',
++        create_helper_folders: false,
++        smtp_verification: 'login',
++        ...draft.settings,
++      };
++      OnboardingActions.setAccount(draft, {
++        confirmServers: expanded.confirmServers || (reuseDraft && confirmServers),
++      });
++      OnboardingActions.moveToPage('account-settings-imap');
++    } catch {
++      if (current()) setProblem({ message: '未能查找邮件服务器。请重试，或手动填写服务器。' });
++    } finally {
++      if (current()) {
++        pending.current = false;
++        setSearching(false);
++      }
++    }
++  };
++
++  return (
++    <div className="page account-setup AccountBasicSettingsForm pr-imap-setup">
++      <div className="pr-onboarding-brand">Paper Reed</div>
++      <section className="pr-imap-content" aria-labelledby="pr-imap-heading">
++        <h2 id="pr-imap-heading">连接其他邮箱</h2>
++        <form ref={form} noValidate onSubmit={event => { event.preventDefault(); void continueSetup(); }}
++          onKeyDown={event => {
++            if (event.repeat && event.key === 'Enter') event.preventDefault();
++          }}>
++          {fields.filter(({ key }) => !google || key !== 'password').map(({ key, id, label, ...attrs }) => {
++            const invalid = problem?.field === key;
++            const help = key === 'password' ? 'pr-imap-help' : '';
++            return (
++              <div className="pr-imap-field" key={key}>
++                <label htmlFor={id}>{label}</label>
++                <input
++                  {...attrs}
++                  id={id}
++                  name={key}
++                  value={values[key]}
++                  required={!google || key === 'email'}
++                  readOnly={searching}
++                  spellCheck={false}
++                  autoCapitalize={key === 'name' ? 'words' : 'none'}
++                  aria-invalid={invalid || undefined}
++                  aria-describedby={[help, invalid ? 'pr-imap-error' : ''].filter(Boolean).join(' ') || undefined}
++                  onChange={event => {
++                    const { value } = event.currentTarget;
++                    setValues(previous => ({ ...previous, [key]: value }));
++                    if (!problem?.field || problem.field === key || key === 'email') {
++                      setProblem(undefined);
++                    }
++                  }}
++                />
++              </div>
++            );
++          })}
++          <p id="pr-imap-help">
++            {google
++              ? '此邮箱通过 Google 登录连接，无需填写密码。'
++              : '如果服务商要求，请使用应用专用密码。下一步会查找收信与发信服务器。'}
++          </p>
++          <div className="pr-imap-actions">
++            {google ? (
++              <button className="btn btn-add-account" type="submit" data-use-google>使用 Google 登录</button>
++            ) : (
++              <>
++                <button className="btn btn-add-account" type="submit" aria-disabled={searching}>下一步</button>
++                <button className="btn pr-imap-manual" type="button" data-manual-setup
++                  onClick={() => void continueSetup(true)}>手动填写服务器</button>
++              </>
++            )}
++          </div>
++          <div role="status" className="pr-imap-status">{searching && '正在查找邮件服务器…'}</div>
++          <p id="pr-imap-error" role="alert" ref={errorMessage}>{problem?.message}</p>
++        </form>
++      </section>
++    </div>
++  );
++}
+diff --git a/app/internal_packages/onboarding/styles/onboarding.less b/app/internal_packages/onboarding/styles/onboarding.less
+index 3a7ac46..ee6e311 100644
+--- a/app/internal_packages/onboarding/styles/onboarding.less
++++ b/app/internal_packages/onboarding/styles/onboarding.less
+@@ -934,13 +934,14 @@ body.platform-win32 {
+     font-size: 11px;
+     margin-top: 25px;
+   }
+-  .pr-icloud-setup {
++  .pr-icloud-setup, .pr-imap-setup {
+     padding-inline: 24px;
++    min-width: 0;
+     .pr-onboarding-brand { margin-bottom: 12px; }
+-    .pr-icloud-content { max-width: 360px; margin: 0 auto; }
++    .pr-icloud-content, .pr-imap-content { max-width: 360px; margin: 0 auto; }
+     h2 { margin-bottom: 12px; }
+     form { width: 100%; margin: 0; padding: 0; text-align: left; }
+-    .pr-icloud-field { margin-bottom: 8px; }
++    .pr-icloud-field, .pr-imap-field { margin-bottom: 8px; }
+     label { display: block; color: #626b60; margin-bottom: 4px; }
+     input {
+       box-sizing: border-box;
+@@ -952,7 +953,7 @@ body.platform-win32 {
+       color: #353a36;
+     }
+     input[aria-invalid='true'] { border-color: #a56a60; }
+-    #pr-icloud-password-help {
++    #pr-icloud-password-help, #pr-imap-help {
+       margin: 0 0 12px;
+       color: #626b60;
+       font-size: 12px;
+@@ -966,24 +967,25 @@ body.platform-win32 {
+       text-decoration: underline;
+       text-underline-offset: 2px;
+     }
+-    .pr-icloud-actions { display: flex; flex-wrap: wrap; gap: 12px; }
++    .pr-icloud-actions, .pr-imap-actions { display: flex; flex-wrap: wrap; gap: 12px; }
+     .btn { min-height: 36px; margin: 0; padding: 0 12px; }
+     .btn-add-account { min-width: 132px; }
+-    .pr-icloud-advanced { border-color: transparent; }
+-    .pr-icloud-advanced:hover:not([aria-disabled='true']) { background: #edf0e8; }
++    .pr-icloud-advanced, .pr-imap-manual { border-color: transparent; }
++    .pr-icloud-advanced:hover:not([aria-disabled='true']), .pr-imap-manual:hover { background: #edf0e8; }
+     .btn[aria-disabled='true'] { color: #586650; background: transparent; cursor: default; }
+     .btn-add-account[aria-disabled='true'] { background: #edf0e8; border-color: #d9ddd4; }
+     a:focus-visible, .btn:focus-visible, input:focus-visible {
+       outline: 2px solid #4b634f;
+       outline-offset: 2px;
+     }
+-    .pr-icloud-status:not(:empty), #pr-icloud-error:not(:empty) {
++    .pr-icloud-status:not(:empty), .pr-imap-status:not(:empty),
++    #pr-icloud-error:not(:empty), #pr-imap-error:not(:empty) {
+       margin: 12px 0 0;
+       line-height: 20px;
+     }
+-    .pr-icloud-status { color: #586650; }
+-    #pr-icloud-error:empty { margin: 0; }
+-    #pr-icloud-error:not(:empty) {
++    .pr-icloud-status, .pr-imap-status { color: #586650; }
++    #pr-icloud-error:empty, #pr-imap-error:empty { margin: 0; }
++    #pr-icloud-error:not(:empty), #pr-imap-error:not(:empty) {
+       padding: 8px 12px;
+       border-left: 2px solid #a56a60;
+       background: #f5ede8;
+@@ -992,11 +994,12 @@ body.platform-win32 {
+     @media (max-height: 540px) {
+       padding-bottom: 16px;
+       .pr-onboarding-brand, h2 { margin-bottom: 8px; }
+-      .pr-icloud-field { margin-bottom: 4px; }
++      .pr-icloud-field, .pr-imap-field { margin-bottom: 4px; }
+       label { margin-bottom: 2px; line-height: 18px; }
+-      #pr-icloud-password-help { margin-bottom: 6px; }
+-      .pr-icloud-status:not(:empty), #pr-icloud-error:not(:empty) { margin-top: 8px; }
+-      #pr-icloud-error:not(:empty) { padding-block: 6px; }
++      #pr-icloud-password-help, #pr-imap-help { margin-bottom: 6px; }
++      .pr-icloud-status:not(:empty), .pr-imap-status:not(:empty),
++      #pr-icloud-error:not(:empty), #pr-imap-error:not(:empty) { margin-top: 8px; }
++      #pr-icloud-error:not(:empty), #pr-imap-error:not(:empty) { padding-block: 6px; }
+     }
+   }
+   .pr-google-setup {
+diff --git a/app/src/regexp-utils.ts b/app/src/regexp-utils.ts
+index 23dbb01..5a355e1 100644
+--- a/app/src/regexp-utils.ts
++++ b/app/src/regexp-utils.ts
+@@ -20,12 +20,20 @@ const RegExpUtils = {
+   emailRegex({
+     requireStartOrWhitespace,
+     matchTailOfString,
+-  }: { requireStartOrWhitespace?: boolean; matchTailOfString?: boolean } = {}) {
++    allowPunycodeTLD,
++  }: {
++    requireStartOrWhitespace?: boolean;
++    matchTailOfString?: boolean;
++    allowPunycodeTLD?: boolean;
++  } = {}) {
++    const topLevelDomain = allowPunycodeTLD
++      ? '(?:[A-Za-z]{2,63}|[Xx][Nn]--[A-Za-z0-9](?:[A-Za-z0-9-]{0,57}[A-Za-z0-9])?)'
++      : '[A-Za-z]{2,63}';
+     const parts = [
+       `(`,
+       `[a-z.A-Z${UnicodeEmailChars}0-9!#$%&\\'*+\\-/=?^_\`{|}~]+`,
+       '@',
+-      `[A-Za-z${UnicodeEmailChars}0-9.-]+\\.[A-Za-z]{2,63}`,
++      `[A-Za-z${UnicodeEmailChars}0-9.-]+\\.${topLevelDomain}`,
+       `)`,
+     ];
+     if (requireStartOrWhitespace) {

@@ -664,6 +664,8 @@ async function checkGooglePage(phase) {
  if(pickerPhase){await checkProviderPicker(pickerPhase);await stop();return;}
  const icloudPhase=process.env.PAPER_REED_ICLOUD_PAGE_CHECK;
  if(icloudPhase){await require('./check-icloud-onboarding.cjs')({phase:icloudPhase,app,main,run,until,shot,out,fixture,work});await stop();return;}
+ const imapPhase=process.env.PAPER_REED_IMAP_PAGE_CHECK;
+ if(imapPhase){await require('./check-imap-onboarding.cjs')({phase:imapPhase,main,run,until,shot,out});await stop();return;}
  const activePage=main.locator('.page-container:not([inert])');
  await activePage.locator('[data-provider=gmail]').click();
  await activePage.getByRole('button',{name:'使用 Google 登录',exact:true}).waitFor();
