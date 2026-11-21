@@ -1,0 +1,574 @@
+diff --git a/app/internal_packages/mcp-server/lib/mcp-tools.ts b/app/internal_packages/mcp-server/lib/mcp-tools.ts
+index 4595fc8fe0d22dfde4e3c78b6c117b2c6bcd5f87..1b13811f4e2512169525f93b281b887b0fbc92ed 100644
+--- a/app/internal_packages/mcp-server/lib/mcp-tools.ts
++++ b/app/internal_packages/mcp-server/lib/mcp-tools.ts
+@@ -1142,9 +1142,10 @@ export function registerTools(server: McpServer) {
+   defineTool(
+     server,
+     'organize_mail',
+-    'Set read/unread, archive, move to spam/trash or restore to Inbox. Returns per-target queued tasks, not remote success.',
++    'Set read/unread, archive, move to spam/trash or restore to Inbox. Set fromArchive to restore only archived copies. Returns per-target queued tasks, not remote success.',
+     {
+       action: z.enum(['read', 'unread', 'archive', 'spam', 'trash', 'inbox']),
++      fromArchive: z.boolean().optional(),
+       targets: z
+         .array(z.object({ accountId: z.string().min(1), threadId: z.string().min(1) }))
+         .min(1)
+diff --git a/app/internal_packages/paper-reed/lib/workspace.tsx b/app/internal_packages/paper-reed/lib/workspace.tsx
+index ee3ac787c05397509500857390a96c6b50cd8042..6bf385a4e5f5631950e884e197c1c422e11686b5 100644
+--- a/app/internal_packages/paper-reed/lib/workspace.tsx
++++ b/app/internal_packages/paper-reed/lib/workspace.tsx
+@@ -18,6 +18,7 @@ import {
+   undoMail,
+   mailTaskStatus,
+   actionAvailable,
++  archiveFolder,
+   inboxDesktopAccess,
+   MailAction,
+   MailReceipt,
+@@ -597,7 +598,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   };
+   private loadMore = () => {
+     if (this.state.limit >= 100 || this.listActionsUnavailable()) return;
+-    if (this.followUpView() || this.isDraftList() || this.isSentList()) this.listPageBeforeLoad = {
++    if (this.followUpView() || this.isDraftList() || this.isSentList() || this.isArchiveList()) this.listPageBeforeLoad = {
+       scope: this.listReadScope(),
+       ids: new Set(this.state.rows.map(row => row.id)),
+     };
+@@ -607,6 +608,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     const view = this.followUpView();
+     const drafts = this.isDraftList();
+     const sent = this.isSentList();
++    const archive = this.isArchiveList();
+     const bulkUnpin = '.pr-local-controls [data-local-action=unpin]';
+     let selector = '.pr-mail-row, .pr-follow-up-action, .pr-follow-up-empty button, .pr-follow-up-row input';
+     if (view) {
+@@ -614,9 +616,12 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     }
+     if (drafts) selector += ', .pr-load-more, .pr-drafts-empty button, .pr-draft-read-error button';
+     if (sent) selector += ', .pr-load-more, .pr-sent-empty button, .pr-sent-read-error button';
+-    const row = this.state.route === 'list' && (this.state.query || view || drafts || sent) &&
++    const archiveCheckbox = '.pr-mail-item > input[type=checkbox]';
++    if (archive) selector += ', .pr-load-more, .pr-archive-empty button, .pr-archive-read-error button, .pr-selection-actions button, .pr-mail-receipt button, ' + archiveCheckbox;
++    const row = this.state.route === 'list' && (this.state.query || view || drafts || sent || archive) &&
+       document.activeElement?.closest<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>(selector);
+-    const id = row && (row.dataset.listId || row.closest<HTMLElement>('.pr-follow-up-row')?.dataset.followUpId);
++    const id = row && (row.dataset.listId || row.closest<HTMLElement>('.pr-follow-up-row')?.dataset.followUpId ||
++      row.closest('.pr-mail-item')?.querySelector<HTMLElement>('.pr-mail-row')?.dataset.listId);
+     const loadingMore = row && row.matches('.pr-load-more');
+     const index = loadingMore ? this.state.rows.length :
+       this.state.rows.findIndex(item => item.id === id);
+@@ -628,12 +633,14 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+           (document.activeElement === row || document.activeElement === document.body)) {
+         const sameDrafts = !leavingView && drafts && this.isDraftList();
+         const sameSent = !leavingView && sent && this.isSentList();
++        const sameArchive = !leavingView && archive && this.isArchiveList();
+         const selector = sameDrafts ? '.pr-mail-row[data-draft-id]'
+-          : sameSent ? '.pr-mail-row'
++          : sameArchive && row.matches(archiveCheckbox) ? archiveCheckbox
++          : sameSent || sameArchive ? '.pr-mail-row'
+           : row.matches('.pr-follow-up-action') ? '.pr-follow-up-action'
+           : row.matches('.pr-follow-up-row input') ? '.pr-follow-up-row input' : '.pr-follow-up-row .pr-mail-row';
+         const sameView = !leavingView && view && view === this.followUpView();
+-        const candidates = sameView || sameDrafts || sameSent
++        const candidates = sameView || sameDrafts || sameSent || sameArchive
+           ? Array.from(document.querySelectorAll<HTMLElement>(selector + ':not(:disabled)'))
+           : [];
+         const replacement = (sameView && row.matches(bulkUnpin) &&
+@@ -643,6 +650,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+         const fallback = (sameView && document.querySelector<HTMLElement>('.pr-follow-up-empty button'))
+           || (sameDrafts && document.querySelector<HTMLElement>('.pr-drafts-empty button'))
+           || (sameSent && document.querySelector<HTMLElement>('.pr-sent-empty button'))
++          || (sameArchive && document.querySelector<HTMLElement>('.pr-archive-empty button'))
+           || document.querySelector<HTMLInputElement>('.pr-search-input');
+         (replacement || fallback)?.focus();
+       }
+@@ -722,7 +730,8 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   navigate = (folder: string, requestedAccountId = this.state.accountId) =>
+     this.move(() => {
+       const accountId = connectedAccountId(requestedAccountId);
+-      const restoreFocus = (this.followUpView() || this.isDraftList() || this.isSentList()) && this.restoreListFocus(true);
++      const restoreFocus = (this.followUpView() || this.isDraftList() || this.isSentList() ||
++        this.isArchiveList()) && this.restoreListFocus(true);
+       this.listPageBeforeLoad = undefined;
+       const changingAccount = accountId !== this.state.accountId;
+       const { query, searchText, searchPending, searchClearing, searchVisit } = this.state;
+@@ -795,10 +804,12 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+         ? popIn.location?.accountId ?? (source.accountIds.length === AccountStore.accountIds().length ? '' : row.accountId)
+         : row.accountId);
+       const accountIds = inbox ? [accountId] : this.accountIds();
+-      const perspective = source || MailboxPerspective.forStandardCategories(
++      const perspective = source || (folder === 'archive'
++        ? MailboxPerspective.forCategories(accountIds.map(archiveFolder).filter(Boolean))
++        : MailboxPerspective.forStandardCategories(
+         accountIds,
+         folders.slice(3).some(([id]) => id === folder) || folder === 'inbox' ? folder : 'all'
+-      );
++      ));
+ 
+       Actions.focusMailboxPerspective(perspective);
+       Actions.setFocus({ collection: 'thread', item: row });
+@@ -962,6 +973,9 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   private isSentList() {
+     return this.state.folder === 'sent' && !this.state.query;
+   }
++  private isArchiveList() {
++    return this.state.folder === 'archive' && !this.state.query;
++  }
+   private followUpRefilling() {
+     const { route, searchPending, followUpRefillScope } = this.state;
+     return route === 'list' && !searchPending &&
+@@ -969,7 +983,8 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   }
+   listActionsUnavailable() {
+     const { loading, listRead } = this.state;
+-    return this.followUpRefilling() || this.searchResultsUnavailable() || ((!!this.followUpView() || this.isDraftList() || this.isSentList()) &&
++    return this.followUpRefilling() || this.searchResultsUnavailable() || ((!!this.followUpView() ||
++      this.isDraftList() || this.isSentList() || this.isArchiveList()) &&
+       (loading || listRead?.failed || listRead?.scope !== this.listReadScope()));
+   }
+   retrySearchRead = () => {
+@@ -1013,15 +1028,23 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     if (this.state.route !== 'list' || this.state.busy || this.listActionsUnavailable()) return;
+     const targets = this.selectedTargets();
+     if (!targets.length) return;
++    const fromArchive = action === 'inbox' && this.isArchiveList();
++    const scope = this.listReadScope();
+     this.receiptStarted = Date.now();
+-    this.setState({ busy: true, receipt: [], receiptAction: action });
++    this.setState({ busy: true, receipt: [], receiptAction: action },
++      fromArchive ? this.restoreListFocus() : undefined);
+     try {
+       const result = await organizeMail(
+-        { action, targets, requestId: randomUUID() },
++        { action, targets, requestId: randomUUID(), fromArchive },
+         inboxDesktopAccess
+       );
+       if (this.mounted)
+-        this.setState({ receipt: result.items, checked: [], busy: false }, () => {
++        this.setState(previous => ({
++          receipt: result.items,
++          checked: fromArchive && (previous.route !== 'list' || scope !== this.listReadScope())
++            ? previous.checked : [],
++          busy: false,
++        }), () => {
+           this.refresh();
+           this.refreshMailReceipt();
+         });
+@@ -1034,7 +1057,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     const items = this.state.receipt.filter((r) => r.undoable);
+     if (!items.length) return;
+     this.receiptStarted = Date.now();
+-    this.setState({ busy: true });
++    this.setState({ busy: true }, this.isArchiveList() ? this.restoreListFocus() : undefined);
+     const receipts = await Promise.all(
+       items.map(async (item) => {
+         try {
+@@ -1065,6 +1088,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   commands = (): MailCommand[] => {
+     const list = this.state.route === 'list';
+     const listReady = list && !this.listActionsUnavailable();
++    const archive = this.isArchiveList();
+     const browse = (delta: number) => {
+       const rows = Array.from(document.querySelectorAll<HTMLButtonElement>('.pr-mail-row'));
+       const index = rows.indexOf(this.focusedRow());
+@@ -1083,9 +1107,15 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       { id: 'multiselect-list:deselect-all', title: '取消选择', disabled: !list || this.followUpRefilling(), run: () => this.setState({ checked: [] }) },
+       ...([['archive', '归档'], ['trash', '移到废纸篓'], ['read', '标为已读'], ['unread', '标为未读']] as [MailAction, string][]).map(([action, title]) => ({
+         id: { archive: 'core:archive-item', trash: 'core:delete-item', read: 'core:mark-as-read', unread: 'core:mark-as-unread' }[action],
+-        title, disabled: !listReady || this.state.busy || this.state.loading || !this.selectedTargets().length || !this.selectedTargets().every(t => actionAvailable(action, t.accountId)),
++        title, disabled: !listReady || (archive && action === 'archive') || this.state.busy ||
++          this.state.loading || !this.selectedTargets().length ||
++          !this.selectedTargets().every(t => actionAvailable(action, t.accountId)),
+         run: () => this.organize(action),
+       })),
++      { id: 'paper-reed:restore-archive', title: '移回收件箱',
++        disabled: !archive || !listReady || this.state.busy || !this.selectedTargets().length ||
++          !this.selectedTargets().every(target => actionAvailable('inbox', target.accountId)),
++        run: () => this.organize('inbox') },
+       { id: 'paper-reed:settings', title: '打开设置', shortcutId: 'application:open-preferences', run: this.preferences },
+       { id: 'paper-reed:agent', title: '交给 Agent', disabled: list && (!listReady || this.isDraftList()), run: this.copyContext },
+     ];
+@@ -1187,13 +1217,14 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+             {actions
+               .filter(
+                 ([action]) =>
+-                  action !== 'inbox' ||
++                  (action !== 'archive' || !this.isArchiveList()) &&
++                  (action !== 'inbox' || this.isArchiveList() ||
+                   this.state.rows.some(
+                     (r) =>
+                       r instanceof Thread &&
+                       this.state.checked.includes(r.id) &&
+                       r.categories.some((c) => ['spam', 'trash'].includes(c.role))
+-                  )
++                  ))
+               )
+               .map(([action, title]) => (
+                 <button
+@@ -1251,13 +1282,13 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       </div>
+     );
+   }
+-  renderSearchEmpty(sent = false) {
++  renderSearchEmpty(mailbox?: '已发送' | '归档') {
+     return (
+       <div className="pr-search-empty">
+         <div role="status">
+-          <p>{sent ? '没有未读的已发送邮件' :
++          <p>{mailbox ? `没有未读的${mailbox}邮件` :
+             this.state.unreadOnly ? '没找到匹配的未读邮件' : '没找到匹配的邮件'}</p>
+-          {!sent && <small>可以更换关键词或邮箱范围。</small>}
++          {!mailbox && <small>可以更换关键词或邮箱范围。</small>}
+         </div>
+         {this.state.unreadOnly && (
+           <button onKeyDown={keepNativeButtonActivation} onClick={() => {
+@@ -1295,14 +1326,16 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+               : ''}
+         </span>
+         {items.some((r) => r.undoable) && (
+-          <button type="button" disabled={this.state.busy} onClick={this.undoOrganization}>
++          <button type="button" disabled={this.state.busy} onKeyDown={keepNativeButtonActivation} onClick={this.undoOrganization}>
+             撤销
+           </button>
+         )}
+         <button
+           type="button"
+           aria-label="关闭整理结果"
+-          onClick={() => this.setState({ receipt: [] })}
++          onKeyDown={keepNativeButtonActivation}
++          onClick={() => this.setState({ receipt: [] },
++            this.isArchiveList() ? this.restoreListFocus() : undefined)}
+         >
+           ×
+         </button>
+@@ -1679,12 +1712,13 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     const draftList = route === 'list' && this.isDraftList();
+     const drafts = draftList && !searchActive;
+     const sent = route === 'list' && !searchActive && this.isSentList();
++    const archive = route === 'list' && !searchActive && this.isArchiveList();
+     const operationsRead = this.state.operationsRead?.scope === this.operationsScope()
+       ? this.state.operationsRead : null;
+     const operations = operationsRead ? this.state.operations : [];
+     const followUp = route === 'list' ? this.followUpView() : null;
+     const snoozed = followUp === 'snoozed';
+-    const localList = !!followUp || drafts || sent;
++    const localList = !!followUp || drafts || sent || archive;
+     const atListLimit = this.state.limit >= 100;
+     const readBelowSearch = searchActive || localList || (route === 'list' && this.state.searchClearing);
+     const searchUnavailable = route === 'list' && this.listActionsUnavailable();
+@@ -1863,8 +1897,10 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                 )}
+                 {readBelowSearch && readFailed && !loading && !this.state.searchPending && (
+                   <div className={drafts ? 'pr-notice pr-draft-read-error' :
+-                    sent ? 'pr-notice pr-sent-read-error' : 'pr-notice'} role="alert">
+-                    {drafts ? '草稿暂时无法读取。' : sent ? '已发送邮件暂时无法读取。' : mailReadError}
++                    sent ? 'pr-notice pr-sent-read-error' :
++                    archive ? 'pr-notice pr-archive-read-error' : 'pr-notice'} role="alert">
++                    {drafts ? '草稿暂时无法读取。' : sent ? '已发送邮件暂时无法读取。' :
++                      archive ? '归档邮件暂时无法读取。' : mailReadError}
+                     <button onKeyDown={keepNativeButtonActivation} onClick={this.retrySearchRead}>重新读取</button>
+                   </div>
+                 )}
+@@ -1895,7 +1931,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                     </div>
+                   )}
+                   {sent && !searchUnavailable && !rows.length && (
+-                    this.state.unreadOnly ? this.renderSearchEmpty(true) :
++                    this.state.unreadOnly ? this.renderSearchEmpty('已发送') :
+                       <div className="pr-drafts-empty pr-sent-empty">
+                         <p role="status">本机暂无已发送邮件</p>
+                         <button type="button" onKeyDown={keepNativeButtonActivation} onClick={this.compose}>
+@@ -1903,11 +1939,23 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                         </button>
+                       </div>
+                   )}
++                  {archive && !searchUnavailable && !rows.length && (
++                    this.state.unreadOnly ? this.renderSearchEmpty('归档') :
++                      <div className="pr-follow-up-empty pr-archive-empty">
++                        <p role="status">{accounts.length && !accounts.some(account => archiveFolder(account.id))
++                          ? '当前邮箱尚无可用的归档位置' : '本机暂无归档邮件'}</p>
++                        <button type="button" onKeyDown={keepNativeButtonActivation}
++                          onClick={() => void this.navigate('inbox')}>
++                          返回收件箱
++                        </button>
++                      </div>
++                  )}
+                   {searchActive && !searchUnavailable && !rows.length && this.renderSearchEmpty()}
+-                  {!searchActive && !rows.length && !emptyInbox && (!readFailed || (sent && loading)) &&
+-                    (drafts || sent ? searchUnavailable : !followUp || loading) && (
++                  {!searchActive && !rows.length && !emptyInbox && (!readFailed || ((sent || archive) && loading)) &&
++                    (drafts || sent || archive ? searchUnavailable : !followUp || loading) && (
+                     <p className="pr-empty" role="status">
+-                      {drafts ? '正在读取草稿…' : sent ? '正在读取已发送邮件…' : loading ? '正在读取邮件…' : '这里还没有邮件'}
++                      {drafts ? '正在读取草稿…' : sent ? '正在读取已发送邮件…' :
++                        archive ? '正在读取归档邮件…' : loading ? '正在读取邮件…' : '这里还没有邮件'}
+                     </p>
+                   )}
+                   {this.state.more && !searchUnavailable && (
+@@ -1922,7 +1970,8 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                         ? (localList && rows.length < 100 ? '正在加载更多…'
+                           : drafts ? '已显示前 100 份草稿'
+                           : followUp === 'pinned' ? '已显示前 100 个置顶会话'
+-                          : sent ? '已显示前 100 个已发送会话' : '已显示 100 个会话，请缩小搜索范围')
++                          : sent ? '已显示前 100 个已发送会话'
++                          : archive ? '已显示前 100 个归档会话' : '已显示 100 个会话，请缩小搜索范围')
+                         : '加载更多'}
+                     </button>
+                   )}
+diff --git a/app/src/flux/tasks/change-folder-task.ts b/app/src/flux/tasks/change-folder-task.ts
+index bb0e7dcdbba45c091456d7a63786c471e4732f34..0537b610b4a331286e363e8135e708c78d9679cc 100644
+--- a/app/src/flux/tasks/change-folder-task.ts
++++ b/app/src/flux/tasks/change-folder-task.ts
+@@ -14,7 +14,14 @@ let CategoryStore = null;
+  * their bytes but not their flags, so the engine uses `bits` to send each one home.
+  */
+ export type SourceFoldersByMessageId = {
+-  [messageId: string]: { folderId: string; bits: number; labels?: string[] }[];
++  [messageId: string]: {
++    folderId: string;
++    bits: number;
++    labels?: string[];
++    movedFolderId?: string;
++    movedUID?: number;
++    movedUIDValidity?: number;
++  }[];
+ };
+ 
+ /*
+@@ -50,6 +57,7 @@ export class ChangeFolderTask extends ChangeMailTask {
+     // Gmail still uses physical All Mail / Spam / Trash placements. This flag specifies
+     // the Inbox label independently of the physical destination and authentication method.
+     gmailInbox: Attributes.Boolean({ modelKey: 'gmailInbox' }),
++    exactPlacementUndo: Attributes.Boolean({ modelKey: 'exactPlacementUndo' }),
+     folder: Attributes.Obj({
+       modelKey: 'folder',
+       itemClass: Folder,
+@@ -66,6 +74,7 @@ export class ChangeFolderTask extends ChangeMailTask {
+   };
+ 
+   gmailInbox?: boolean;
++  exactPlacementUndo?: boolean;
+   folder: Folder;
+   sourceFolderIds: string[];
+   undoPlacements?: SourceFoldersByMessageId;
+@@ -189,6 +198,7 @@ export class ChangeFolderTask extends ChangeMailTask {
+   }
+ 
+   createUndoTasks(): this[] {
++    if (!this.hasConfirmedUndoPlacements()) return [];
+     if (this.undoPlacements) {
+       // An empty map is the engine reporting that the move selected no copy, so there is
+       // nothing to send back. `folder` only describes the undo to the user: the engine
+@@ -241,6 +251,14 @@ export class ChangeFolderTask extends ChangeMailTask {
+     return scoped[0] || takenByDefault[0] || candidates[0] || null;
+   }
+ 
++  hasConfirmedUndoPlacements() {
++    if (!this.exactPlacementUndo) return true;
++    const entries = Object.values(this.undoPlacements || {}).flat();
++    return entries.length > 0 && !!this.folder &&
++      entries.every(entry => entry.movedFolderId === this.folder.id &&
++        entry.movedUID > 0 && entry.movedUIDValidity > 0);
++  }
++
+   _singleSourceFolder(): Folder | null {
+     if (!this.sourceFolderIds || this.sourceFolderIds.length !== 1) {
+       return null;
+diff --git a/app/src/flux/tasks/change-mail-task.ts b/app/src/flux/tasks/change-mail-task.ts
+index 53075c4b4af174a7350200b954c5404d662a1aed..ed1c5e1ae06902b70167d748ab23bf024915e671 100644
+--- a/app/src/flux/tasks/change-mail-task.ts
++++ b/app/src/flux/tasks/change-mail-task.ts
+@@ -36,7 +36,7 @@ export class ChangeMailTask extends Task {
+     }),
+   };
+ 
+-  paperReed?: { action: string; threadId: string; requestId: string; undoable: boolean };
++  paperReed?: { action: string; threadId: string; requestId: string; undoable: boolean; fromArchive?: boolean };
+   threadIds: string[];
+   messageIds: string[];
+   isUndo: boolean;
+diff --git a/app/src/services/mail-access/filter.ts b/app/src/services/mail-access/filter.ts
+index 304363aee32a408dd9da43321a107a72aec05097..610fcdb6d12ab52ae79cb3ae84827ba621ef2bee 100644
+--- a/app/src/services/mail-access/filter.ts
++++ b/app/src/services/mail-access/filter.ts
+@@ -121,7 +121,7 @@ export function validateFilter(filter: any): Filter {
+ 
+ // ── SQL helpers ─────────────────────────────────────────────────────────────
+ 
+-const sqlString = (s: string) => `'${s.replace(/'/g, "''")}'`;
++export const sqlString = (s: string) => `'${s.replace(/'/g, "''")}'`;
+ const likeEscape = (s: string) => s.replace(/[\\%_]/g, (c) => `\\${c}`);
+ const list = (v: string | string[]) => (Array.isArray(v) ? v : [v]);
+ 
+diff --git a/app/src/services/mail-core/inbox.ts b/app/src/services/mail-core/inbox.ts
+index 69e49517fb7a18563bd233a1cf41b9c12474a9c9..0854cb8f119189cd55bd600d7f31d7ab3a70619f 100644
+--- a/app/src/services/mail-core/inbox.ts
++++ b/app/src/services/mail-core/inbox.ts
+@@ -5,7 +5,7 @@ import {
+   localPinOrder,
+   localSnoozeOrder,
+ } from './local-triage';
+-import { FilterMatcher } from '../mail-access/filter';
++import { FilterMatcher, sqlString } from '../mail-access/filter';
+ import { createHash } from 'crypto';
+ import {
+   AccountStore,
+@@ -69,6 +69,36 @@ export function sentCategoryIds(ids: string[]) {
+     .filter(category => category.role === 'sent').map(category => category.id)).sort();
+ }
+ 
++const gmailOutsideArchive = ['\\Inbox', '\\Sent', '\\Spam', '\\Trash', '\\Draft', '\\Drafts'];
++
++export function archiveFolder(accountId: string) {
++  const usesLabels = CategoryStore.getInboxCategory(accountId) instanceof Label;
++  const folder = CategoryStore.getCategoryByRole(accountId, usesLabels ? 'all' : 'archive');
++  return folder instanceof Folder ? folder : null;
++}
++
++function archiveMembership(ids: string[], grant: Grant) {
++  const conditions = ids.flatMap(accountId => {
++    const folder = archiveFolder(accountId);
++    if (!folder || !isFolderAllowed(grant, accountId, folder.id)) return [];
++    const usesLabels = CategoryStore.getInboxCategory(accountId) instanceof Label;
++    const liveMessage = `m.accountId = Thread.accountId AND m.threadId = Thread.id AND m.draft = 0
++      AND NOT EXISTS (SELECT 1 FROM MessageOrphan WHERE messageId = m.id)`;
++    const inFolder = `EXISTS (SELECT 1 FROM json_each(m.data, '$.folders') WHERE key = ${sqlString(folder.id)})`;
++    const archived = usesLabels
++      ? `AND NOT EXISTS (SELECT 1 FROM json_each(m.data, '$.labels') WHERE value IN (${gmailOutsideArchive.map(sqlString).join(', ')}))`
++      : '';
++    const outsideInbox = usesLabels
++      ? `AND NOT EXISTS (SELECT 1 FROM Message m INDEXED BY MessageListThreadIndex WHERE ${liveMessage} AND ${inFolder}
++          AND EXISTS (SELECT 1 FROM json_each(m.data, '$.labels') WHERE value = ${sqlString(gmailOutsideArchive[0])}))`
++      : '';
++    return [`(Thread.accountId = ${sqlString(accountId)} AND EXISTS (
++      SELECT 1 FROM Message m INDEXED BY MessageListThreadIndex WHERE ${liveMessage} AND ${inFolder} ${archived}
++    ) ${outsideInbox})`];
++  });
++  return `(${conditions.join(' OR ') || '0'})`;
++}
++
+ export async function queryInboxPage(input: InboxQuery, access: InboxAccess) {
+   await ensureLocalTriage();
+   const grant = access.grant();
+@@ -82,7 +112,8 @@ export async function queryInboxPage(input: InboxQuery, access: InboxAccess) {
+   const limit = Math.min(input.limit, 201);
+   const offset = input.offset || 0;
+   const clauses: any[] = [];
+-  if (input.folder) clauses.push({ in: input.folder });
++  const archive = input.folder === 'archive' ? archiveMembership(ids, grant) : null;
++  if (input.folder && input.folder !== 'archive') clauses.push({ in: input.folder });
+   if (input.unread) clauses.push({ unread: true });
+   const makeQuery = (pinned?: boolean) => {
+     const query = threadQuery({ ...grant, accountIds: ids }, {
+@@ -94,6 +125,7 @@ export async function queryInboxPage(input: InboxQuery, access: InboxAccess) {
+       limit, offset: 0, background: true,
+     });
+     query.where(new FilterMatcher(localViewSQL(input.localView, input.folder === 'inbox' && !input.query)) as any);
++    if (archive) query.where(new FilterMatcher(archive) as any);
+     if (pinned !== undefined) query.where(new FilterMatcher(
+       `Thread.id ${pinned ? 'IN' : 'NOT IN'} (SELECT threadId FROM PaperReedLocalThread WHERE pinned=1)`
+     ) as any);
+@@ -179,7 +211,8 @@ function receipt(task: ChangeMailTask): MailReceipt {
+     threadId: task.paperReed.threadId,
+     taskId: task.id,
+     status,
+-    undoable: status === 'succeeded' && !task.isUndo && task.paperReed.undoable,
++    undoable: status === 'succeeded' && !task.isUndo && task.paperReed.undoable &&
++      (!(task instanceof ChangeFolderTask) || task.hasConfirmedUndoPlacements()),
+     ...(task.error
+       ? { error: typeof task.error === 'string' ? task.error : JSON.stringify(task.error) }
+       : {}),
+@@ -240,11 +273,13 @@ export function actionAvailable(action: MailAction, accountId: string) {
+   return CategoryStore.getCategoryByRole(accountId, action) instanceof Folder;
+ }
+ export async function organizeMail(
+-  input: { action: MailAction; targets: MailTarget[]; requestId: string },
++  input: { action: MailAction; targets: MailTarget[]; requestId: string; fromArchive?: boolean },
+   access: InboxAccess
+ ) {
+   if (!['read', 'unread', 'archive', 'spam', 'trash', 'inbox'].includes(input.action))
+     throw new Error('invalid-action');
++  const fromArchive = input.fromArchive === true;
++  if (fromArchive && input.action !== 'inbox') throw new Error('invalid-action');
+   if (
+     !input.requestId ||
+     input.requestId.length > 200 ||
+@@ -263,11 +298,12 @@ export async function organizeMail(
+       const id = taskId(target.accountId, input.requestId, target.threadId);
+       const existing = await DatabaseStore.find<ChangeMailTask>(Task, id);
+       if (existing) {
+-        if (existing.paperReed?.action !== input.action) throw new Error('request-conflict');
++        if (existing.paperReed?.action !== input.action ||
++            !!existing.paperReed?.fromArchive !== fromArchive) throw new Error('request-conflict');
+         items.push(receipt(await taskFor(target.accountId, id, access, true)));
+         continue;
+       }
+-      const pendingKey = id + ':' + input.action;
++      const pendingKey = id + ':' + input.action + (fromArchive ? ':archive-source' : '');
+       if ([...pending.keys()].some((k) => k.startsWith(id + ':') && k !== pendingKey))
+         throw new Error('request-conflict');
+       if (!pending.has(pendingKey))
+@@ -290,6 +326,20 @@ export async function organizeMail(
+               throw new Error('Access denied: excluded mail');
+             if (!actionAvailable(input.action, target.accountId))
+               throw new Error('unsupported-mailbox-action');
++            const sourceArchive = fromArchive ? archiveFolder(target.accountId) : null;
++            if (fromArchive && !sourceArchive)
++              throw new Error('unsupported-mailbox-action');
++            if (sourceArchive && !isFolderAllowed(access.grant(), target.accountId, sourceArchive.id))
++              throw new Error('Access denied: source excluded');
++            if (sourceArchive && messages.length) {
++              const orphaned = await DatabaseStore._query(
++                'SELECT messageId FROM MessageOrphan JOIN Message ON Message.id = messageId ' +
++                  'WHERE Message.accountId = ? AND Message.threadId = ?',
++                [target.accountId, target.threadId]
++              );
++              const orphanIds = new Set(orphaned.map(row => row.messageId));
++              messages = messages.filter(message => !orphanIds.has(message.id));
++            }
+             let task: ChangeMailTask;
+             let undoable = true;
+             if (input.action === 'read' || input.action === 'unread') {
+@@ -311,6 +361,8 @@ export async function organizeMail(
+               messages = messages.filter((m) => {
+                 const inInbox = (m.labels || []).includes('\\Inbox');
+                 if (input.action === 'archive') return inInbox && m.folderIds().includes(destination.id);
++                if (sourceArchive) return m.folderIds().includes(sourceArchive.id) &&
++                  !(m.labels || []).some(label => gmailOutsideArchive.includes(label));
+                 if (input.action === 'inbox') return !inInbox || !m.folderIds().includes(destination.id);
+                 return m.folderIds().some((id) => id !== destination.id);
+               });
+@@ -327,6 +379,7 @@ export async function organizeMail(
+               let sourceFolderIds: string[] = [];
+               if (input.action === 'archive')
+                 sourceFolderIds = [CategoryStore.getInboxCategory(target.accountId).id];
++              if (sourceArchive) sourceFolderIds = [sourceArchive.id];
+               if (sourceFolderIds.length)
+                 messages = messages.filter((m) =>
+                   m.folderIds().some((id) => sourceFolderIds.includes(id))
+@@ -339,6 +392,7 @@ export async function organizeMail(
+                 messages,
+                 folder: destination as Folder,
+                 sourceFolderIds,
++                ...(sourceArchive ? { exactPlacementUndo: true } : {}),
+                 source: 'Paper Reed',
+               });
+             }
+@@ -349,6 +403,7 @@ export async function organizeMail(
+               threadId: target.threadId,
+               requestId: input.requestId,
+               undoable,
++              ...(fromArchive ? { fromArchive } : {}),
+             };
+             access.check(target.accountId, true);
+             if (messages.some((m) => !isMessageAllowed(access.grant(), m)))
+@@ -372,7 +427,7 @@ export async function organizeMail(
+ }
+ export async function undoMail(ref: { accountId: string; taskId: string }, access: InboxAccess) {
+   const task = await taskFor(ref.accountId, ref.taskId, access, true);
+-  if (taskState(task) !== 'succeeded' || task.isUndo || !task.paperReed.undoable)
++  if (!receipt(task).undoable)
+     throw new Error('undo-unavailable');
+   const id = taskId(task.accountId, 'undo', task.id);
+   const existing = await DatabaseStore.find<ChangeMailTask>(Task, id);

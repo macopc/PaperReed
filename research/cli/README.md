@@ -98,7 +98,7 @@ paper-reed undo --input '{"accountId":"ACCOUNT_ID","taskId":"TASK_ID"}'
 
 整理命令最多接收 100 个明确的账号／会话引用，需要写权限。返回 `items` 数组，每项有 `accountId`、`threadId`、`status`，实际入队的项另有 `taskId`。`queued` / `syncing` 尚未完成；`succeeded` 为任务完成，`unchanged` 为无需改动，`rejected` / `failed` 带错误信息。批次只要存在拒绝或失败项，CLI 退出码为 1，但 stdout 保留全部结果，包括成功项。
 
-使用 `change-get` 查询每个任务；返回 `undoable: true` 才可撤销，撤销也返回任务并需继续查询。不永久删除邮件；`trash` 是移入废纸篓。`restore-inbox` 恢复垃圾邮件／废纸篓中的邮件。当前精确文件夹适配不支持 Gmail 标签型 Inbox 的归档／移回，返回 `unsupported-mailbox-action`。
+使用 `change-get` 查询每个任务。返回 `undoable: true` 后可提交撤销请求，并继续查询撤销任务。`trash` 将邮件移入废纸篓。对 `local-list` 的归档结果使用 `restore-inbox` 时，在 JSON 输入中添加 `"fromArchive": true`，只恢复归档邮件或归档副本。垃圾邮件和废纸篓的恢复沿用 `restore-inbox` 原有输入。
 
 重试保持同一请求 ID、目标和动作；仍保留的同一任务不会重复提交，相同目标换动作会返回 `request-conflict`。每个任务只处理提交时已经存在的邮件，后来进入会话的邮件不自动包含在内。
 

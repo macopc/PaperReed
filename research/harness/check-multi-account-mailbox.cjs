@@ -8,7 +8,7 @@ let app,main,cdp,port;const results=[];
 async function until(fn,label,timeout=45000){const end=Date.now()+timeout;while(Date.now()<end){const v=await fn();if(v)return v;await new Promise(r=>setTimeout(r,200));}throw Error('Timeout: '+label);}
 async function evaluate(expression){const v=await cdp.send('Runtime.evaluate',{expression,awaitPromise:true,returnByValue:true});if(v.exceptionDetails)throw Error(JSON.stringify(v.exceptionDetails));return v.result.value;}
 async function cli(command,input,error=false){const child=spawn(process.execPath,[path.resolve(__dirname,'../cli/paper-reed.cjs'),command],{env:{...process.env,PAPER_REED_UPSTREAM:upstream,PAPER_REED_TOKEN_FILE:tokenFile,PAPER_REED_MCP_URL:`http://127.0.0.1:${port}/mcp`},stdio:['pipe','pipe','pipe']});let stdout='',stderr='';child.stdout.on('data',b=>stdout+=b);child.stderr.on('data',b=>stderr+=b);child.stdin.end(JSON.stringify(input));const code=await new Promise((resolve,reject)=>{child.on('exit',resolve);child.on('error',reject)});error?assert.notEqual(code,0):assert.equal(code,0,stdout+stderr);return JSON.parse(stdout||stderr);}
-async function truth(account,messageId='same-message@example.test'){const result=path.join(work,'truth-result.json');fs.writeFileSync(path.join(work,'truth-request.json'),JSON.stringify({account,messageId}));await until(()=>fs.existsSync(result),'server truth');const value=JSON.parse(fs.readFileSync(result));fs.unlinkSync(result);return value;}
+async function truth(account,messageId='same-message@example.test',options={}){const result=path.join(work,'truth-result.json');fs.writeFileSync(path.join(work,'truth-request.json'),JSON.stringify({account,messageId,...options}));await until(()=>fs.existsSync(result),'server truth');const value=JSON.parse(fs.readFileSync(result));fs.unlinkSync(result);return value;}
 async function complete(item){assert(item.taskId,JSON.stringify(item));return until(async()=>{const v=await cli('change-get',{accountId:item.accountId,taskId:item.taskId});assert(!['failed','rejected','cancelled'].includes(v.status),JSON.stringify(v));return v.status==='succeeded'?v:false},'remote complete');}
 async function undo(item){return complete(await cli('undo',{accountId:item.accountId,taskId:item.taskId}));}
 function pass(name){results.push(name);console.log('PASS',name);}
@@ -25,6 +25,11 @@ async function stop(){const p=app.process();await app.evaluate(({app})=>app.quit
  const ids=[];for(const a of accounts)ids.push((await cli('search',{accountId:a.id,query:'in:inbox',limit:10}))[0].id);
  assert.notEqual(ids[0],ids[1]);const targets=accounts.map((a,i)=>({accountId:a.id,threadId:ids[i]}));
  await until(()=>evaluate('document.querySelectorAll(".pr-mail-row").length===2'),'unified inbox');
+ if(process.env.PAPER_REED_ARCHIVE_PAGE_CHECK){
+  await require('./check-archive-page.cjs')({main,cdp,out,accounts,ids,cli,truth,until,evaluate,pass,complete,undo});
+  await stop();
+  return;
+ }
  const otherRule=await cli('rule-save', {
    accountId:accounts[1].id,name:'第二邮箱规则',field:'subject',
    query:'shared subject',action:'category',value:'notifications',enabled:false,

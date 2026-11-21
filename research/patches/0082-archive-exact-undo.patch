@@ -1,0 +1,1120 @@
+diff --git a/MailSync/SyncWorker.cpp b/MailSync/SyncWorker.cpp
+index 3721bb4445adee771054d6ecaf21b00a7da93ee0..c3e1ce003e7e64492bc9d2157c0e30d0e2965795 100644
+--- a/MailSync/SyncWorker.cpp
++++ b/MailSync/SyncWorker.cpp
+@@ -189,29 +189,28 @@ void SyncWorker::idleCycleIteration()
+     // because we want tasks created when a task runs to also be run
+     // immediately. (eg: A SendDraftTask queueing a SyncbackMetadataTask)
+     //
+-    vector<shared_ptr<Task>> tasks;
+     TaskProcessor processor { account, store, &session };
+ 
+     // Ensure our pile of completed tasks doesn't grow unbounded
+     processor.cleanupOldTasksAtRuntime();
+ 
+-    // Find tasks ready for "remote" that we haven't processed yet in this pass
+-    int rowid = -1;
+-    SQLite::Statement statement(store->db(), "SELECT rowid, data FROM Task WHERE accountId = ? AND status = \"remote\" AND rowid > ?");
+-
+-    do {
+-        tasks = {};
++    // Read each task immediately before it runs. An earlier failure can invalidate
++    // a later task's source while this pass is still processing the queue.
++    long long rowid = -1;
++    SQLite::Statement statement(store->db(),
++        "SELECT rowid, data FROM Task WHERE accountId = ? AND status = 'remote' AND rowid > ? ORDER BY rowid LIMIT 1");
++    while (true) {
+         statement.bind(1, account->id());
+         statement.bind(2, rowid);
+-        while (statement.executeStep()) {
+-            tasks.push_back(make_shared<Task>(statement));
+-            rowid = max(rowid, statement.getColumn("rowid").getInt());
++        if (!statement.executeStep()) {
++            statement.reset();
++            break;
+         }
++        Task task(statement);
++        rowid = statement.getColumn("rowid").getInt64();
+         statement.reset();
+-        for (auto & task : tasks) {
+-            processor.performRemote(task.get());
+-        }
+-    } while (tasks.size() > 0);
++        processor.performRemote(&task);
++    }
+ 
+     if (idleShouldReloop) {
+         idleShouldReloop = false;
+diff --git a/MailSync/TaskProcessor.cpp b/MailSync/TaskProcessor.cpp
+index bc558780f4a132d27b6d30815019b8277cc471da..c38cb09ee5e44ec53a32f2747d091a7b8f9bc1ae 100644
+--- a/MailSync/TaskProcessor.cpp
++++ b/MailSync/TaskProcessor.cpp
+@@ -110,18 +110,19 @@ static json _clientVisibleState(Message & msg) {
+  own saveFolderStatus writes only keys its pass changed, so the reset survives unless that
+  pass ran the full scan itself.
+  */
+-static void _rescanFoldersForFlags(MailStore * store, string accountId, const map<string, vector<TaskPlacement *>> & itemsByFolder) {
+-    for (auto & pair : itemsByFolder) {
+-        auto folder = store->find<Folder>(Query().equal("accountId", accountId).equal("id", pair.first));
+-        if (folder == nullptr) {
+-            continue;
+-        }
++static void _rescanFolder(MailStore * store, const string & accountId, const string & folderId) {
++    auto folder = store->find<Folder>(Query().equal("accountId", accountId).equal("id", folderId));
++    if (folder != nullptr) {
+         json initialStatus = folder->localStatus();
+         folder->localStatus()[LS_LAST_DEEP] = 0;
+         store->saveFolderStatus(folder.get(), initialStatus);
+     }
+ }
+ 
++static void _rescanFoldersForFlags(MailStore * store, string accountId, const map<string, vector<TaskPlacement *>> & itemsByFolder) {
++    for (auto & pair : itemsByFolder) _rescanFolder(store, accountId, pair.first);
++}
++
+ /*
+  The UID each item's copy received in `dest`, aligned with `items` (0 when unknown). Copies
+  are matched to UIDs by message id, which does not depend on the folder: the headers of the
+@@ -252,6 +253,71 @@ static void _expungeMovedCopies(IMAPSession * session, String * path, IndexSet *
+ // EXPUNGE when the server lacks MOVE, and records each copy's new UID on the item. A copy
+ // whose new UID cannot be determined is logged and left as it was: its row keeps the
+ // optimistic marker and the destination's next scan records it.
++static uint32_t _mailboxUIDValidity(IMAPSession * session, String * path) {
++    ErrorCode err = ErrorCode::ErrorNone;
++    auto status = session->folderStatus(path, &err);
++    return err == ErrorCode::ErrorNone && status ? status->uidValidity() : 0;
++}
++
++static uint32_t _localFolderUIDValidity(MailStore * store, const string & accountId, const string & folderId,
++    bool requireUnchanged = false) {
++    auto folder = store->find<Folder>(Query().equal("accountId", accountId).equal("id", folderId));
++    if (!folder || !folder->localStatus().is_object()) return 0;
++    const auto & status = folder->localStatus();
++    if (requireUnchanged && status.value(LS_UIDVALIDITY_RESET_COUNT, -1) != 0) return 0;
++    const auto validity = status.value(LS_UIDVALIDITY, json(nullptr));
++    return validity.is_number_unsigned() ? validity.get<uint32_t>() : 0;
++}
++
++static void _selectExactSource(IMAPSession * session, String * path, uint32_t validity) {
++    ErrorCode err = ErrorCode::ErrorNone;
++    session->select(path, &err);
++    if (err != ErrorCode::ErrorNone) throw SyncException(err, "select exact move source");
++    if (!validity || session->uidValidity() != validity) {
++        throw SyncException("exact-move-source-unavailable", "The source mailbox generation changed.", false);
++    }
++}
++
++static void _moveExactCopy(IMAPSession * session, String * path, uint32_t sourceValidity, Folder & dest, TaskPlacement & item) {
++    ErrorCode err = ErrorCode::ErrorNone;
++    const bool canMove = session->storedCapabilities()->containsIndex(IMAPCapabilityMove);
++    if (!canMove && !session->storedCapabilities()->containsIndex(IMAPCapabilityUIDPlus)) {
++        throw SyncException("exact-move-unavailable", "The server lacks MOVE and targeted UID expunge.", false);
++    }
++    auto destPath = AS_MCSTR(dest.path());
++    auto uids = IndexSet::indexSetWithIndex(item.placement.remoteUID);
++    HashMap * uidmap = nullptr;
++    uint32_t validity = 0;
++    _selectExactSource(session, path, sourceValidity);
++    if (canMove) session->moveMessages(path, uids, destPath, &uidmap, &err, &validity);
++    else session->copyMessages(path, uids, destPath, &uidmap, &err, &validity);
++    if (err != ErrorCode::ErrorNone) throw SyncException(err, canMove ? "UID MOVE" : "UID COPY");
++
++    Value * mapped = uidmap && uidmap->count() == 1
++        ? (Value *)uidmap->objectForKey(Value::valueWithUnsignedLongValue(item.placement.remoteUID))
++        : nullptr;
++    const uint32_t uid = mapped ? (uint32_t)mapped->unsignedLongValue() : 0;
++    if (!uid || !validity || _mailboxUIDValidity(session, destPath) != validity) {
++        throw SyncException("exact-move-unconfirmed", "The server did not confirm the destination copy in its current mailbox generation.", false);
++    }
++    if (!canMove) {
++        // UID COPY preserves flags. Neither a whole-mailbox EXPUNGE nor a destination
++        // flag write is appropriate for this one-copy fallback.
++        _selectExactSource(session, path, sourceValidity);
++        session->storeFlagsByUID(path, uids, IMAPStoreFlagsRequestKindAdd, MessageFlagDeleted, &err);
++        if (err == ErrorCode::ErrorNone) {
++            _selectExactSource(session, path, sourceValidity);
++            session->expungeUIDs(path, uids, &err);
++        }
++        if (err != ErrorCode::ErrorNone) {
++            throw SyncException("exact-move-partial", "The copy was made, but the server did not confirm targeted source removal.", false);
++        }
++    }
++    item.moved = true;
++    item.movedUID = uid;
++    item.movedUIDValidity = validity;
++}
++
+ static void _moveMessagesResilient(IMAPSession * session, String * path, Folder & dest, vector<TaskPlacement *> & items) {
+     ErrorCode err = ErrorCode::ErrorNone;
+     HashMap * uidmap = nullptr;
+@@ -452,13 +518,25 @@ void _applyStarredInIMAPFolder(IMAPSession * session, MailStore * store, string
+  phase already marked for a recorded folder keeps that course, which is how the remote
+  phase finds the local phase's choice.
+  */
+-static vector<PlacementMove> _restoreMovesForMessage(Message * msg, const vector<Placement> & placements, json & data) {
++static vector<PlacementMove> _restoreMovesForMessage(Message * msg, const vector<Placement> & placements, const json & data) {
+     vector<PlacementMove> moves;
+     auto & restore = data["restorePlacements"];
+     if (!restore.count(msg->id()) || !restore[msg->id()].is_array() || !data.count("sourceFolderIds") || !data["sourceFolderIds"].is_array() || data["sourceFolderIds"].empty()) {
+         return moves;
+     }
+     string from = data["sourceFolderIds"][0].get<string>();
++    if (data.value("exactPlacementUndo", false)) {
++        // Never use flags or UID ordering to guess the identity of another copy.
++        for (auto & entry : restore[msg->id()]) {
++            if (entry.value("movedFolderId", string()) != from || !entry.value("movedUIDValidity", 0U)) continue;
++            uint32_t uid = entry.value("movedUID", 0U);
++            auto placement = std::find_if(placements.begin(), placements.end(), [&](const Placement & p) {
++                return uid && p.remoteUID == uid && p.folderId == from && p.pendingFolderId.empty();
++            });
++            if (placement != placements.end()) moves.push_back({*placement, entry["folderId"].get<string>()});
++        }
++        return moves;
++    }
+     vector<pair<string, int>> targets;
+     for (auto & entry : restore[msg->id()]) {
+         targets.push_back({entry["folderId"].get<string>(), entry["bits"].get<int>()});
+@@ -532,7 +610,7 @@ static vector<PlacementMove> _restoreMovesForMessage(Message * msg, const vector
+  it back from a pending move elsewhere. A copy is moved even when the destination already
+  holds one: two copies in one folder are a state the placement model represents.
+  */
+-static vector<PlacementMove> _movesForMessage(MailStore * store, Message * msg, const vector<Placement> & placements, json & data) {
++static vector<PlacementMove> _movesForMessage(MailStore * store, Message * msg, const vector<Placement> & placements, const json & data) {
+     if (data.count("restorePlacements") && data["restorePlacements"].is_object()) {
+         return _restoreMovesForMessage(msg, placements, data);
+     }
+@@ -569,6 +647,12 @@ static vector<PlacementMove> _movesForMessage(MailStore * store, Message * msg,
+             moves.push_back({p, dest});
+             continue;
+         }
++        if (data.value("exactPlacementUndo", false)) {
++            if (p.folderId != dest && matches(p.folderId) && p.pendingFolderId.empty()) {
++                moves.push_back({p, dest});
++            }
++            continue;
++        }
+         bool pendingElsewhere = !p.pendingFolderId.empty() && p.pendingFolderId != dest;
+         bool selected;
+         if (p.pendingFolderId == dest) {
+@@ -585,10 +669,34 @@ static vector<PlacementMove> _movesForMessage(MailStore * store, Message * msg,
+     return moves;
+ }
+ 
++// Only a placement recorded at admission may be used by an exact forward move.
++static vector<PlacementMove> _exactSourceMoves(Message * msg, const vector<Placement> & placements, const json & data) {
++    vector<PlacementMove> moves;
++    auto sources = data.find("exactMoveSources");
++    if (sources == data.end()) return moves;
++    auto entries = sources->find(msg->id());
++    if (entries == sources->end()) return moves;
++
++    string dest = data["folder"]["id"].get<string>();
++    for (const auto & entry : *entries) {
++        auto placement = std::find_if(placements.begin(), placements.end(), [&](const Placement & candidate) {
++            return candidate.folderId == entry["folderId"].get<string>() &&
++                candidate.rowid == entry["rowId"].get<long long>() &&
++                candidate.remoteUID == entry["uid"].get<uint32_t>() &&
++                candidate.pendingFolderId == dest;
++        });
++        if (placement != placements.end()) moves.push_back({*placement, dest});
++    }
++    return moves;
++}
++
+ // Marks the selected copies so the client sees them in the destination immediately, and
+ // records as `undoPlacements` the folder each one was shown in and its flag bits, which is
+ // where and how its undo sends a copy back (_restoreMovesForMessage).
+ void _applyFolder(MailStore * store, Message * msg, const vector<Placement> & placements, json & data) {
++    // Verify the physical source on the server before showing any exact undo move.
++    const bool exact = data.value("exactPlacementUndo", false);
++    if (exact && data.count("restorePlacements")) return;
+     json shownIn = json::array();
+     bool gmail = data.count("gmailInbox");
+     if (gmail) {
+@@ -608,12 +716,35 @@ void _applyFolder(MailStore * store, Message * msg, const vector<Placement> & pl
+         data["gmailLabels"][msg->id()] = labels;
+         store->setPlacementLabels(*msg, labels);
+     }
+-    for (auto & move : _movesForMessage(store, msg, placements, data)) {
++    auto moves = _movesForMessage(store, msg, placements, data);
++    if (exact) {
++        if (moves.empty()) {
++            throw SyncException("exact-move-source-unavailable", "The archive copy is no longer available.", false);
++        }
++        for (const auto & move : moves) {
++            auto folder = store->folderById(msg->accountId(), move.placement.folderId);
++            const auto validity = folder && folder->localStatus().is_object()
++                ? folder->localStatus().value(LS_UIDVALIDITY, json(nullptr)) : json(nullptr);
++            if (!validity.is_number_unsigned() || validity == 0) {
++                throw SyncException("exact-move-source-unavailable", "The archive mailbox generation is unknown.", false);
++            }
++            data["exactMoveSources"][msg->id()].push_back({
++                {"folderId", move.placement.folderId}, {"rowId", move.placement.rowid},
++                {"uid", move.placement.remoteUID}, {"uidValidity", validity}, {"bits", move.placement.flagBits()},
++            });
++        }
++    }
++    for (auto & move : moves) {
+         if (gmail || move.placement.reportedFolderId() != move.destFolderId) {
+             json entry = {{"folderId", move.placement.reportedFolderId()}, {"bits", move.placement.flagBits()}};
+             if (gmail) entry["labels"] = move.placement.labels;
+             shownIn.push_back(entry);
+         }
++        const auto validity = _localFolderUIDValidity(store, msg->accountId(), move.placement.folderId);
++        data["queuedMoveCopies"][msg->id()].push_back({
++            {"rowId", move.placement.rowid}, {"destinationId", move.destFolderId},
++            {"sourceId", move.placement.folderId}, {"sourceUID", move.placement.remoteUID}, {"sourceUIDValidity", validity},
++        });
+         store->beginPlacementMove(*msg, move.placement.folderId, move.placement.remoteUID, move.destFolderId);
+     }
+     if (!shownIn.empty()) {
+@@ -632,9 +763,59 @@ static shared_ptr<Folder> _moveDestination(MailStore * store, string accountId,
+     return folder;
+ }
+ 
++static void _applyRecoveredMove(IMAPSession * session, MailStore * store, Folder & source, TaskPlacement & item, json & data) {
++    auto path = AS_MCSTR(source.path());
++    if (item.placement.folderId != item.destFolderId) {
++        auto dest = _moveDestination(store, source.accountId(), item.destFolderId, data);
++        _moveExactCopy(session, path, item.recoveredSourceValidity, *dest, item);
++        return;
++    }
++    _selectExactSource(session, path, item.recoveredSourceValidity);
++    ErrorCode err = ErrorCode::ErrorNone;
++    auto fetched = session->fetchMessagesByUID(path, IMAPMessagesRequestKindFlags,
++        IndexSet::indexSetWithIndex(item.placement.remoteUID), nullptr, &err);
++    if (err != ErrorCode::ErrorNone) throw SyncException(err, "read recovered move source");
++    if (!fetched || fetched->count() != 1) {
++        throw SyncException("move-source-history-unavailable", "The recovered source copy is no longer available.", false);
++    }
++    item.moved = true;
++    item.movedUID = item.placement.remoteUID;
++    item.movedUIDValidity = item.recoveredSourceValidity;
++}
++
+ // Moves the items' copies out of `source`, one MOVE per destination. A copy already in its
+ // destination (an undo settling a copy it found at home) is only confirmed in place.
+ void _applyFolderMoveInIMAPFolder(IMAPSession * session, MailStore * store, string accountId, Folder & source, vector<TaskPlacement *> & items, json & data) {
++    bool exact = data.value("exactPlacementUndo", false);
++    bool restoring = data.count("restorePlacements");
++    uint32_t sourceValidity = 0;
++    if (exact) {
++        auto path = AS_MCSTR(source.path());
++        auto & sources = data[restoring ? "restorePlacements" : "exactMoveSources"];
++        const char * folderKey = restoring ? "movedFolderId" : "folderId";
++        const char * uidKey = restoring ? "movedUID" : "uid";
++        const char * validityKey = restoring ? "movedUIDValidity" : "uidValidity";
++        for (auto item : items) {
++            auto & entries = sources[item->message->id()];
++            auto sourceEntry = std::find_if(entries.begin(), entries.end(), [&](const json & entry) {
++                return entry.value(folderKey, string()) == source.id() &&
++                    entry.value(uidKey, 0U) == item->placement.remoteUID;
++            });
++            const uint32_t validity = sourceEntry == entries.end() ? 0 : sourceEntry->value(validityKey, 0U);
++            if (!validity || (sourceValidity && validity != sourceValidity)) {
++                throw SyncException("exact-move-source-unavailable", "The recorded source mailbox generations disagree.", false);
++            }
++            sourceValidity = validity;
++        }
++        _selectExactSource(session, path, sourceValidity);
++        ErrorCode err = ErrorCode::ErrorNone;
++        auto uids = _uidsOf(items);
++        auto fetched = session->fetchMessagesByUID(path, IMAPMessagesRequestKindFlags, uids, nullptr, &err);
++        if (err != ErrorCode::ErrorNone) throw SyncException(err, "read exact move source");
++        if (!fetched || fetched->count() != uids->count()) {
++            throw SyncException("exact-move-source-unavailable", "An expected copy is no longer in the source mailbox.", false);
++        }
++    }
+     map<string, vector<TaskPlacement *>> byDest;
+     for (auto item : items) {
+         if (item->placement.folderId == item->destFolderId) {
+@@ -646,7 +827,13 @@ void _applyFolderMoveInIMAPFolder(IMAPSession * session, MailStore * store, stri
+     }
+     for (auto & pair : byDest) {
+         auto dest = _moveDestination(store, accountId, pair.first, data);
+-        _moveMessagesResilient(session, AS_MCSTR(source.path()), *dest, pair.second);
++        if (exact) {
++            for (auto item : pair.second) {
++                _moveExactCopy(session, AS_MCSTR(source.path()), sourceValidity, *dest, *item);
++            }
++        } else {
++            _moveMessagesResilient(session, AS_MCSTR(source.path()), *dest, pair.second);
++        }
+     }
+     if (data.count("gmailInbox")) {
+         for (auto item : items) {
+@@ -856,9 +1043,16 @@ void TaskProcessor::performLocal(Task * task) {
+ 
+         } else if (cname == "ChangeFolderTask") {
+             task->data()["undoPlacements"] = json::object();
++            task->data()["queuedMoveCopies"] = json::object();
++            task->data().erase("exactMoveSources");
++            task->data().erase("recoveredMoveCopies");
++            if (task->data().value("exactPlacementUndo", false) && !task->data().count("restorePlacements")) {
++                task->data()["exactMoveSources"] = json::object();
++            }
+             if (task->data().count("gmailInbox")) task->data()["gmailLabels"] = json::object();
+             performLocalChangeOnMessages(task, _applyFolder);
+-            
++            return; // The local placement changes and queued receipt committed together.
++
+         } else if (cname == "ChangeLabelsTask") {
+             performLocalChangeOnMessages(task, _applyLabels);
+         
+@@ -1217,7 +1411,11 @@ void TaskProcessor::performLocalChangeOnMessages(Task * task, LocalChangeFn modi
+     json & data = task->data();
+     ChangeMailModels models = inflateMessages(data);
+     bool recomputeThreadAttributes = data.count("threadIds");
+-    
++    if (data.count("exactMoveSources") &&
++        (models.messages.empty() || (data.count("messageIds") && models.messages.size() != data["messageIds"].size()))) {
++        throw SyncException("exact-move-source-unavailable", "An expected archive message is no longer available.", false);
++    }
++
+     for (auto msg : models.messages) {
+         // TEMPORARY
+         if (recomputeThreadAttributes) {
+@@ -1265,9 +1463,311 @@ void TaskProcessor::performLocalChangeOnMessages(Task * task, LocalChangeFn modi
+     }
+     // END TEMPORARY
+ 
++    if (modifyLocalMessage == _applyFolder) {
++        task->setStatus("remote");
++        store->save(task);
++    }
+     transaction.commit();
+ }
+ 
++static vector<json> _pendingPlacementChangesAfter(MailStore * store, Task * task) {
++    SQLite::Statement query(store->db(),
++        "SELECT data FROM Task WHERE accountId = ? AND status = 'remote' "
++        "AND rowid > (SELECT rowid FROM Task WHERE id = ?) "
++        "AND json_extract(data, '$.__cls') IN ('ChangeFolderTask', 'ChangeUnreadTask', 'ChangeStarredTask') ORDER BY rowid");
++    query.bind(1, task->accountId());
++    query.bind(2, task->id());
++    vector<json> moves;
++    while (query.executeStep()) moves.push_back(json::parse(query.getColumn(0).getString()));
++    return moves;
++}
++
++static void _applyRecordedFlags(Placement & copy, int bits) {
++    copy.unread = (bits & PLACEMENT_FLAG_UNREAD) != 0;
++    copy.starred = (bits & PLACEMENT_FLAG_STARRED) != 0;
++}
++
++// Replay the message's copies together: approximate undo pairs candidates by
++// flags before falling back to row order. Replaying a single copy would let it
++// take a target that belonged to another copy in the original selection.
++struct PlacementHistory {
++    map<long long, string> claimed;
++    set<long long> uncertain;
++    set<string> uncertainTargets;
++    map<string, json> plans;
++    bool incomplete = false;
++};
++
++struct MoveOrigin {
++    uint32_t validity;
++    int bits;
++    bool confirmed;
++};
++
++static PlacementHistory _laterMoveHistory(MailStore * store, const vector<json> & laterMoves, Message & msg,
++    vector<Placement> copies, const set<long long> & failedRows, const set<string> & originalSources,
++    const map<long long, MoveOrigin> & origins, bool legacy, const string & dest, const json & originalUndo) {
++    map<string, deque<int>> originalFlags;
++    for (const auto & entry : originalUndo) {
++        originalFlags[entry["folderId"].get<string>()].push_back(entry["bits"].get<int>());
++    }
++    map<long long, Placement> physical;
++    map<long long, string> priorMove;
++    map<string, uint32_t> folderValidities;
++    for (auto & copy : copies) {
++        physical.emplace(copy.rowid, copy);
++        copy.pendingFolderId.clear();
++        const auto origin = origins.find(copy.rowid);
++        if (origin != origins.end()) _applyRecordedFlags(copy, origin->second.bits);
++        if (!failedRows.count(copy.rowid)) continue;
++        copy.pendingFolderId = dest;
++        if (origin == origins.end()) {
++            auto & bits = originalFlags[copy.folderId];
++            if (!bits.empty()) {
++                _applyRecordedFlags(copy, bits.front());
++                bits.pop_front();
++            }
++        }
++    }
++
++    PlacementHistory history;
++    for (const auto & move : laterMoves) {
++        const auto kind = move["__cls"].get<string>();
++        if (kind == "ChangeUnreadTask" || kind == "ChangeStarredTask") {
++            const bool threads = move.count("threadIds");
++            const auto ids = move.find(threads ? "threadIds" : "messageIds");
++            const auto id = threads ? msg.threadId() : msg.id();
++            if (ids != move.end() && std::find(ids->begin(), ids->end(), json(id)) != ids->end()) {
++                for (auto & copy : copies) {
++                    if (kind == "ChangeUnreadTask") copy.unread = move["unread"].get<bool>();
++                    else copy.starred = move["starred"].get<bool>();
++                }
++            }
++            continue;
++        }
++        auto undo = move.find("undoPlacements");
++        if (undo == move.end() || !undo->is_object()) continue;
++        auto entries = undo->find(msg.id());
++        if (entries != undo->end() && !entries->is_array()) continue;
++
++        auto priorPlans = move.value("recoveredMoveCopies", json::object());
++        auto prior = priorPlans.find(msg.id());
++        const auto queued = move.value("queuedMoveCopies", json::object()).value(msg.id(), json::array());
++        bool incomplete = prior != priorPlans.end() && prior->value("incomplete", false);
++        json approved = json::array();
++        map<string, vector<int>> recordedBySource;
++        if (entries != undo->end()) {
++            for (const auto & entry : *entries) {
++                recordedBySource[entry["folderId"].get<string>()].push_back(entry["bits"].get<int>());
++            }
++        } else {
++            const bool targetsThreads = move.contains("threadIds");
++            const auto ids = move.find(targetsThreads ? "threadIds" : "messageIds");
++            const auto id = targetsThreads ? msg.threadId() : msg.id();
++            if (ids == move.end() || std::find(ids->begin(), ids->end(), json(id)) == ids->end()) continue;
++        }
++        map<string, vector<PlacementMove>> bySource;
++        bool reassertsOriginal = false;
++        if (entries == undo->end() && !move.contains("restorePlacements") && !move.contains("gmailInbox") &&
++            move["folder"]["id"] == dest) {
++            const auto sources = move.find("sourceFolderIds");
++            reassertsOriginal = sources != move.end() && std::any_of(sources->begin(), sources->end(), [&](const json & source) {
++                return originalSources.count(source.get<string>()) > 0;
++            });
++        }
++        const auto steps = _movesForMessage(store, &msg, copies, move);
++        for (const auto & step : steps) {
++            const auto source = step.placement.reportedFolderId();
++            if (entries != undo->end() && source != step.destFolderId) {
++                bySource[source].push_back(step);
++            } else if (reassertsOriginal && step.placement.folderId != step.destFolderId) {
++                // An old task could reassert the failed move while the copy already
++                // appeared at its destination, leaving no change in undoPlacements.
++                // Only a task explicitly naming that copy's physical folder proves this intent.
++                const auto sources = move.find("sourceFolderIds");
++                if (sources != move.end() && std::find(sources->begin(), sources->end(), json(step.placement.folderId)) != sources->end() &&
++                    originalSources.count(step.placement.folderId)) {
++                    recordedBySource[source].push_back(step.placement.flagBits());
++                    bySource[source].push_back(step);
++                }
++            }
++        }
++        if (entries == undo->end() && !reassertsOriginal) continue;
++        if (reassertsOriginal && recordedBySource.empty()) incomplete = true;
++        // Receipt entries in a separate source folder cannot invalidate a
++        // proved copy here. An undo within one folder still needs its full pairing.
++        const bool paired = move.count("restorePlacements") && copies.size() > 1;
++        const bool cancelled = move.value("should_cancel", false);
++        for (const auto & group : bySource) {
++            auto & recorded = recordedBySource[group.first];
++            const bool pairingMatches = paired ? (group.second.size() == recorded.size() &&
++                std::equal(group.second.begin(), group.second.end(), recorded.begin(),
++                    [](const PlacementMove & step, int bits) { return step.placement.flagBits() == bits; })) :
++                group.second.size() <= recorded.size();
++            const bool sameCount = group.second.size() == recorded.size();
++            for (const auto & step : group.second) {
++                const auto rowId = step.placement.rowid;
++                const auto match = sameCount ? recorded.begin() : std::find(recorded.begin(), recorded.end(), step.placement.flagBits());
++                const bool wasApproved = prior == priorPlans.end() ||
++                    std::any_of((*prior)["copies"].begin(), (*prior)["copies"].end(), [&](const json & copy) {
++                        return copy["rowId"] == rowId && copy["destinationId"] == step.destFolderId;
++                    });
++                if (!pairingMatches || match == recorded.end() || !wasApproved || history.uncertain.count(rowId)) {
++                    incomplete = true;
++                    history.uncertain.insert(rowId);
++                    history.claimed.erase(rowId);
++                    continue;
++                }
++                auto copy = std::find_if(copies.begin(), copies.end(), [&](const Placement & candidate) {
++                    return candidate.rowid == rowId;
++                });
++                _applyRecordedFlags(*copy, *match);
++                recorded.erase(match);
++                copy->pendingFolderId = step.destFolderId;
++                if (cancelled) {
++                    history.claimed.erase(rowId);
++                    continue;
++                }
++                auto & location = physical.at(rowId);
++                json proof = {{"rowId", rowId}, {"sourceId", location.folderId},
++                    {"destinationId", step.destFolderId}};
++                const auto predecessor = priorMove.find(rowId);
++                const auto origin = origins.find(rowId);
++                if (predecessor != priorMove.end()) {
++                    proof["sourceTaskId"] = predecessor->second;
++                } else if (origin != origins.end() && origin->second.confirmed) {
++                    proof["sourceUID"] = location.remoteUID;
++                    proof["sourceUIDValidity"] = origin->second.validity;
++                } else if (prior != priorPlans.end()) {
++                    // A new pass cannot replace previously captured source identity.
++                    auto saved = std::find_if((*prior)["copies"].begin(), (*prior)["copies"].end(), [&](const json & copy) {
++                        return copy["rowId"] == rowId && copy["sourceId"] == location.folderId &&
++                            copy["destinationId"] == step.destFolderId;
++                    });
++                    if (saved != (*prior)["copies"].end()) proof = *saved;
++                } else if (origin != origins.end()) {
++                    proof["sourceUID"] = location.remoteUID;
++                    proof["sourceUIDValidity"] = origin->second.validity;
++                } else if (!queued.empty()) {
++                    auto admitted = std::find_if(queued.begin(), queued.end(), [&](const json & copy) {
++                        return copy["rowId"] == rowId && copy["destinationId"] == step.destFolderId &&
++                            copy.value("sourceId", string()) == location.folderId &&
++                            copy.value("sourceUID", 0U) == location.remoteUID;
++                    });
++                    if (admitted != queued.end()) {
++                        proof["sourceUID"] = location.remoteUID;
++                        proof["sourceUIDValidity"] = admitted->value("sourceUIDValidity", 0U);
++                    }
++                } else if (legacy && !location.pendingFolderId.empty()) {
++                    // Old receipts lack physical IDs. A surviving marker can anchor
++                    // them only while the original local mailbox generation survives.
++                    auto validity = folderValidities.find(location.folderId);
++                    if (validity == folderValidities.end()) {
++                        validity = folderValidities.emplace(location.folderId,
++                            _localFolderUIDValidity(store, msg.accountId(), location.folderId, true)).first;
++                    }
++                    proof["sourceUID"] = location.remoteUID;
++                    proof["sourceUIDValidity"] = validity->second;
++                }
++                if (!proof.contains("sourceTaskId") && (!proof.value("sourceUID", 0U) || !proof.value("sourceUIDValidity", 0U))) {
++                    incomplete = true;
++                    history.uncertain.insert(rowId);
++                    history.claimed.erase(rowId);
++                    continue;
++                }
++                history.claimed[rowId] = step.destFolderId;
++                approved.push_back(proof);
++                if (location.folderId != step.destFolderId) {
++                    location.folderId = step.destFolderId;
++                    priorMove[rowId] = move["id"].get<string>();
++                }
++            }
++        }
++        for (const auto & group : recordedBySource) {
++            if (group.second.empty()) continue;
++            incomplete = true;
++            for (const auto & copy : copies) {
++                if (copy.reportedFolderId() != group.first || history.claimed.count(copy.rowid)) continue;
++                history.uncertain.insert(copy.rowid);
++            }
++        }
++        if (cancelled) continue;
++        if (incomplete) {
++            history.incomplete = true;
++            if (move.count("restorePlacements")) {
++                const auto targets = move["restorePlacements"].find(msg.id());
++                if (targets != move["restorePlacements"].end()) {
++                    for (const auto & target : *targets) history.uncertainTargets.insert(target["folderId"].get<string>());
++                }
++            } else {
++                history.uncertainTargets.insert(move["folder"]["id"].get<string>());
++            }
++        }
++        history.plans[move["id"].get<string>()] = {{"copies", approved}, {"incomplete", incomplete}};
++    }
++    return history;
++}
++
++static const json & _moveClaimsForMessage(const json & move, const string & messageId) {
++    static const json none = json::array();
++    const auto recovered = move.find("recoveredMoveCopies");
++    if (recovered != move.end() && recovered->contains(messageId)) {
++        return (*recovered)[messageId]["copies"];
++    }
++    const auto queued = move.find("queuedMoveCopies");
++    return queued != move.end() && queued->contains(messageId) ? (*queued)[messageId] : none;
++}
++
++static void _settleRecoveredMoveSources(MailStore * store, Task * task, const vector<json> & laterMoves,
++    const map<string, vector<TaskPlacement *>> & itemsByMessage) {
++    for (const auto & move : laterMoves) {
++        if (!move.contains("recoveredMoveCopies")) continue;
++        auto plans = move["recoveredMoveCopies"];
++        auto markers = move.value("queuedMoveCopies", json::object());
++        bool changed = false;
++        for (auto & plan : plans.items()) {
++            const auto items = itemsByMessage.find(plan.key());
++            if (items == itemsByMessage.end()) continue;
++            const auto rows = store->placementsForMessage(plan.key());
++            for (auto & proof : plan.value()["copies"]) {
++                if (!proof.contains("sourceTaskId")) continue;
++                const bool direct = proof["sourceTaskId"] == task->id();
++                auto item = std::find_if(items->second.begin(), items->second.end(), [&](const TaskPlacement * candidate) {
++                    return candidate->moved && candidate->movedUIDValidity &&
++                        candidate->placement.rowid == proof["rowId"] && (!direct || candidate->destFolderId == proof["sourceId"]);
++                });
++                if (item == items->second.end()) continue;
++                const auto row = std::find_if(rows.begin(), rows.end(), [&](const Placement & copy) {
++                    return copy.folderId == (*item)->destFolderId && copy.remoteUID == (*item)->movedUID;
++                });
++                if (row == rows.end()) continue;
++                if (direct) {
++                    proof["sourceUID"] = (*item)->movedUID;
++                    proof["sourceUIDValidity"] = (*item)->movedUIDValidity;
++                    changed = true;
++                }
++                if (proof["rowId"] != row->rowid) {
++                    // A background scan may have indexed the confirmed destination first.
++                    if (markers.contains(plan.key())) {
++                        for (auto & marker : markers[plan.key()]) {
++                            if (marker["rowId"] == proof["rowId"]) marker["rowId"] = row->rowid;
++                        }
++                    }
++                    proof["rowId"] = row->rowid;
++                    changed = true;
++                }
++            }
++        }
++        if (!changed) continue;
++        auto later = store->find<Task>(Query().equal("accountId", task->accountId())
++            .equal("id", move["id"].get<string>()).equal("status", "remote"));
++        if (!later) continue;
++        later->data()["recoveredMoveCopies"] = plans;
++        later->data()["queuedMoveCopies"] = markers;
++        store->save(later.get());
++    }
++}
++
+ /*
+  Runs the server side of a message task: every server copy the task addresses is grouped by
+  the folder holding it and `applyInFolder` runs once per folder. The network I/O happens
+@@ -1286,14 +1786,63 @@ void TaskProcessor::performLocalChangeOnMessages(Task * task, LocalChangeFn modi
+ void TaskProcessor::performRemoteChangeOnMessages(Task * task, bool isMove, RemoteChangeFn applyInFolder) {
+     json & data = task->data();
+     vector<shared_ptr<Message>> messages = inflateMessages(data).messages;
++    const bool exact = isMove && data.value("exactPlacementUndo", false);
++    const bool exactRestore = exact && data.count("restorePlacements");
++    const auto recovered = isMove ? data.value("recoveredMoveCopies", json::object()) : json::object();
++    bool incompleteHistory = false;
++    for (auto plan = recovered.begin(); plan != recovered.end(); ++plan) {
++        incompleteHistory |= plan->value("incomplete", false) ||
++            std::none_of(messages.begin(), messages.end(), [&](const shared_ptr<Message> & message) {
++                return message->id() == plan.key();
++            });
++    }
++    const auto historyUnavailable = [] {
++        return std::make_exception_ptr(SyncException(
++            "move-source-history-unavailable", "A queued move no longer has a verifiable source.", false));
++    };
++    const auto exactSources = data.find(exactRestore ? "restorePlacements" : "exactMoveSources");
++    // Older queued moves have only the local undo records. Use them to roll back
++    // their markers, never to select a copy for a server write.
++    const bool hasExactSources = exactSources != data.end();
++    const auto rollbackSources = hasExactSources ? exactSources : data.find("undoPlacements");
+ 
+     deque<TaskPlacement> items;
+     for (auto msg : messages) {
+         auto placements = store->placementsForMessage(msg->id());
+         if (isMove) {
+-            for (auto & move : _movesForMessage(store, msg.get(), placements, data)) {
++            const auto plan = recovered.find(msg->id());
++            if (!exact && plan != recovered.end()) {
++                // History was matched to a specific physical row. Do not let
++                // ordinary selection infer a substitute from the pending folder.
++                for (const auto & proof : (*plan)["copies"]) {
++                    const auto uid = proof.value("sourceUID", 0U);
++                    const auto validity = proof.value("sourceUIDValidity", 0U);
++                    auto source = std::find_if(placements.begin(), placements.end(), [&](const Placement & copy) {
++                        return uid && validity && copy.rowid == proof["rowId"].get<long long>() &&
++                            copy.remoteUID == uid && copy.folderId == proof["sourceId"].get<string>();
++                    });
++                    if (source == placements.end()) {
++                        incompleteHistory = true;
++                    } else {
++                        items.push_back(TaskPlacement{msg, *source, proof["destinationId"].get<string>()});
++                        items.back().recoveredSourceValidity = validity;
++                    }
++                }
++                continue;
++            }
++            auto moves = exact && !exactRestore
++                ? _exactSourceMoves(msg.get(), placements, data)
++                : _movesForMessage(store, msg.get(), placements, data);
++            size_t selected = 0;
++            for (auto & move : moves) {
++                if (plan != recovered.end() && std::none_of((*plan)["copies"].begin(), (*plan)["copies"].end(),
++                    [&](const json & proof) {
++                        return proof["rowId"] == move.placement.rowid && proof["destinationId"] == move.destFolderId;
++                    })) continue;
+                 items.push_back(TaskPlacement{msg, move.placement, move.destFolderId});
++                ++selected;
+             }
++            if (plan != recovered.end() && selected != (*plan)["copies"].size()) incompleteHistory = true;
+         } else {
+             for (auto & p : placements) {
+                 if (p.remoteUID > 0) {
+@@ -1310,14 +1859,47 @@ void TaskProcessor::performRemoteChangeOnMessages(Task * task, bool isMove, Remo
+         itemsByMessage[item.message->id()].push_back(&item);
+     }
+     std::exception_ptr failure = nullptr;
++    if (items.empty() && incompleteHistory) {
++        failure = historyUnavailable();
++    } else if (exact) {
++        size_t expected = 0;
++        set<pair<string, uint32_t>> selected;
++        if (exactSources != data.end()) {
++            for (auto entries = exactSources->begin(); entries != exactSources->end(); ++entries) {
++                const auto planned = recovered.find(entries.key());
++                expected += planned == recovered.end() ? entries->size() : (*planned)["copies"].size();
++            }
++        }
++        for (const auto & item : items) selected.emplace(item.placement.folderId, item.placement.remoteUID);
++        if (items.empty() || items.size() != expected || items.size() != selected.size() || itemsByFolder.size() != 1 ||
++            !store->folderById(account->id(), itemsByFolder.begin()->first)) {
++            failure = std::make_exception_ptr(SyncException(
++                "exact-move-source-unavailable", "The exact source copies are no longer available.", false));
++        }
++    }
++    std::exception_ptr recoveredFailure = nullptr;
+     for (auto & pair : itemsByFolder) {
++        if (failure) break;
+         auto folder = store->folderById(account->id(), pair.first);
+         if (folder == nullptr) {
+             logger->warn("-- {} copies are in a folder ({}) that no longer exists, skipping", pair.second.size(), pair.first);
+             continue;
+         }
+         try {
+-            applyInFolder(session, store, account->id(), *folder, pair.second, data);
++            vector<TaskPlacement *> ordinary;
++            for (auto item : pair.second) {
++                if (!item->recoveredSourceValidity) {
++                    ordinary.push_back(item);
++                    continue;
++                }
++                try {
++                    _applyRecoveredMove(session, store, *folder, *item, data);
++                } catch (SyncException & ex) {
++                    if (ex.isOffline() || ex.isRetryable()) throw;
++                    if (!recoveredFailure) recoveredFailure = std::current_exception();
++                }
++            }
++            if (!ordinary.empty()) applyInFolder(session, store, account->id(), *folder, ordinary, data);
+         } catch (SQLite::Exception &) {
+             throw; // leaves the task queued (see performRemote), so nothing is released twice
+         } catch (...) {
+@@ -1327,18 +1909,55 @@ void TaskProcessor::performRemoteChangeOnMessages(Task * task, bool isMove, Remo
+         }
+     }
+ 
++    if (exact || !recovered.empty()) {
++        // A later copy in the same task can observe a mailbox rebuild after an earlier
++        // COPYUID was confirmed. Verify each destination again before updating SQLite.
++        map<string, uint32_t> destinationValidity;
++        for (auto & item : items) {
++            if (!item.moved || (!exact && !item.recoveredSourceValidity)) continue;
++            auto known = destinationValidity.find(item.destFolderId);
++            if (known == destinationValidity.end()) {
++                auto folder = store->folderById(account->id(), item.destFolderId);
++                uint32_t validity = folder ? _mailboxUIDValidity(session, AS_MCSTR(folder->path())) : 0;
++                known = destinationValidity.emplace(item.destFolderId, validity).first;
++            }
++            if (!known->second || known->second != item.movedUIDValidity) {
++                item.moved = false;
++                if (!failure) failure = std::make_exception_ptr(SyncException(
++                    "exact-move-unconfirmed", "The destination mailbox generation changed before confirming the move.", false));
++            }
++        }
++    }
++    if (!failure && exact && std::any_of(items.begin(), items.end(), [](const TaskPlacement & item) {
++        return !item.moved;
++    })) {
++        failure = std::make_exception_ptr(SyncException(
++            "exact-move-unconfirmed", "The server did not confirm all moves.", false));
++    }
++    if (!recovered.empty() && std::any_of(items.begin(), items.end(), [&](const TaskPlacement & item) {
++        return !item.moved && recovered.count(item.message->id());
++    })) incompleteHistory = true;
++    if (!failure) failure = recoveredFailure;
++    if (!failure && incompleteHistory) failure = historyUnavailable();
+     {
+         MailStoreTransaction transaction{store, "performRemoteChangeOnMessages"};
+         bool clientVisibleChange = false;
+         vector<shared_ptr<Message>> safeMessages = inflateMessages(data).messages;
++        const bool rollingBackExactMove = failure && exact && !exactRestore;
++        const auto laterMoves = rollingBackExactMove || !recovered.empty()
++            ? _pendingPlacementChangesAfter(store, task) : vector<json>{};
++        map<string, json> recoveredTasks;
+         
+         vector<string> displacedIds;
+         for (auto safe : safeMessages) {
+             json before = _clientVisibleState(*safe);
+             auto rows = store->placementsForMessage(safe->id());
++            const auto plan = recovered.find(safe->id());
+             for (auto item : itemsByMessage[safe->id()]) {
+                 if (failure && !item->moved && !item->destFolderId.empty()) {
+-                    store->abandonPlacementMove(*safe, item->placement.folderId, item->placement.remoteUID, item->destFolderId);
++                    if (!rollingBackExactMove && plan == recovered.end()) {
++                        store->abandonPlacementMove(*safe, item->placement.folderId, item->placement.remoteUID, item->destFolderId);
++                    }
+                     continue;
+                 }
+                 string displaced = confirmPlacementChange(*safe, *item, rows);
+@@ -1346,6 +1965,73 @@ void TaskProcessor::performRemoteChangeOnMessages(Task * task, bool isMove, Remo
+                     displacedIds.push_back(displaced);
+                 }
+             }
++            if (plan != recovered.end()) {
++                const auto currentRows = store->placementsForMessage(safe->id());
++                for (const auto & proof : (*plan)["copies"]) {
++                    auto row = std::find_if(currentRows.begin(), currentRows.end(), [&](const Placement & copy) {
++                        return copy.rowid == proof["rowId"] && copy.pendingFolderId == proof["destinationId"];
++                    });
++                    if (row == currentRows.end()) continue;
++                    const bool takenOver = std::any_of(laterMoves.begin(), laterMoves.end(), [&](const json & later) {
++                        if (later.value("should_cancel", false)) return false;
++                        const auto & claims = _moveClaimsForMessage(later, safe->id());
++                        return std::any_of(claims.begin(), claims.end(), [&](const json & claim) {
++                            return claim["rowId"] == row->rowid && claim["destinationId"] == row->pendingFolderId;
++                        });
++                    });
++                    if (!takenOver) {
++                        store->abandonPlacementMove(*safe, row->folderId, row->remoteUID, row->pendingFolderId);
++                    }
++                }
++            }
++            if (rollingBackExactMove && rollbackSources != data.end() && !recovered.count(safe->id())) {
++                auto entries = rollbackSources->find(safe->id());
++                if (entries != rollbackSources->end() && entries->is_array()) {
++                    const auto dest = data["folder"]["id"].get<string>();
++                    const auto currentRows = store->placementsForMessage(safe->id());
++                    set<string> originalSources;
++                    set<long long> failedRows;
++                    map<long long, MoveOrigin> origins;
++                    for (const auto & entry : *entries) originalSources.insert(entry["folderId"].get<string>());
++                    for (const auto & row : currentRows) {
++                        auto source = std::find_if(entries->begin(), entries->end(), [&](const json & entry) {
++                            return entry["folderId"] == row.folderId && (!hasExactSources || entry["rowId"] == row.rowid);
++                        });
++                        if (source != entries->end()) {
++                            failedRows.insert(row.rowid);
++                            if (hasExactSources && source->value("uid", 0U) == row.remoteUID) {
++                                origins.emplace(row.rowid, MoveOrigin{source->value("uidValidity", 0U),
++                                    source->value("bits", row.flagBits()), false});
++                            }
++                        }
++                    }
++                    for (auto item : itemsByMessage[safe->id()]) {
++                        if (!item->moved || !item->movedUIDValidity) continue;
++                        auto confirmed = std::find_if(currentRows.begin(), currentRows.end(), [&](const Placement & row) {
++                            return row.folderId == item->destFolderId && row.remoteUID == item->movedUID;
++                        });
++                        if (confirmed != currentRows.end()) {
++                            failedRows.erase(confirmed->rowid);
++                            origins[confirmed->rowid] = MoveOrigin{item->movedUIDValidity, item->placement.flagBits(), true};
++                        }
++                    }
++                    const auto originalUndo = data.value("undoPlacements", json::object()).value(safe->id(), json::array());
++                    const auto history = _laterMoveHistory(store, laterMoves, *safe, currentRows, failedRows,
++                        originalSources, origins, !hasExactSources, dest, originalUndo);
++                    for (const auto & plan : history.plans) recoveredTasks[plan.first][safe->id()] = plan.second;
++                    for (const auto & row : currentRows) {
++                        const auto owner = history.claimed.find(row.rowid);
++                        const bool claimed = owner != history.claimed.end() && owner->second == row.pendingFolderId;
++                        const bool failedMarker = row.pendingFolderId == dest && failedRows.count(row.rowid);
++                        const bool noLongerOwned = history.uncertain.count(row.rowid) ||
++                            history.uncertainTargets.count(row.pendingFolderId) ||
++                            (history.incomplete && row.pendingFolderId == row.folderId);
++                        if (!row.pendingFolderId.empty() && !claimed && (failedMarker || noLongerOwned)) {
++                            store->abandonPlacementMove(*safe, row.folderId, row.remoteUID, row.pendingFolderId);
++                        }
++                    }
++                }
++            }
+             if (safe->placementsChanged()) {
+                 store->refreshMessageFromPlacements(*safe);
+             }
+@@ -1360,6 +2046,7 @@ void TaskProcessor::performRemoteChangeOnMessages(Task * task, bool isMove, Remo
+             }
+             store->save(safe.get());
+         }
++        if (!recovered.empty()) _settleRecoveredMoveSources(store, task, laterMoves, itemsByMessage);
+         // A message that lost a stale (folder, UID) row to a moved copy has a snapshot
+         // listing a copy it no longer has. Without another row it is an orphan, swept at
+         // the end of the pass like any other vanished copy.
+@@ -1367,6 +2054,14 @@ void TaskProcessor::performRemoteChangeOnMessages(Task * task, bool isMove, Remo
+             logger->warn("-- Message {} lost a placement to a moved copy at the same UID", id);
+             clientVisibleChange = true;
+         }
++        for (const auto & pair : recoveredTasks) {
++            auto laterTask = store->find<Task>(Query().equal("accountId", account->id()).equal("id", pair.first).equal("status", "remote"));
++            if (!laterTask) continue;
++            auto plans = laterTask->data().value("recoveredMoveCopies", json::object());
++            plans.update(pair.second);
++            laterTask->data()["recoveredMoveCopies"] = plans;
++            store->save(laterTask.get());
++        }
+         MailProcessor{account, store}.refreshMessagesInOpenTransaction(displacedIds, UnplacedMessages::KeepAsOrphan);
+         if (!clientVisibleChange) {
+             store->unsafeEraseTransactionDeltas();
+@@ -1375,11 +2070,50 @@ void TaskProcessor::performRemoteChangeOnMessages(Task * task, bool isMove, Remo
+     }
+ 
+     if (failure) {
+-        if (!isMove || data.count("gmailInbox")) {
++        if (exact || !recovered.empty()) {
++            set<string> affectedFolders;
++            for (auto & item : items) {
++                affectedFolders.insert(item.placement.folderId);
++                affectedFolders.insert(item.destFolderId);
++            }
++            affectedFolders.insert(data["folder"]["id"].get<string>());
++            if (data.count("sourceFolderIds")) {
++                for (const auto & folderId : data["sourceFolderIds"]) affectedFolders.insert(folderId.get<string>());
++            }
++            if (exactSources != data.end()) {
++                for (const auto & entries : *exactSources) {
++                    for (const auto & entry : entries) affectedFolders.insert(entry["folderId"].get<string>());
++                }
++            }
++            for (const auto & plan : recovered) {
++                for (const auto & proof : plan["copies"]) {
++                    affectedFolders.insert(proof["sourceId"].get<string>());
++                    affectedFolders.insert(proof["destinationId"].get<string>());
++                }
++            }
++            for (const auto & folderId : affectedFolders) _rescanFolder(store, account->id(), folderId);
++        } else if (!isMove || data.count("gmailInbox")) {
+             _rescanFoldersForFlags(store, account->id(), itemsByFolder);
+         }
+         std::rethrow_exception(failure);
+     }
++    if (exact && !exactRestore && !items.empty()) {
++        json recorded = json::object();
++        auto & previous = data["undoPlacements"];
++        if (itemsByMessage.size() != previous.size()) return;
++        for (auto & group : itemsByMessage) {
++            if (!previous.count(group.first) || previous[group.first].size() != group.second.size()) return;
++            for (auto item : group.second) {
++                if (!item->moved || !item->movedUIDValidity) return;
++                recorded[group.first].push_back({
++                    {"folderId", item->placement.folderId}, {"bits", item->placement.flagBits()},
++                    {"movedFolderId", item->destFolderId}, {"movedUID", item->movedUID},
++                    {"movedUIDValidity", item->movedUIDValidity},
++                });
++            }
++        }
++        data["undoPlacements"] = recorded;
++    }
+ }
+ 
+ // Applies one moved copy's new location to the reloaded message. A row that no longer
+@@ -1396,7 +2130,8 @@ string TaskProcessor::confirmPlacementChange(Message & msg, TaskPlacement & item
+     auto & p = item.placement;
+     const Placement * current = nullptr;
+     for (auto & r : rows) {
+-        if (r.folderId == p.folderId && r.remoteUID == p.remoteUID) {
++        if (r.folderId == p.folderId && r.remoteUID == p.remoteUID &&
++            (!item.recoveredSourceValidity || r.rowid == p.rowid)) {
+             current = &r;
+             break;
+         }
+diff --git a/MailSync/TaskProcessor.hpp b/MailSync/TaskProcessor.hpp
+index 4a75962788c669d2ba5287d3d05a28dac56396d4..e4b6df6354fedae910eda61dc409c26ab2138775 100644
+--- a/MailSync/TaskProcessor.hpp
++++ b/MailSync/TaskProcessor.hpp
+@@ -43,6 +43,8 @@ struct TaskPlacement {
+     string destFolderId; // moves: where this copy should end up
+     bool moved = false;  // the copy is now at (destFolderId, movedUID)
+     uint32_t movedUID = 0;
++    uint32_t movedUIDValidity = 0;
++    uint32_t recoveredSourceValidity = 0;
+ };
+ 
+ // The local variant runs inside a transaction with the message's placements in hand;
+diff --git a/Vendor/mailcore2/src/core/imap/MCIMAPSession.cpp b/Vendor/mailcore2/src/core/imap/MCIMAPSession.cpp
+index c7e0ca49068f033a44ee96c939b51a8ef1bdec90..99ffedfed4389270b0bfb22e4953b4733bddf4f3 100644
+--- a/Vendor/mailcore2/src/core/imap/MCIMAPSession.cpp
++++ b/Vendor/mailcore2/src/core/imap/MCIMAPSession.cpp
+@@ -1962,7 +1962,7 @@ void IMAPSession::appendMessageWithCustomFlagsAndDate(String * folder, String *
+ }
+ 
+ void IMAPSession::copyMessages(String * folder, IndexSet * uidSet, String * destFolder,
+-     HashMap ** pUidMapping, ErrorCode * pError)
++     HashMap ** pUidMapping, ErrorCode * pError, uint32_t * pUidValidity)
+ {
+     int r;
+     struct mailimap_set * set;
+@@ -1973,6 +1973,7 @@ void IMAPSession::copyMessages(String * folder, IndexSet * uidSet, String * dest
+     IndexSet * uidSetResult;
+     HashMap * uidMapping = NULL;
+ 
++    if (pUidValidity != nullptr) *pUidValidity = 0;
+     selectIfNeeded(folder, pError);
+     if (* pError != ErrorNone)
+         return;
+@@ -1984,6 +1985,8 @@ void IMAPSession::copyMessages(String * folder, IndexSet * uidSet, String * dest
+     }
+ 
+     setList = splitSet(set, 10);
++    // A single response is required to associate the mapping with a mailbox generation.
++    bool singleCommand = clist_count(setList) == 1;
+     uidSetResult = NULL;
+ 
+     for(clistiter * iter = clist_begin(setList) ; iter != NULL ; iter = clist_next(iter)) {
+@@ -2009,6 +2012,7 @@ void IMAPSession::copyMessages(String * folder, IndexSet * uidSet, String * dest
+         }
+ 
+         if ((src_uid != NULL) && (dest_uid != NULL)) {
++            if (pUidValidity != nullptr && singleCommand) *pUidValidity = uidvalidity;
+             if (uidMapping == NULL) {
+                 uidMapping = HashMap::hashMap();
+             }
+@@ -2047,7 +2051,7 @@ void IMAPSession::copyMessages(String * folder, IndexSet * uidSet, String * dest
+ }
+ 
+ void IMAPSession::moveMessages(String * folder, IndexSet * uidSet, String * destFolder,
+-     HashMap ** pUidMapping, ErrorCode * pError)
++     HashMap ** pUidMapping, ErrorCode * pError, uint32_t * pUidValidity)
+ {
+     int r;
+     struct mailimap_set * set;
+@@ -2058,6 +2062,7 @@ void IMAPSession::moveMessages(String * folder, IndexSet * uidSet, String * dest
+     IndexSet * uidSetResult;
+     HashMap * uidMapping = NULL;
+ 
++    if (pUidValidity != nullptr) *pUidValidity = 0;
+     selectIfNeeded(folder, pError);
+     if (* pError != ErrorNone)
+         return;
+@@ -2069,6 +2074,8 @@ void IMAPSession::moveMessages(String * folder, IndexSet * uidSet, String * dest
+     }
+ 
+     setList = splitSet(set, 10);
++    // A single response is required to associate the mapping with a mailbox generation.
++    bool singleCommand = clist_count(setList) == 1;
+     uidSetResult = NULL;
+ 
+     for(clistiter * iter = clist_begin(setList) ; iter != NULL ; iter = clist_next(iter)) {
+@@ -2094,6 +2101,7 @@ void IMAPSession::moveMessages(String * folder, IndexSet * uidSet, String * dest
+         }
+ 
+         if ((src_uid != NULL) && (dest_uid != NULL)) {
++            if (pUidValidity != nullptr && singleCommand) *pUidValidity = uidvalidity;
+             if (uidMapping == NULL) {
+                 uidMapping = HashMap::hashMap();
+             }
+diff --git a/Vendor/mailcore2/src/core/imap/MCIMAPSession.h b/Vendor/mailcore2/src/core/imap/MCIMAPSession.h
+index 2dc88c8708af3cf00448e38912ee40fd7450c648..8b9d682877f1c87362b94f801be18ed17dc7522b 100644
+--- a/Vendor/mailcore2/src/core/imap/MCIMAPSession.h
++++ b/Vendor/mailcore2/src/core/imap/MCIMAPSession.h
+@@ -108,10 +108,10 @@ namespace mailcore {
+                                                          IMAPProgressCallback * progressCallback, uint32_t * createdUID, ErrorCode * pError);
+ 
+         virtual void copyMessages(String * folder, IndexSet * uidSet, String * destFolder,
+-                                  HashMap ** pUidMapping, ErrorCode * pError);
++                                  HashMap ** pUidMapping, ErrorCode * pError, uint32_t * pUidValidity = nullptr);
+         
+         virtual void moveMessages(String * folder, IndexSet * uidSet, String * destFolder,
+-                                  HashMap ** pUidMapping, ErrorCode * pError);
++                                  HashMap ** pUidMapping, ErrorCode * pError, uint32_t * pUidValidity = nullptr);
+ 
+         virtual void findUIDsOfRecentHeaderMessageID(String * folder, String * headerMessageID, IndexSet * uids);
+ 
