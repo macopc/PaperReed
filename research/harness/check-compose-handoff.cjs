@@ -61,6 +61,10 @@ async function startDesktop(build=upstream){
    return;
  }
  if(mode==='workspace') {
+   if (process.env.PAPER_REED_LABEL_PAGE_CHECK) {
+     await require('./check-label-page.cjs')({main,cdp,evaluate,until,account,cli});
+     return;
+   }
    if (process.env.PAPER_REED_SENT_PAGE_CHECK) {
      await require('./check-sent-page.cjs')({main,cdp,evaluate,until,account,secondAccount});
      return;

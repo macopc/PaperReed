@@ -12,7 +12,7 @@ module.exports = async ({
   until,
   restartDesktop,
 }) => {
-  const out = path.resolve(__dirname, '../rules-validation-2026-11-16');
+  const out = process.env.PAPER_REED_UI_OUTPUT || path.resolve(__dirname, '../rules-validation-2026-11-16');
   fs.mkdirSync(out, { recursive: true });
   const run = (s) => evaluate(cdp, s),
     click = (s) => main.locator(s).first().click(),

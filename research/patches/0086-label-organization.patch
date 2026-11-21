@@ -1,0 +1,683 @@
+diff --git a/app/internal_packages/paper-reed/lib/triage-controls.tsx b/app/internal_packages/paper-reed/lib/triage-controls.tsx
+index 97740ff51d2233a397d804d2978632119c30fb14..cab5156841f2cc6ed7ffb1ea7cbe6d913a22a784 100644
+--- a/app/internal_packages/paper-reed/lib/triage-controls.tsx
++++ b/app/internal_packages/paper-reed/lib/triage-controls.tsx
+@@ -1,9 +1,11 @@
+-import React, { useState, useRef } from 'react';
++import React, { useState, useRef, useEffect, useCallback, useImperativeHandle } from 'react';
+ import {
+   categories,
+   MailCategory,
+   changeLocalMail,
+   editLocalLabel,
++  localLabels,
++  onLocalTriageChanged,
+   LocalChange,
+   LocalLabel,
+   LocalState,
+@@ -24,6 +26,7 @@ export const triageError = (message: string) =>
+     'snooze-requires-inbox': '只能稍后处理收件箱中的邮件。',
+     'snooze-needs-synced-inbox': '请等待收件箱同步完成后重试。',
+     'duplicate-label-name': '已有同名标签，请换一个名称。',
++    'invalid-label-color': '请选择六位十六进制颜色。',
+     'invalid-label-name': '标签名称需为 1–40 个字符。',
+     'label-not-found': '这个标签已被删除，请重新选择。',
+   })[message] || message;
+@@ -270,118 +273,252 @@ export function TriageControls({
+     </section>
+   );
+ }
+-export function LabelManager({
+-  labels,
+-  onDone,
+-  onClose,
+-}: {
+-  labels: LocalLabel[];
+-  onDone: () => void;
++export interface LabelManagerHandle {
++  canLeave: () => boolean;
++  setNavigating: (value: boolean) => void;
++}
++
++const defaultLabelColor = '#688177';
++
++export const LabelManager = React.forwardRef<LabelManagerHandle, {
+   onClose: () => void;
+-}) {
+-  const [id, setId] = useState('');
++  onRules: () => void;
++  notice: string;
++}>(function LabelManager({ onClose, onRules, notice }, ref) {
++  const [labels, setLabels] = useState<LocalLabel[] | null>(null);
++  const [readFailed, setReadFailed] = useState(false);
++  const [selected, setSelected] = useState<LocalLabel | null>(null);
+   const [name, setName] = useState('');
+-  const [color, setColor] = useState('#688177');
+-  const [error, setError] = useState('');
++  const [color, setColor] = useState(defaultLabelColor);
++  const [feedback, setFeedback] = useState<{ text: string; failed?: boolean }>();
+   const [busy, setBusy] = useState(false);
++  const [navigating, setNavigating] = useState(false);
+   const [confirm, setConfirm] = useState(false);
+-  const choose = (id: string) => {
+-    const label = labels.find((l) => l.id === id);
+-    setId(id);
+-    setName(label?.name || '');
+-    setColor(label?.color || '#688177');
++  const [leaveBlocked, setLeaveBlocked] = useState(false);
++  const heading = useRef<HTMLHeadingElement>(null);
++  const retryButton = useRef<HTMLButtonElement>(null);
++  const nameInput = useRef<HTMLInputElement>(null);
++  const remove = useRef<HTMLButtonElement>(null);
++  const cancel = useRef<HTMLButtonElement>(null);
++  const confirmation = useRef<HTMLDivElement>(null);
++  const collection = useRef<HTMLElement>(null);
++  const create = useRef<HTMLButtonElement>(null);
++  const leaveNotice = useRef<HTMLParagraphElement>(null);
++  const reading = useRef(0);
++  const mounted = useRef(false);
++  const saving = useRef(false);
++
++  const refresh = useCallback(async () => {
++    const request = ++reading.current;
++    try {
++      const next = await localLabels();
++      if (request !== reading.current) return;
++      const focused = document.activeElement;
++      const retryFocused = focused === retryButton.current;
++      const labelControlFocused = confirmation.current?.contains(focused) ||
++        collection.current?.contains(focused);
++      setLabels(next);
++      setReadFailed(false);
++      if (focused && (retryFocused || labelControlFocused)) requestAnimationFrame(() => {
++        if (focused.isConnected || document.activeElement !== document.body) return;
++        (retryFocused ? heading.current : create.current)?.focus();
++      });
++    } catch (error) {
++      if (request === reading.current) setReadFailed(true);
++    }
++  }, []);
++  useEffect(() => {
++    mounted.current = true;
++    heading.current?.focus();
++    const unlisten = onLocalTriageChanged(refresh);
++    void refresh();
++    return () => {
++      mounted.current = false;
++      reading.current++;
++      unlisten();
++    };
++  }, [refresh]);
++  useEffect(() => {
++    if (confirm) cancel.current?.focus();
++  }, [confirm]);
++
++  const live = selected && labels?.find((label) => label.id === selected.id);
++  const dirty = name !== (selected?.name ?? '') || color !== (selected?.color ?? defaultLabelColor);
++  const canLeave = () => {
++    if (saving.current) return false;
++    if (!dirty) return true;
++    setLeaveBlocked(true);
++    requestAnimationFrame(() => leaveNotice.current?.focus());
++    return false;
++  };
++  useImperativeHandle(ref, () => ({ canLeave, setNavigating }));
++  useEffect(() => {
++    if (confirm && labels && !live && !busy && !readFailed) setConfirm(false);
++  }, [confirm, labels, live, busy, readFailed]);
++
++  const resetEditor = (label: LocalLabel | null) => {
++    setSelected(label);
++    setName(label?.name ?? '');
++    setColor(label?.color ?? defaultLabelColor);
++    setLeaveBlocked(false);
+     setConfirm(false);
+-    setError('');
+   };
+-  const save = async (remove = false) => {
++  const choose = (label: LocalLabel | null) => {
++    if (navigating || readFailed || !labels || !canLeave()) return;
++    resetEditor(label);
++    setFeedback(undefined);
++    nameInput.current?.focus();
++  };
++  const discard = () => {
++    if (navigating || saving.current) return;
++    resetEditor(readFailed ? selected : live ?? null);
++    setFeedback(undefined);
++    nameInput.current?.focus();
++  };
++  const cancelRemoval = () => {
++    if (navigating || saving.current) return;
++    setConfirm(false);
++    remove.current?.focus();
++  };
++  const save = async (deleting = false) => {
++    if (navigating || saving.current || !labels || readFailed || (selected && !live)) return;
++    saving.current = true;
+     setBusy(true);
+-    setError('');
++    setFeedback(undefined);
+     try {
+-      await editLocalLabel({ id: id || undefined, name, color, remove }, inboxDesktopAccess);
+-      choose('');
+-      onDone();
+-    } catch (e) {
+-      setError(triageError(e.message));
++      if (deleting && live) {
++        await editLocalLabel({ id: live.id, remove: true }, inboxDesktopAccess);
++        if (!mounted.current) return;
++        resetEditor(null);
++        setFeedback({ text: '已删除标签。' });
++        nameInput.current?.focus();
++      } else {
++        const result = await editLocalLabel({
++          id: selected?.id,
++          name: name !== selected?.name ? name : undefined,
++          color: color !== selected?.color ? color : undefined,
++        }, inboxDesktopAccess);
++        if (!mounted.current || !('name' in result)) return;
++        const saved = { id: result.id, name: result.name, color: result.color };
++        setSelected(saved);
++        setName(saved.name);
++        setColor(saved.color);
++        setLeaveBlocked(false);
++        setFeedback({ text: selected ? '已保存标签。' : '已创建标签。' });
++      }
++      await refresh();
++    } catch (error) {
++      if (mounted.current) setFeedback({ text: triageError(error.message), failed: true });
+     } finally {
+-      setBusy(false);
++      saving.current = false;
++      if (mounted.current) setBusy(false);
+     }
+   };
++  const locked = busy || navigating;
++  const unavailable = !labels || locked || readFailed;
++  const missing = selected && labels && !live && !busy && !readFailed;
++
+   return (
+-    <section className="pr-label-manager pr-local-panel" aria-label="管理本机标签">
+-      <header>
+-        <strong>本机标签</strong>
+-        <button onClick={onClose} aria-label="关闭标签管理">
+-          关闭
+-        </button>
++    <section className="pr-label-manager" aria-labelledby="pr-organization-title"
++      onKeyDown={(event) => {
++        keepNativeButtonActivation(event);
++        if (event.key === 'Escape' && confirm) {
++          event.stopPropagation();
++          cancelRemoval();
++        }
++      }}>
++      <header className="pr-page-head">
++        <h1 id="pr-organization-title" ref={heading} tabIndex={-1}>标签与分类</h1>
++        <button type="button" aria-disabled={navigating} onClick={onClose} aria-label="关闭标签管理">返回邮件</button>
+       </header>
+-      <p>名称与颜色在所有邮箱中共用。</p>
+-      <form
+-        onSubmit={(e) => {
+-          e.preventDefault();
+-          save();
+-        }}
+-      >
+-        <label>
+-          标签
+-          <select
+-            aria-label="编辑标签"
+-            value={id}
+-            onChange={(e) => choose(e.target.value)}
+-            disabled={busy}
+-          >
+-            <option value="">新建标签</option>
+-            {labels.map((l) => (
+-              <option key={l.id} value={l.id}>
+-                {l.name}
+-              </option>
+-            ))}
+-          </select>
+-        </label>
+-        <label>
+-          名称
+-          <input
+-            autoFocus
+-            aria-label="标签名称"
+-            value={name}
+-            maxLength={40}
+-            onChange={(e) => setName(e.target.value)}
+-            disabled={busy}
+-            required
+-          />
+-        </label>
+-        <label>
+-          颜色
+-          <input
+-            type="color"
+-            aria-label="标签颜色"
+-            value={color}
+-            onChange={(e) => setColor(e.target.value)}
+-            disabled={busy}
+-          />
+-        </label>
+-        <button type="submit" disabled={busy}>
+-          {id ? '保存' : '创建'}
+-        </button>
+-        {id && (
+-          <button type="button" disabled={busy} onClick={() => setConfirm(true)}>
+-            删除标签
+-          </button>
+-        )}
+-      </form>
+-      {confirm && (
+-        <div role="alert">
+-          <p>删除“{labels.find((l) => l.id === id)?.name}”及其本机标记？邮件会保留。</p>
+-          <button disabled={busy} onClick={() => save(true)}>
+-            确认删除
+-          </button>
+-          <button onClick={() => setConfirm(false)}>取消</button>
+-        </div>
+-      )}
+-      {error && (
++      <nav className="pr-organization-nav" aria-label="标签与分类">
++        <span aria-current="page">自定义标签</span>
++        <button type="button" aria-disabled={navigating} onClick={onRules}>自动分类规则 ↗</button>
++      </nav>
++      <p className="pr-label-scope">标签保存在本机，所有已连接的邮箱共用名称和颜色。</p>
++      {navigating && <p role="status">正在切换页面…</p>}
++      {notice && <p className="pr-local-error" role="alert">{notice}</p>}
++      {readFailed ? (
+         <p className="pr-local-error" role="alert">
+-          {error}
++          标签暂时无法读取。<button type="button" ref={retryButton} onClick={refresh}>重新读取</button>
+         </p>
+-      )}
++      ) : !labels && <p role="status">正在读取标签…</p>}
++      {labels && <div className="pr-label-layout">
++        <section className="pr-label-collection" aria-label="已有标签" ref={collection}>
++          <div className="pr-label-collection-head">
++            <h2>标签</h2>
++            <button type="button" ref={create} aria-disabled={unavailable} onClick={() => choose(null)}>＋ 新建标签</button>
++          </div>
++          {!labels.length && <p>还没有自定义标签。</p>}
++          <ul>
++            {labels.map((label) => (
++              <li key={label.id}>
++                <button type="button" data-edit-label-id={label.id} aria-pressed={selected?.id === label.id}
++                  aria-disabled={unavailable} onClick={() => choose(label)} title={label.name}>
++                  <i className="pr-label-dot" style={{ backgroundColor: label.color }} aria-hidden="true" />
++                  <span>{label.name}</span>
++                </button>
++              </li>
++            ))}
++          </ul>
++        </section>
++        <div className="pr-label-edit">
++          <form onSubmit={(event) => { event.preventDefault(); if (!confirm) void save(); }}>
++            <h2>{selected ? '编辑标签' : '新建标签'}</h2>
++            <div className="pr-label-fields">
++              <label>
++                名称
++                <input ref={nameInput} aria-label="标签名称" value={name}
++                  maxLength={40} onChange={(event) => {
++                    setName(event.target.value);
++                    setFeedback(undefined);
++                  }}
++                  readOnly={unavailable || !!missing || confirm} required />
++              </label>
++              <label>
++                颜色
++                <input type="color" aria-label="标签颜色" value={color}
++                  onChange={(event) => {
++                    setColor(event.target.value);
++                    setFeedback(undefined);
++                  }} disabled={unavailable || !!missing || confirm} />
++              </label>
++            </div>
++            <div className="pr-label-edit-actions">
++              <button type="submit" aria-disabled={unavailable || !!missing || confirm}>
++                {selected ? '保存标签' : '创建标签'}
++              </button>
++              {dirty && <button type="button" aria-disabled={locked} onClick={discard}>放弃修改</button>}
++              {selected && <button type="button" className="pr-delete-label" ref={remove} aria-disabled={unavailable || !!missing || confirm}
++                onClick={() => {
++                  if (unavailable || missing || !canLeave()) return;
++                  setFeedback(undefined);
++                  setConfirm(true);
++                }}>删除标签</button>}
++            </div>
++          </form>
++          {confirm && live && (
++            <div className="pr-label-confirm" ref={confirmation} role="group" aria-label="确认删除标签">
++              <p>删除「{live.name}」及其本机标记？邮件会保留，使用此标签的规则将暂停。</p>
++              <div className="pr-label-edit-actions">
++                <button type="button" ref={cancel} aria-disabled={locked} onClick={cancelRemoval}>取消</button>
++                <button type="button" aria-disabled={unavailable} onClick={() => void save(true)}>确认删除</button>
++              </div>
++            </div>
++          )}
++          {leaveBlocked && dirty && (
++            <p className="pr-local-error" ref={leaveNotice} role="alert" tabIndex={-1}>
++              请先保存或放弃这次修改。
++            </p>
++          )}
++          {busy && <p className="pr-label-status" role="status">正在更新标签…</p>}
++          {missing && <p className="pr-local-error" role="alert">这个标签已被删除，请重新选择。</p>}
++          {!missing && feedback && (
++            <p className={feedback.failed ? 'pr-local-error' : 'pr-label-status'}
++              role={feedback.failed ? 'alert' : 'status'}>{feedback.text}</p>
++          )}
++        </div>
++      </div>}
+     </section>
+   );
+-}
++});
+diff --git a/app/internal_packages/paper-reed/lib/workspace.tsx b/app/internal_packages/paper-reed/lib/workspace.tsx
+index 8ab2890f974272f436b874d20cd42d5ac750cfa8..dd0fd289b90557516f8772fffdcbe47eb4985a86 100644
+--- a/app/internal_packages/paper-reed/lib/workspace.tsx
++++ b/app/internal_packages/paper-reed/lib/workspace.tsx
+@@ -8,7 +8,7 @@ import {
+   LocalLabel,
+   LocalState,
+ } from '../../../src/services/mail-core/local-triage';
+-import { TriageControls, LabelManager, PinMark, keepNativeButtonActivation, localTime, triageError } from './triage-controls';
++import { TriageControls, LabelManager, LabelManagerHandle, PinMark, keepNativeButtonActivation, localTime, triageError } from './triage-controls';
+ import { randomUUID } from 'crypto';
+ import {
+   queryInbox,
+@@ -157,7 +157,7 @@ interface State {
+ let lastLocation:
+   | Pick<
+       State,
+-      'folder' | 'accountId' | 'route' | 'selected' | 'query' | 'searchText' | 'unreadOnly'
++      'folder' | 'accountId' | 'route' | 'selected' | 'query' | 'searchText' | 'unreadOnly' | 'labelManager'
+     >
+   | undefined;
+ 
+@@ -261,6 +261,8 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   private inboxMappingRevision = 0;
+   private connectedAccountIds = AccountStore.accountIds();
+   private main = React.createRef<HTMLElement>();
++  private labelManager = React.createRef<LabelManagerHandle>();
++  private labelManagerTrigger = React.createRef<HTMLButtonElement>();
+   private reader = React.createRef<HTMLElement>();
+   mounted = false;
+   refreshTimer: ReturnType<typeof setTimeout>;
+@@ -298,6 +300,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       AccountStore.listen(this.onAccountsChanged),
+       OnlineStatusStore.listen(() => this.forceUpdate()),
+       WorkspaceStore.setSectionLeaveGuard(() => {
++        if (this.labelManager.current?.canLeave() === false) return false;
+         if (!this.dirtySessions().length) return true;
+         this.setState({ notice: '请先保存当前编辑，再离开邮件。' });
+         return false;
+@@ -370,6 +373,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   componentDidUpdate(_previousProps: unknown, previous: State) {
+     const { route, searchPending, agentCopyCancelled, accountId, unreadOnly, searchVisit } = this.state;
+     if (accountId !== previous.accountId) this.refreshOperations();
++    if (route !== 'list' && this.state.labelManager) this.setState({ labelManager: false });
+     if (previous.route === 'list' && this.followUpView(previous) &&
+         (route !== 'list' || this.followUpView() !== this.followUpView(previous) ||
+           accountId !== previous.accountId ||
+@@ -385,8 +389,8 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     }
+   }
+   componentWillUnmount() {
+-    const { folder, accountId, route, selected, query, searchText, unreadOnly } = this.state;
+-    lastLocation = { folder, accountId, route, selected, query, searchText, unreadOnly };
++    const { folder, accountId, route, selected, query, searchText, unreadOnly, labelManager } = this.state;
++    lastLocation = { folder, accountId, route, selected, query, searchText, unreadOnly, labelManager };
+ 
+     this.mounted = false;
+     if (activeWorkspace === this) activeWorkspace = null;
+@@ -715,8 +719,10 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     }
+   };
+   move = async (next: () => void | boolean | Promise<void | boolean>) => {
+-    if (this.moving) return false;
++    const labelManager = this.labelManager.current;
++    if (this.moving || labelManager?.canLeave() === false) return false;
+     this.moving = true;
++    labelManager?.setNavigating(true);
+     let finishSave: (saved: boolean) => void;
+     this.moveSaved = new Promise(resolve => { finishSave = resolve; });
+     let saved = false;
+@@ -746,6 +752,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     } finally {
+       if (!saved && this.state.searchPending) this.searchBlockedBySave = true;
+       this.moving = false;
++      if (labelManager) this.labelManager.current?.setNavigating(false);
+       this.moveSaved = null;
+       finishSave(saved);
+       if (this.mounted && pendingThread?.options.inbox) void this.openPendingThread();
+@@ -757,6 +764,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       const restoreFocus = (this.followUpView() || this.isDraftList() || this.isSentList() ||
+         this.isArchiveList() || this.recoveryList()) && this.restoreListFocus(true);
+       this.listPageBeforeLoad = undefined;
++      const managingLabels = this.state.labelManager;
+       const changingAccount = accountId !== this.state.accountId;
+       const { query, searchText, searchPending, searchClearing, searchVisit } = this.state;
+       Actions.setFocus({ collection: 'thread', item: null });
+@@ -765,6 +773,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+           folder,
+           accountId,
+           route: 'list',
++          labelManager: false,
+           selected: null,
+           rows: [],
+           more: false,
+@@ -778,7 +787,8 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+           checked: [],
+         },
+         () => {
+-          if (restoreFocus) restoreFocus();
++          if (managingLabels && document.activeElement === document.body) this.focusSearch();
++          else if (restoreFocus) restoreFocus();
+           this.refresh();
+         }
+       );
+@@ -953,6 +963,24 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       Actions.switchPreferencesTab('MCP');
+       Actions.openPreferences();
+     });
++  openLabelManagement = () =>
++    this.move(() => {
++      Actions.setFocus({ collection: 'thread', item: null });
++      this.setState({ route: 'list', selected: null, labelManager: true, checked: [] },
++        () => { if (this.state.searchPending) this.retrySearchRead(); });
++    });
++
++  closeLabelManagement = () => {
++    if (this.moving || this.labelManager.current?.canLeave() === false) return;
++    this.setState({ labelManager: false }, () => this.labelManagerTrigger.current?.focus());
++  };
++
++  rulesPreferences = () =>
++    this.move(() => {
++      Actions.switchPreferencesTab('Mail Rules');
++      Actions.openPreferences();
++    });
++
+   onSearchPending = () => {
+     if (this.state.searchPending) return;
+     this.searchBlockedBySave = false;
+@@ -1127,12 +1155,14 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     if (this.state.route !== 'list') {
+       return this.move(() => this.setState({ route: 'list', selected: null }, focus));
+     }
+-    if (this.state.palette) this.setState({ palette: false }, focus);
++    if (this.state.labelManager && (this.moving || this.labelManager.current?.canLeave() === false)) return;
++    if (this.state.palette || this.state.labelManager)
++      this.setState({ palette: false, labelManager: false }, focus);
+     else focus();
+   };
+   focusedRow = () => document.activeElement?.closest<HTMLButtonElement>('.pr-mail-row');
+   commands = (): MailCommand[] => {
+-    const list = this.state.route === 'list';
++    const list = this.state.route === 'list' && !this.state.labelManager;
+     const listReady = list && !this.listActionsUnavailable();
+     const archive = this.isArchiveList();
+     const recoveryRole = this.recoveryList();
+@@ -1170,7 +1200,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+         run: () => this.organize('inbox'),
+       })),
+       { id: 'paper-reed:settings', title: '打开设置', shortcutId: 'application:open-preferences', run: this.preferences },
+-      { id: 'paper-reed:agent', title: '交给 Agent', disabled: list && (!listReady || this.isDraftList()), run: this.copyContext },
++      { id: 'paper-reed:agent', title: '交给 Agent', disabled: this.state.labelManager || (list && (!listReady || this.isDraftList())), run: this.copyContext },
+     ];
+   };
+   renderLocalControls(targets = this.selectedTargets()) {
+@@ -1766,6 +1796,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   render() {
+     const [commandShortcut] = AppEnv.keymaps.getBindingsForCommand('paper-reed:commands');
+     const { route, folder, selected, rows, loading, agent } = this.state;
++    const managingLabels = route === 'list' && this.state.labelManager;
+     const accounts = this.visibleAccounts();
+     const failed = accounts.filter((a) => a.hasSyncStateError() || !OnlineStatusStore.isAccountOnline(a.id));
+     const listRead = this.state.listRead?.scope === this.listReadScope() ? this.state.listRead : null;
+@@ -1775,6 +1806,8 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     const drafts = draftList && !searchActive;
+     const sent = route === 'list' && !searchActive && this.isSentList();
+     const archive = route === 'list' && !searchActive && this.isArchiveList();
++    const missingLabel = route === 'list' && !searchActive && folder.startsWith('label:') &&
++      !loading && listRead && !readFailed && !this.state.labels.some(label => label.id === folder.slice(6));
+     const recoveryRole = this.recoveryList();
+     const recoveryList = route === 'list' && !searchActive && recoveryRole;
+     const recoveryReader = route === 'thread' && recoveryRole && selected instanceof Thread;
+@@ -1842,7 +1875,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                 <button
+                   key={id}
+                   data-mailbox={id}
+-                  aria-current={!this.state.query && folder === id ? 'page' : undefined}
++                  aria-current={!managingLabels && !this.state.query && folder === id ? 'page' : undefined}
+                   onClick={() => this.navigate(id)}
+                 >
+                   {label}
+@@ -1857,7 +1890,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                     key={id}
+                     data-category={id}
+                     aria-current={
+-                      !this.state.query && folder === `category:${id}` ? 'page' : undefined
++                      !managingLabels && !this.state.query && folder === `category:${id}` ? 'page' : undefined
+                     }
+                     onClick={() => this.navigate(`category:${id}`)}
+                   >
+@@ -1869,8 +1902,10 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+             <div className="pr-local-label-heading">
+               <span>标签</span>
+               <button
+-                onClick={() => this.setState({ labelManager: !this.state.labelManager })}
+-                aria-expanded={this.state.labelManager}
++                ref={this.labelManagerTrigger}
++                onKeyDown={keepNativeButtonActivation}
++                onClick={managingLabels ? this.closeLabelManagement : this.openLabelManagement}
++                aria-expanded={managingLabels}
+               >
+                 管理
+               </button>
+@@ -1881,7 +1916,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                   key={l.id}
+                   data-label-id={l.id}
+                   aria-current={
+-                    !this.state.query && folder === `label:${l.id}` ? 'page' : undefined
++                    !managingLabels && !this.state.query && folder === `label:${l.id}` ? 'page' : undefined
+                   }
+                   onClick={() => this.navigate(`label:${l.id}`)}
+                   title={l.name}
+@@ -1896,6 +1931,10 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+             </div>
+           </aside>
+           <main className={`pr-main pr-route-${route}`} ref={this.main}>
++            {managingLabels ? (
++              <LabelManager ref={this.labelManager} notice={this.state.notice}
++                onClose={this.closeLabelManagement} onRules={this.rulesPreferences} />
++            ) : <>
+             {(!editingDraft || agent) && <div className="pr-page-head">
+               {route === 'list' ? <h1>{title}</h1> : !editingDraft && back}
+               {!draftList && (route !== 'compose' || agent) && (
+@@ -1912,13 +1951,6 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+               )}
+             </div>}
+             {this.renderSyncStatus(accounts, failed, emptyInbox)}
+-            {this.state.labelManager && (
+-              <LabelManager
+-                labels={this.state.labels}
+-                onDone={this.refresh}
+-                onClose={() => this.setState({ labelManager: false })}
+-              />
+-            )}
+             {this.renderMailReceipt()}
+             {this.state.notice && (
+               <div className="pr-notice" role="alert">
+@@ -2032,7 +2064,14 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                       </div>
+                   )}
+                   {searchActive && !searchUnavailable && !rows.length && this.renderSearchEmpty()}
+-                  {!searchActive && !rows.length && !emptyInbox && (!readFailed || ((sent || archive || recoveryList) && loading)) &&
++                  {missingLabel && (
++                    <div className="pr-follow-up-empty">
++                      <p role="status">该标签已删除，原有邮件仍保留。</p>
++                      <button type="button" onKeyDown={keepNativeButtonActivation}
++                        onClick={() => void this.navigate('inbox')}>返回收件箱</button>
++                    </div>
++                  )}
++                  {!missingLabel && !searchActive && !rows.length && !emptyInbox && (!readFailed || ((sent || archive || recoveryList) && loading)) &&
+                     (drafts || sent || archive || recoveryList ? searchUnavailable : !followUp || loading) && (
+                     <p className="pr-empty" role="status">
+                       {drafts ? '正在读取草稿…' : sent ? '正在读取已发送邮件…' :
+@@ -2105,6 +2144,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                 ))}
+               </details>
+             )}
++            </>}
+           </main>
+         </div>
+       </div>
+diff --git a/app/internal_packages/paper-reed/styles/paper-reed.less b/app/internal_packages/paper-reed/styles/paper-reed.less
+index 8e7707185eb8317e41ffbadf3505a69ca7fc3513..1bf209436b896bb43d903c78566f6e679c5872a6 100644
+--- a/app/internal_packages/paper-reed/styles/paper-reed.less
++++ b/app/internal_packages/paper-reed/styles/paper-reed.less
+@@ -1149,3 +1149,41 @@
+     justify-self:end;
+   }
+ }
++
++.paper-reed-enabled .pr-workspace {
++  .pr-label-manager { max-width: 960px; }
++  .pr-label-manager .pr-page-head { margin-bottom: 16px; }
++  .pr-label-manager h1:focus { outline: none; }
++  .pr-label-manager .pr-page-head button, .pr-label-scope { color: var(--pr-muted); }
++  .pr-label-scope { margin: 16px 0 24px; }
++  .pr-organization-nav { display: flex; align-items: baseline; gap: 16px; border-bottom: 1px solid var(--pr-line); }
++  .pr-organization-nav span { padding: 8px 0; border-bottom: 2px solid var(--pr-reed); color: var(--pr-reed); font-weight: 600; }
++  .pr-organization-nav button { color: var(--pr-reed); }
++  .pr-label-layout { display: grid; grid-template-columns: minmax(168px, 1fr) minmax(240px, 1.45fr); gap: 24px; }
++  .pr-label-collection { min-width: 0; }
++  .pr-label-collection-head { display: flex; align-items: center; justify-content: space-between; gap: 8px; padding-bottom: 8px; border-bottom: 1px solid var(--pr-line); }
++  .pr-label-manager h2 { margin: 0; font-size: 14px; font-weight: 600; line-height: 24px; }
++  .pr-label-collection-head button { color: var(--pr-reed); white-space: nowrap; }
++  .pr-label-collection p { color: var(--pr-muted); padding: 0 8px; }
++  .pr-label-collection ul { list-style: none; padding: 0; margin: 8px 0 0; }
++  .pr-label-collection li { margin: 0; }
++  .pr-label-collection li button { display: flex; align-items: center; gap: 12px; width: 100%; text-align: left; min-height: 36px; }
++  .pr-label-collection li button[aria-pressed=true] { background: #e9eee5; color: var(--pr-reed); }
++  .pr-label-collection li button span { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++  .pr-label-collection .pr-label-dot { width: 10px; height: 10px; }
++  .pr-label-edit { min-width: 0; align-self: start; padding: 20px; border: 1px solid var(--pr-line); border-radius: 6px; background: #fffefa; }
++  .pr-label-fields { display: grid; grid-template-columns: minmax(0, 1fr) auto; gap: 12px; margin: 16px 0; }
++  .pr-label-fields label { display: grid; gap: 6px; color: var(--pr-muted); }
++  .pr-label-fields input { width: 100%; min-width: 0; height: 34px; margin: 0; border: 1px solid #c6cbc2; border-radius: 4px; background: var(--pr-paper); color: var(--pr-ink); font: inherit; padding: 4px 8px; }
++  .pr-label-fields input:focus-visible { outline: 2px solid var(--pr-reed); outline-offset: 2px; }
++  .pr-label-fields input[type=color] { width: 42px; padding: 4px; }
++  .pr-label-edit-actions { display: flex; flex-wrap: wrap; gap: 8px; }
++  .pr-label-edit-actions button[type=submit] { background: var(--pr-reed); color: #fffefa; }
++  .pr-label-manager button[aria-disabled=true] { opacity: .5; cursor: default; }
++  .pr-label-confirm { border-top: 1px solid var(--pr-line); margin-top: 16px; overflow-wrap: anywhere; }
++  .pr-label-confirm button:last-child, .pr-label-edit .pr-delete-label { color: #9a433e; }
++  .pr-label-status { margin: 12px 0 0; color: var(--pr-reed); }
++  @media (max-width: 690px) {
++    .pr-label-layout { grid-template-columns: minmax(0, 1fr); }
++  }
++}

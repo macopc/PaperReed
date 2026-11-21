@@ -12,7 +12,7 @@ module.exports = async ({
   until,
   restartDesktop,
 }) => {
-  const out = path.resolve(__dirname, '../triage-validation-2026-11-16');
+  const out = process.env.PAPER_REED_UI_OUTPUT || path.resolve(__dirname, '../triage-validation-2026-11-16');
   fs.mkdirSync(out, { recursive: true });
   const run = (s) => evaluate(cdp, s),
     action = (s) => main.locator(s).first().click();
@@ -67,9 +67,7 @@ module.exports = async ({
   assert(label);
   await cli('label-add', { ...ref(ids[7]), labelId: label.id });
   await cli('label-add', { ...ref(ids[0]), labelId: label.id });
-  await main
-    .getByLabel('编辑标签', { exact: true })
-    .selectOption(label.id);
+  await main.locator(`[data-edit-label-id="${label.id}"]`).click();
   await main.getByLabel('标签名称', { exact: true }).fill('设计合作');
   await main.getByLabel('标签颜色', { exact: true }).fill('#957789');
   await main.locator('.pr-label-manager button[type=submit]').click();

@@ -61,7 +61,7 @@ try:
     if a.workspace and any(os.environ.get(name) for name in (
         'PAPER_REED_COMPOSE_PAGE_CHECK', 'PAPER_REED_SEARCH_PAGE_CHECK', 'PAPER_REED_SNOOZE_PAGE_CHECK',
         'PAPER_REED_PINNED_PAGE_CHECK',
-        'PAPER_REED_DRAFT_LIST_CHECK',
+        'PAPER_REED_DRAFT_LIST_CHECK', 'PAPER_REED_LABEL_PAGE_CHECK',
     )):
         assert not sent, len(sent)
         result_path=Path(os.environ['PAPER_REED_UI_OUTPUT'])/'result.json'
@@ -85,11 +85,11 @@ try:
         if os.environ.get('PAPER_REED_INBOX_CHECK'):
             result_path=Path(__file__).resolve().parent.parent/'inbox-validation-2026-11-16/result.json'
         if os.environ.get('PAPER_REED_TRIAGE_CHECK'):
-            result_path=Path(__file__).resolve().parent.parent/'triage-validation-2026-11-16/result.json'
+            result_path=Path(os.environ.get('PAPER_REED_UI_OUTPUT', Path(__file__).resolve().parent.parent/'triage-validation-2026-11-16'))/'result.json'
         if os.environ.get('PAPER_REED_ATTACHMENTS_CHECK'):
             result_path=Path(__file__).resolve().parent.parent/'attachments-validation-2026-11-16/result.json'
         if os.environ.get('PAPER_REED_RULES_CHECK'):
-            result_path=Path(__file__).resolve().parent.parent/'rules-validation-2026-11-16/result.json'
+            result_path=Path(os.environ.get('PAPER_REED_UI_OUTPUT', Path(__file__).resolve().parent.parent/'rules-validation-2026-11-16'))/'result.json'
         if os.environ.get('PAPER_REED_QUALITY_CHECK'):
             result_path=Path(__file__).resolve().parent.parent/'quality-fixes-validation-2026-11-16/result.json'
         result=json.loads(result_path.read_text());result['observedSMTPSubmissions']=len(sent)
