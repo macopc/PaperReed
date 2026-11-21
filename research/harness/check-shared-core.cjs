@@ -61,7 +61,7 @@ async function checkCLI(operation) {
   });
   await new Promise(r=>listener.listen(0,'127.0.0.1',r));
   try{
-    const child=spawn(process.execPath,[path.resolve(__dirname,'../cli/paper-reed.cjs'),'operation-get'],{
+    const child=spawn(path.join(upstream,'app','paper-reed-cli'),['operation-get'],{
       env:{...process.env,PAPER_REED_UPSTREAM:upstream,PAPER_REED_TOKEN_FILE:tokenFile,PAPER_REED_MCP_URL:`http://127.0.0.1:${listener.address().port}/mcp`},stdio:['pipe','pipe','pipe'],
     });
     let stdout='',stderr='';child.stdout.on('data',b=>stdout+=b);child.stderr.on('data',b=>stderr+=b);

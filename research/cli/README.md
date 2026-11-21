@@ -187,15 +187,17 @@ paper-reed local-list --input '{"accountId":"ACCOUNT_ID","view":"category:notifi
 
 ## 从研究源码运行（维护者）
 
-保留旧的开发环境变量方式，供隔离 harness 和源码维护使用：
+准备开发桌面后，从 Go 源码编译原生 CLI。需要 Go 1.23 或更新版本：
 
 ```sh
-export PAPER_REED_UPSTREAM="/absolute/path/to/patched/Mailspring"
+# 在 Paper Reed 仓库根目录执行
+upstream="/absolute/path/to/prepared-desktop"
+(cd research/cli/native && CGO_ENABLED=0 go build -trimpath -o "$upstream/app/paper-reed-cli" .)
 export PAPER_REED_MCP_URL="http://127.0.0.1:2587/mcp"
 export PAPER_REED_TOKEN_FILE="/absolute/path/to/private-token-file"
-node research/cli/paper-reed.cjs doctor
+"$upstream/app/paper-reed-cli" doctor
 ```
 
-token 文件只含桌面 MCP 令牌，使用 `0600` 权限。用户安装的 launcher 会忽略这三个旧变量，以本次安装的连接文件为准。`PAPER_REED_CLI_BIN_DIR` 可在启动实验桌面时覆盖安装目录，用于隔离测试；默认始终为用户的 `~/.local/bin`。
+连接文件和 token 文件应保持 `0600` 权限。桌面安装的命令使用对应的私有连接文件。可在启动开发桌面时用 `PAPER_REED_CLI_BIN_DIR` 设定隔离安装路径。
 
-`paper-reed.cjs` 和 `install.cjs` 为 CLI 源文件，在 0016 中首次内置、0017–0019 中同步更新，以完全相同的内容放入桌面 `internal_packages/mcp-server/bin/`。更新时同步导出补丁并检查两份文件一致，不新增 npm 安装步骤。已验证范围与实际窗口见 [安装与接入验证](../cli-onboarding-validation-2026-11-16/README.md)。
+0089 将原生程序放进 macOS 桌面发行包，安装时建立指向私有配置目录和桌面二进制的链接。旧 launcher 可经兼容入口运行。打开桌面的 CLI 安装设置并更新后，命令直接启动原生程序。开发安装路径支持 macOS 和 Linux。合成回环测试使用 `PAPER_REED_NATIVE_CLI=/path/to/paper-reed-cli node --test research/harness/check-cli-transport.cjs`。

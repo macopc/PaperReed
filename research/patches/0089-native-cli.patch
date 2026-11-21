@@ -1,0 +1,719 @@
+diff --git a/.gitignore b/.gitignore
+--- a/.gitignore
++++ b/.gitignore
+@@ -80,4 +80,6 @@
+ .claude/worktrees/
+ /test-results
+ /playwright-report
+-/playwright/test-results/
+\ No newline at end of file
++/playwright/test-results/
++/app/paper-reed-cli
++/app/native/paper-reed-cli/
+diff --git a/app/build/build.js b/app/build/build.js
+--- a/app/build/build.js
++++ b/app/build/build.js
+@@ -131,6 +131,21 @@
+   if (!fs.existsSync(fmHelperPath)) throw new Error(`mailspring-fm not found at ${fmHelperPath}`);
+ }
+ 
++async function buildNativeCLI() {
++  if (platform === 'win32') return;
++  const goArch = { arm64: 'arm64', x64: 'amd64', ia32: '386' }[arch];
++  if (!goArch) throw new Error(`Unsupported Paper Reed CLI architecture: ${arch}`);
++  const executable = path.join(appDir, 'paper-reed-cli');
++  await spawn({
++    cmd: 'go',
++    args: ['build', '-trimpath', '-ldflags=-s -w', '-o', executable, '.'],
++    opts: {
++      cwd: path.join(appDir, 'native', 'paper-reed-cli'),
++      env: { ...process.env, GOOS: platform, GOARCH: goArch, CGO_ENABLED: '0', GOTOOLCHAIN: 'local', GOPROXY: 'off', GOWORK: 'off' },
++    },
++  });
++}
++
+ function resolveRealSymlinkPaths() {
+   console.log('---> Resolving symlinks');
+   const dirs = ['internal_packages', 'src', 'spec', 'node_modules'];
+@@ -307,6 +322,7 @@
+           'mailsync',
+           'mailsync.exe',
+           'mailsync.bin',
++          'paper-reed-cli',
+           // mailsync reads its time zone data from icu-tzdata/ beside its binary.
+           '**/icu-tzdata/**',
+           '*.so',
+@@ -448,6 +464,7 @@
+ }
+ 
+ async function runPackager() {
++  await buildNativeCLI();
+   await buildFMHelper();
+   const opts = buildPackagerOptions();
+   console.log('---> Running packager with options:');
+diff --git a/app/internal_packages/mcp-server/bin/install.cjs b/app/internal_packages/mcp-server/bin/install.cjs
+--- a/app/internal_packages/mcp-server/bin/install.cjs
++++ b/app/internal_packages/mcp-server/bin/install.cjs
+@@ -10,37 +10,45 @@
+ function paths({
+   configDir,
+   appRoot,
+-  executable,
+   binDir = path.join(os.homedir(), '.local/bin'),
+ }) {
++  configDir = path.resolve(configDir);
+   return {
+-    command: path.join(binDir, 'paper-reed'),
++    command: path.join(path.resolve(binDir), 'paper-reed'),
+     profile: path.join(configDir, 'paper-reed-cli', 'connection.json'),
+-    entry: path.join(
+-      appRoot,
+-      'internal_packages/mcp-server/bin/paper-reed.cjs'
+-    ),
+-    executable,
++    executable: nativeExecutable(path.resolve(appRoot)),
++    installedExecutable: path.join(configDir, 'paper-reed-cli', 'paper-reed-cli'),
+   };
++}
++function nativeExecutable(appRoot) {
++  const onDisk = path.basename(appRoot) === 'app.asar' ? appRoot + '.unpacked' : appRoot;
++  return path.join(onDisk, 'paper-reed-cli');
+ }
+ function marker(p) {
+   return `# Paper Reed CLI v1 ${JSON.stringify(p.profile)}`;
+ }
+-function launcher(p) {
+-  return `#!/bin/sh\n${marker(p)}\nunset PAPER_REED_UPSTREAM PAPER_REED_MCP_URL PAPER_REED_TOKEN_FILE\nexport ELECTRON_RUN_AS_NODE=1\nexport PAPER_REED_CLI_PROFILE=${quote(p.profile)}\nexec ${quote(p.executable)} ${quote(p.entry)} "$@"\n`;
++function linkTarget(file) {
++  const info = fs.lstatSync(file, { throwIfNoEntry: false });
++  return info?.isSymbolicLink() ? fs.readlinkSync(file) : undefined;
+ }
+ function owned(p) {
+-  try {
+-    return (
+-      fs.lstatSync(p.command).isFile() &&
+-      fs.readFileSync(p.command, 'utf8').split('\n')[1] === marker(p)
+-    );
+-  } catch (error) {
+-    if (error.code === 'ENOENT') return false;
+-    throw error;
++  const info = fs.lstatSync(p.command, { throwIfNoEntry: false });
++  if (info?.isSymbolicLink()) return linkTarget(p.command) === p.installedExecutable;
++  return info?.isFile() && fs.readFileSync(p.command, 'utf8').split('\n')[1] === marker(p);
++}
++function isExecutable(file) {
++  try {
++    if (!fs.statSync(file).isFile()) return false;
++    fs.accessSync(file, fs.constants.X_OK);
++    return true;
++  } catch {
++    return false;
+   }
+ }
+ function status(p, connection) {
++  if (process.platform === 'win32') {
++    return { installed: false, ready: false, blocked: true, message: 'Paper Reed CLI 安装支持 macOS 和 Linux。' };
++  }
+   try {
+     let exists = true;
+     try {
+@@ -68,7 +76,9 @@
+       saved.endpoint === connection.endpoint &&
+       saved.token === connection.token &&
+       (fs.statSync(p.profile).mode & 0o077) === 0 &&
+-      fs.readFileSync(p.command, 'utf8') === launcher(p);
++      linkTarget(p.command) === p.installedExecutable &&
++      linkTarget(p.installedExecutable) === p.executable &&
++      isExecutable(p.executable);
+     return { installed: true, ready };
+   } catch (error) {
+     return {
+@@ -94,8 +104,17 @@
+     }
+   }
+ }
++function writeLink(name, target) {
++  const temp = name + '.' + randomUUID() + '.tmp';
++  fs.symlinkSync(target, temp);
++  try {
++    fs.renameSync(temp, name);
++  } finally {
++    if (linkTarget(temp) !== undefined) fs.unlinkSync(temp);
++  }
++}
+ function cleanEnv() {
+-  const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1' };
++  const env = { ...process.env };
+   // The installed profile is authoritative; legacy development variables must not redirect it.
+   for (const key of [
+     'PAPER_REED_UPSTREAM',
+@@ -108,7 +127,7 @@
+ async function install(p, connection) {
+   const state = status(p, connection);
+   if (state.blocked) throw new Error(state.message);
+-  const probe = await exec(p.executable, [p.entry, '--version'], {
++  const probe = await exec(p.executable, ['--version'], {
+     env: cleanEnv(),
+     timeout: 8000,
+   });
+@@ -119,17 +138,24 @@
+   if (fs.lstatSync(path.dirname(p.profile)).isSymbolicLink())
+     throw new Error('连接目录不能是符号链接。');
+   fs.chmodSync(path.dirname(p.profile), 0o700);
++  const inner = fs.lstatSync(p.installedExecutable, { throwIfNoEntry: false });
++  if (inner && !inner.isSymbolicLink()) throw new Error('连接目录中已有其他可执行文件。');
++  if (fs.lstatSync(p.command, { throwIfNoEntry: false }) && !owned(p)) {
++    throw new Error('命令已变化，未覆盖现有文件。');
++  }
+   privateWrite(
+     p.profile,
+     JSON.stringify({ product: 'Paper Reed', ...connection }) + '\n',
+     0o600
+   );
+-  privateWrite(p.command, launcher(p), 0o755);
++  writeLink(p.installedExecutable, p.executable);
++  writeLink(p.command, p.installedExecutable);
+   return status(p, connection);
+ }
+ function uninstall(p) {
+   if (!owned(p)) throw new Error('命令已变化，未移除其他文件。');
+   fs.unlinkSync(p.command);
++  if (linkTarget(p.installedExecutable) !== undefined) fs.unlinkSync(p.installedExecutable);
+   if (fs.existsSync(p.profile) && fs.lstatSync(p.profile).isFile())
+     fs.unlinkSync(p.profile);
+ }
+@@ -212,4 +238,4 @@
+     2
+   );
+ }
+-module.exports = { paths, status, install, uninstall, doctor, handoff, quote };
++module.exports = { paths, nativeExecutable, status, install, uninstall, doctor, handoff, quote };
+diff --git a/app/internal_packages/mcp-server/bin/paper-reed.cjs b/app/internal_packages/mcp-server/bin/paper-reed.cjs
+--- a/app/internal_packages/mcp-server/bin/paper-reed.cjs
++++ b/app/internal_packages/mcp-server/bin/paper-reed.cjs
+@@ -1,501 +1,16 @@
+ #!/usr/bin/env node
+-// Ships with the desktop app and calls its loopback MCP server.
+-const fs = require('node:fs');
+-const VERSION = '0.0.1';
+-const mailActions = {
+-  'mark-read': 'read',
+-  'mark-unread': 'unread',
+-  archive: 'archive',
+-  spam: 'spam',
+-  trash: 'trash',
+-  'restore-inbox': 'inbox',
+-};
+-const localActions = {
+-  classify: 'classify',
+-  'classify-auto': 'classify-auto',
+-  pin: 'pin',
+-  unpin: 'unpin',
+-  snooze: 'snooze',
+-  unsnooze: 'unsnooze',
+-  'label-add': 'label-add',
+-  'label-remove': 'label-remove',
+-};
+-const commands = {
+-  rules: ['local_rules', 'accountId'],
+-  'rule-save': ['local_rule_save', 'accountId'],
+-  'rule-delete': ['local_rule_delete', 'accountId'],
+-  'rules-reorder': ['local_rules_reorder', 'accountId'],
+-  'rules-preview': ['local_rules_preview', 'accountId'],
+-  'rules-apply': ['local_rules_apply', 'accountId'],
+-  ...Object.fromEntries(
+-    Object.keys(localActions).map((name) => [
+-      name,
+-      ['local_mail_change', null],
+-    ])
+-  ),
+-  'local-list': ['local_mail_list', 'accountId'],
+-  'local-state': ['local_mail_state', null],
+-  labels: ['local_labels', null],
+-  'label-create': ['local_label_edit', null],
+-  'label-update': ['local_label_edit', 'id'],
+-  'label-delete': ['local_label_edit', 'id'],
+-  ...Object.fromEntries(
+-    Object.keys(mailActions).map((name) => [name, ['organize_mail', null]])
+-  ),
+-  'change-get': ['mail_task_status', 'accountId'],
+-  undo: ['undo_mail_task', 'accountId'],
+-  accounts: ['list_accounts', null],
+-  folders: ['list_folders', 'accountId'],
+-  threads: ['list_threads', 'accountId'],
+-  search: ['search_mail', 'accountId'],
+-  'thread-get': ['get_thread', 'threadId'],
+-  'attachment-get': ['get_attachment', 'messageId'],
+-  'draft-reply': ['reply_to_thread', 'accountId'],
+-  'draft-attach': ['add_draft_attachment', 'accountId'],
+-  'draft-detach': ['remove_draft_attachment', 'accountId'],
+-  'draft-get': ['get_draft', 'accountId'],
+-  'draft-create': ['create_draft', 'accountId'],
+-  'draft-update': ['update_draft', 'accountId'],
+-  'draft-send': ['send_draft', 'accountId'],
+-  'operation-get': ['get_operation', 'accountId'],
+-};
+-const examples = {
+-  rules: { accountId: 'ACCOUNT_ID' },
+-  'rule-save': {
+-    accountId: 'ACCOUNT_ID',
+-    name: '项目通知',
+-    field: 'subject',
+-    query: '项目',
+-    action: 'category',
+-    value: 'notifications',
+-    enabled: false,
+-  },
+-  'rule-delete': { accountId: 'ACCOUNT_ID', id: 'RULE_ID' },
+-  'rules-reorder': {
+-    accountId: 'ACCOUNT_ID',
+-    ids: ['RULE_ID_1', 'RULE_ID_2'],
+-  },
+-  'rules-preview': {
+-    accountId: 'ACCOUNT_ID',
+-    targets: [{ accountId: 'ACCOUNT_ID', threadId: 'THREAD_ID' }],
+-  },
+-  'rules-apply': {
+-    accountId: 'ACCOUNT_ID',
+-    revision: 'PREVIEW_REVISION',
+-    targets: [
+-      {
+-        accountId: 'ACCOUNT_ID',
+-        threadId: 'THREAD_ID',
+-        messageId: 'PREVIEW_MESSAGE_ID',
+-      },
+-    ],
+-  },
+-  ...Object.fromEntries(
+-    Object.keys(localActions).map((name) => [
+-      name,
+-      {
+-        targets: [{ accountId: 'ACCOUNT_ID', threadId: 'THREAD_ID' }],
+-        ...(name === 'classify' ? { category: 'notifications' } : {}),
+-        ...(name === 'snooze'
+-          ? { until: '2027-01-01T09:00:00-05:00' }
+-          : {}),
+-        ...(name.startsWith('label-') ? { labelId: 'LABEL_ID' } : {}),
+-      },
+-    ])
+-  ),
+-  'local-list': { accountId: 'ACCOUNT_ID', view: 'pinned', limit: 25 },
+-  'local-state': {
+-    targets: [{ accountId: 'ACCOUNT_ID', threadId: 'THREAD_ID' }],
+-  },
+-  labels: {},
+-  'label-create': { name: '项目', color: '#688177' },
+-  'label-update': { id: 'LABEL_ID', name: '项目进展', color: '#78849a' },
+-  'label-delete': { id: 'LABEL_ID' },
+-  ...Object.fromEntries(
+-    Object.keys(mailActions).map((name) => [
+-      name,
+-      {
+-        targets: [{ accountId: 'ACCOUNT_ID', threadId: 'THREAD_ID' }],
+-        requestId: 'UNIQUE_REQUEST_ID',
+-      },
+-    ])
+-  ),
+-  'change-get': { accountId: 'ACCOUNT_ID', taskId: 'TASK_ID' },
+-  undo: { accountId: 'ACCOUNT_ID', taskId: 'TASK_ID' },
+-  accounts: {},
+-  folders: { accountId: 'ACCOUNT_ID' },
+-  threads: { accountId: 'ACCOUNT_ID', folderId: 'FOLDER_ID', limit: 25 },
+-  search: { accountId: 'ACCOUNT_ID', query: 'in:inbox', limit: 25 },
+-  'thread-get': { threadId: 'THREAD_ID' },
+-  'attachment-get': { messageId: 'MESSAGE_ID', fileId: 'FILE_ID' },
+-  'draft-reply': { accountId: 'ACCOUNT_ID', threadId: 'THREAD_ID', type: 'reply-all', body: '<div>Thank you.</div>' },
+-  'draft-attach': { accountId: 'ACCOUNT_ID', draftId: 'DRAFT_ID', expectedRevision: 1, path: '/absolute/path/report.pdf' },
+-  'draft-detach': { accountId: 'ACCOUNT_ID', draftId: 'DRAFT_ID', expectedRevision: 2, fileId: 'FILE_ID' },
+-  'draft-get': { accountId: 'ACCOUNT_ID', draftId: 'DRAFT_ID' },
+-  'draft-create': {
+-    accountId: 'ACCOUNT_ID',
+-    to: [],
+-    subject: '',
+-    body: '<div></div>',
+-  },
+-  'draft-update': {
+-    accountId: 'ACCOUNT_ID',
+-    draftId: 'DRAFT_ID',
+-    expectedRevision: 1,
+-    changes: { to: [{ email: 'recipient@example.test' }], cc: [], bcc: [], body: '<div>Updated</div>' },
+-  },
+-  'draft-send': {
+-    accountId: 'ACCOUNT_ID',
+-    draftId: 'DRAFT_ID',
+-    expectedRevision: 1,
+-    requestId: 'STABLE_REQUEST_ID',
+-  },
+-  'operation-get': {
+-    accountId: 'ACCOUNT_ID',
+-    operationId: 'OPERATION_ID',
+-  },
+-};
+-function fail(code, message, hint) {
+-  return Object.assign(new Error(message), { code, hint });
+-}
+-function endpointURL(value) {
+-  let url;
+-  try {
+-    url = new URL(value);
+-  } catch {
+-    throw fail(
+-      'invalid-endpoint',
+-      'Invalid connection address.',
+-      'Reinstall/update CLI connection in Paper Reed settings.'
+-    );
+-  }
+-  if (
+-    url.protocol !== 'http:' ||
+-    url.hostname !== '127.0.0.1' ||
+-    url.pathname !== '/mcp' ||
+-    url.username ||
+-    url.password ||
+-    url.search ||
+-    url.hash
+-  )
+-    throw fail(
+-      'invalid-endpoint',
+-      'Only http://127.0.0.1:<port>/mcp is supported.',
+-      'Use the local connection from Paper Reed settings.'
+-    );
+-  return url;
+-}
+-function connection() {
+-  if (process.env.PAPER_REED_TOKEN_FILE) {
+-    return {
+-      endpoint: endpointURL(
+-        process.env.PAPER_REED_MCP_URL || 'http://127.0.0.1:2587/mcp'
+-      ),
+-      token: fs
+-        .readFileSync(process.env.PAPER_REED_TOKEN_FILE, 'utf8')
+-        .trim(),
+-    };
+-  }
+-  const file = process.env.PAPER_REED_CLI_PROFILE;
+-  if (!file || !fs.existsSync(file))
+-    throw fail(
+-      'not-connected',
+-      'CLI connection is missing.',
+-      'Open Paper Reed → Settings → Agent → Install CLI / Update connection.'
+-    );
+-  const stat = fs.lstatSync(file);
+-  if (!stat.isFile() || stat.mode & 0o077)
+-    throw fail(
+-      'insecure-profile',
+-      'Connection file must be a private regular file (0600).',
+-      'Update the CLI connection in Paper Reed settings.'
+-    );
+-  let data;
+-  try {
+-    data = JSON.parse(fs.readFileSync(file, 'utf8'));
+-  } catch {
+-    throw fail(
+-      'invalid-profile',
+-      'Connection file is invalid.',
+-      'Update the CLI connection in Paper Reed settings.'
+-    );
+-  }
+-  return { endpoint: endpointURL(data.endpoint), token: data.token };
+-}
+-function inputFor(command, args) {
+-  if (
+-    command === 'doctor' ||
+-    command === 'accounts' ||
+-    command === 'labels'
+-  ) {
+-    if (args.length)
+-      throw fail(
+-        'invalid-arguments',
+-        'This command takes no arguments.',
+-        'Run paper-reed --help.'
+-      );
+-    return {};
+-  }
+-  let raw;
+-  if (args.length === 2 && args[0] === '--input') raw = args[1];
+-  else if (!args.length && !process.stdin.isTTY)
+-    raw = fs.readFileSync(0, 'utf8');
+-  else
+-    throw fail(
+-      'input-required',
+-      'Pass JSON with --input or stdin.',
+-      `Run paper-reed ${command} --help.`
+-    );
+-  let data;
+-  try {
+-    data = JSON.parse(raw);
+-  } catch {
+-    throw fail(
+-      'invalid-json',
+-      'Input is not valid JSON.',
+-      `Run paper-reed ${command} --help for an example.`
+-    );
+-  }
+-  if (!data || typeof data !== 'object' || Array.isArray(data))
+-    throw fail(
+-      'invalid-input',
+-      'Input must be a JSON object.',
+-      `Run paper-reed ${command} --help.`
+-    );
+-  const required = commands[command][1];
+-  if (
+-    required &&
+-    (typeof data[required] !== 'string' || !data[required].trim())
+-  )
+-    throw fail(
+-      'invalid-input',
+-      `${required} is required.`,
+-      `Run paper-reed ${command} --help.`
+-    );
+-  return data;
+-}
+-const sendRecoveryHint =
+-  'Have an operationId? Use operation-get to check its status. If the receipt was lost before you got an operationId, repeat draft-send with exactly the original input, including expectedRevision and requestId.';
++// Lets a launcher installed by an earlier desktop release reach the native binary until refreshed.
++const path = require('node:path');
++const { spawnSync } = require('node:child_process');
++const { nativeExecutable } = require('./install.cjs');
+ 
+-function help(command) {
+-  if (commands[command]) {
+-    let note = '';
+-    if (mailActions[command])
+-      note = 'Returns per-target task receipts. queued is not success; poll change-get. Reuse requestId only for the same targets/action while task history remains.';
+-    if (command === 'draft-send')
+-      note = 'Send only with explicit user approval. ' + sendRecoveryHint;
+-    if (command === 'draft-create' || command === 'draft-reply')
+-      note = 'A saved receipt confirms the draft and its body were saved. Use draft-get with accountId and draftId to review it.';
+-    return `paper-reed ${command} --input '${JSON.stringify(examples[command])}'\nOr pass the same JSON through stdin. Results are JSON; failures exit 1.\n` +
+-      (note ? note + '\n' : '');
+-  }
+-  return `Paper Reed CLI ${VERSION}\n\nStart here:\n  paper-reed doctor             Check the local connection (read-only)\n  paper-reed accounts           List authorized accounts\n  paper-reed <command> --help   Show a JSON example\n\nRead: accounts, folders, threads, search, thread-get, attachment-get\nDrafts: draft-get, draft-create, draft-reply, draft-update, draft-attach, draft-detach, draft-send, operation-get\nRules: rules, rule-save, rule-delete, rules-reorder, rules-preview, rules-apply\nClassification: classify, classify-auto\nLocal: pin, unpin, snooze, unsnooze, local-list, local-state, labels, label-create, label-update, label-delete, label-add, label-remove\nOrganize: mark-read, mark-unread, archive, spam, trash, restore-inbox, change-get, undo\n\nJSON input: --input '{...}' or stdin. JSON output; errors exit 1.\nInstall/connect from Paper Reed → Settings → Agent. Keep the app running.\nNo mail is sent by installation or doctor. Sending requires permission and user approval.\n`;
++const executable = nativeExecutable(path.resolve(__dirname, '../../..'));
++const result = spawnSync(executable, process.argv.slice(2), { stdio: 'inherit' });
++if (result.error) {
++  process.stderr.write(JSON.stringify({
++    error: 'Desktop CLI executable is unavailable.',
++    code: 'runtime-missing',
++    hint: 'Reinstall CLI from the current Paper Reed app.',
++  }) + '\n');
+ }
+-const protocolVersions = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05', '2024-10-07'];
+-
+-function invalidResponse() {
+-  return fail(
+-    'invalid-response',
+-    'No structured response received.',
+-    'Update Paper Reed and its CLI together.'
+-  );
+-}
+-
+-function rpcResult(body, contentType, id) {
+-  // The desktop's POST response ends after sending its matching JSON-RPC reply.
+-  const frames = contentType?.startsWith('text/event-stream')
+-    ? body.split(/\r?\n\r?\n|\r\r/).map((event) =>
+-        event.split(/\r?\n|\r/).filter((line) => line.startsWith('data:'))
+-          .map((line) => line.slice(5).replace(/^ /, '')).join('\n')
+-      ).filter(Boolean)
+-    : [body];
+-  for (const frame of frames) {
+-    let decoded;
+-    try {
+-      decoded = JSON.parse(frame);
+-    } catch {
+-      throw invalidResponse();
+-    }
+-    for (const reply of Array.isArray(decoded) ? decoded : [decoded]) {
+-      if (reply?.jsonrpc !== '2.0' || reply.id !== id) continue;
+-      if (reply.error) throw new Error(reply.error.message || 'MCP request failed.');
+-      if (reply.result && typeof reply.result === 'object') return reply.result;
+-    }
+-  }
+-  throw invalidResponse();
+-}
+-
+-async function callDesktopTool(endpoint, token, command, input) {
+-  const attachment = command === 'attachment-get';
+-  const http = require('node:http');
+-  const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
+-  const deadline = AbortSignal.timeout(attachment ? 45000 : 15000);
+-  const headers = {
+-    Authorization: `Bearer ${token}`,
+-    Accept: 'application/json, text/event-stream',
+-  };
+-
+-  function request(method, message, timeout = 10000) {
+-    const body = message && JSON.stringify({ jsonrpc: '2.0', ...message });
+-    const requestHeaders = body
+-      ? { ...headers, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
+-      : headers;
+-    return new Promise((resolve, reject) => {
+-      // Never follow redirects or replay tool requests.
+-      const req = http.request(endpoint, {
+-        agent, method, headers: requestHeaders,
+-        signal: AbortSignal.any([deadline, AbortSignal.timeout(timeout)]),
+-      }, (res) => {
+-        res.setEncoding('utf8');
+-        let text = '';
+-        res.on('data', (chunk) => { text += chunk; });
+-        res.on('error', reject);
+-        res.on('end', () => {
+-          if (res.statusCode < 200 || res.statusCode >= 300) {
+-            let detail;
+-            try { detail = JSON.parse(text)?.error?.message; } catch {}
+-            reject(new Error(`MCP HTTP ${res.statusCode}${detail ? `: ${detail}` : ''}`));
+-          } else {
+-            resolve({ body: text, headers: res.headers });
+-          }
+-        });
+-      });
+-      req.on('error', reject);
+-      req.end(body);
+-    });
+-  }
+-
+-  try {
+-    const initialized = await request('POST', {
+-      id: 0,
+-      method: 'initialize',
+-      params: {
+-        protocolVersion: protocolVersions[0],
+-        capabilities: {},
+-        clientInfo: { name: 'paper-reed-cli', version: VERSION },
+-      },
+-    });
+-    const session = initialized.headers['mcp-session-id'];
+-    if (session) headers['Mcp-Session-Id'] = session;
+-    const { protocolVersion } = rpcResult(initialized.body, initialized.headers['content-type'], 0);
+-    if (!protocolVersions.includes(protocolVersion)) throw invalidResponse();
+-    headers['MCP-Protocol-Version'] = protocolVersion;
+-    await request('POST', { method: 'notifications/initialized' });
+-    const reply = await request('POST', {
+-      id: 1,
+-      method: 'tools/call',
+-      params: { name: command === 'doctor' ? 'list_accounts' : commands[command][0], arguments: input },
+-    }, attachment ? 40000 : 10000);
+-    printToolResult(command, endpoint, rpcResult(reply.body, reply.headers['content-type'], 1));
+-  } finally {
+-    // Release a stateful session without masking the original result.
+-    try {
+-      if (headers['Mcp-Session-Id']) await request('DELETE', undefined, 1000);
+-    } catch {} finally {
+-      agent.destroy();
+-    }
+-  }
+-}
+-
+-function printToolResult(command, endpoint, result) {
+-  const item = Array.isArray(result.content) && result.content.find((c) => c?.type === 'text');
+-  if (!item || typeof item.text !== 'string') throw invalidResponse();
+-  let output;
+-  try {
+-    output = JSON.parse(item.text);
+-  } catch {
+-    if (!result.isError)
+-      throw fail(
+-        'invalid-response',
+-        'Invalid JSON response.',
+-        'Update Paper Reed and its CLI together.'
+-      );
+-    output = { error: item.text };
+-  }
+-  if (result.isError) {
+-    process.stdout.write(JSON.stringify(output) + '\n');
+-    process.exitCode = 1;
+-    return;
+-  }
+-  if (
+-    output?.items?.some((item) =>
+-      ['rejected', 'failed'].includes(item.status)
+-    )
+-  )
+-    process.exitCode = 1;
+-  if (command === 'doctor')
+-    output = {
+-      ok: true,
+-      version: VERSION,
+-      endpoint: endpoint.href,
+-      authorizedAccounts: output.length,
+-      next: output.length
+-        ? 'Run paper-reed accounts.'
+-        : 'Allow an account in Paper Reed → Settings → Agent.',
+-    };
+-  process.stdout.write(JSON.stringify(output) + '\n');
+-}
+-
+-async function main() {
+-  const [command, ...args] = process.argv.slice(2);
+-  if (command === '--version') {
+-    console.log(VERSION);
+-    return;
+-  }
+-  if (!command || command === '--help' || command === 'help') {
+-    console.log(help());
+-    return;
+-  }
+-  if (!commands[command] && command !== 'doctor')
+-    throw fail(
+-      'unknown-command',
+-      `Unknown command: ${command}`,
+-      'Run paper-reed --help.'
+-    );
+-  if (args.length === 1 && args[0] === '--help') {
+-    console.log(command === 'doctor' ? help() : help(command));
+-    return;
+-  }
+-  const input = inputFor(command, args);
+-  if (mailActions[command]) input.action = mailActions[command];
+-  if (localActions[command]) input.action = localActions[command];
+-  if (command === 'label-delete') input.remove = true;
+-  const { endpoint, token } = connection();
+-  if (typeof token !== 'string' || !token.trim())
+-    throw fail(
+-      'not-connected',
+-      'Connection token is empty.',
+-      'Update the CLI connection in Paper Reed settings.'
+-    );
+-  try {
+-    await callDesktopTool(endpoint, token, command, input);
+-  } catch (error) {
+-    if (/401|Unauthorized/i.test(error.message))
+-      throw fail(
+-        'authentication-failed',
+-        'The connection token was rejected.',
+-        'Click Update connection in Paper Reed → Settings → Agent, then retry doctor.'
+-      );
+-    if (['ABORT_ERR', 'ECONNRESET', 'ECONNREFUSED', 'EPIPE'].includes(error.code) || /timeout|timed out/i.test(error.message))
+-      throw fail(
+-        'connection-unavailable',
+-        'Cannot reach Paper Reed.',
+-        command === 'draft-send'
+-          ? 'Send outcome may be unknown. ' + sendRecoveryHint
+-          : 'Keep Paper Reed running, enable Agent access, and update the CLI connection if the port changed.'
+-      );
+-    throw error;
+-  }
+-}
+-main().catch((error) => {
+-  process.stderr.write(
+-    JSON.stringify({
+-      error: error.message,
+-      code: error.code || 'cli-error',
+-      hint:
+-        error.hint ||
+-        'Run paper-reed doctor or check Agent permissions in Paper Reed.',
+-    }) + '\n'
+-  );
+-  process.exitCode = 1;
+-});
++process.exitCode = result.status ?? 1;
+diff --git a/app/internal_packages/mcp-server/lib/paper-reed-cli.ts b/app/internal_packages/mcp-server/lib/paper-reed-cli.ts
+--- a/app/internal_packages/mcp-server/lib/paper-reed-cli.ts
++++ b/app/internal_packages/mcp-server/lib/paper-reed-cli.ts
+@@ -7,7 +7,6 @@
+   return installer.paths({
+     configDir: AppEnv.getConfigDirPath(),
+     appRoot: AppEnv.getLoadSettings().resourcePath,
+-    executable: process.execPath,
+     binDir: process.env.PAPER_REED_CLI_BIN_DIR,
+   });
+ }

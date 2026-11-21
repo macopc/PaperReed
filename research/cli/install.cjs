@@ -10,37 +10,45 @@ const quote = (value) => "'" + value.replace(/'/g, "'\\''") + "'";
 function paths({
   configDir,
   appRoot,
-  executable,
   binDir = path.join(os.homedir(), '.local/bin'),
 }) {
+  configDir = path.resolve(configDir);
   return {
-    command: path.join(binDir, 'paper-reed'),
+    command: path.join(path.resolve(binDir), 'paper-reed'),
     profile: path.join(configDir, 'paper-reed-cli', 'connection.json'),
-    entry: path.join(
-      appRoot,
-      'internal_packages/mcp-server/bin/paper-reed.cjs'
-    ),
-    executable,
+    executable: nativeExecutable(path.resolve(appRoot)),
+    installedExecutable: path.join(configDir, 'paper-reed-cli', 'paper-reed-cli'),
   };
+}
+function nativeExecutable(appRoot) {
+  const onDisk = path.basename(appRoot) === 'app.asar' ? appRoot + '.unpacked' : appRoot;
+  return path.join(onDisk, 'paper-reed-cli');
 }
 function marker(p) {
   return `# Paper Reed CLI v1 ${JSON.stringify(p.profile)}`;
 }
-function launcher(p) {
-  return `#!/bin/sh\n${marker(p)}\nunset PAPER_REED_UPSTREAM PAPER_REED_MCP_URL PAPER_REED_TOKEN_FILE\nexport ELECTRON_RUN_AS_NODE=1\nexport PAPER_REED_CLI_PROFILE=${quote(p.profile)}\nexec ${quote(p.executable)} ${quote(p.entry)} "$@"\n`;
+function linkTarget(file) {
+  const info = fs.lstatSync(file, { throwIfNoEntry: false });
+  return info?.isSymbolicLink() ? fs.readlinkSync(file) : undefined;
 }
 function owned(p) {
+  const info = fs.lstatSync(p.command, { throwIfNoEntry: false });
+  if (info?.isSymbolicLink()) return linkTarget(p.command) === p.installedExecutable;
+  return info?.isFile() && fs.readFileSync(p.command, 'utf8').split('\n')[1] === marker(p);
+}
+function isExecutable(file) {
   try {
-    return (
-      fs.lstatSync(p.command).isFile() &&
-      fs.readFileSync(p.command, 'utf8').split('\n')[1] === marker(p)
-    );
-  } catch (error) {
-    if (error.code === 'ENOENT') return false;
-    throw error;
+    if (!fs.statSync(file).isFile()) return false;
+    fs.accessSync(file, fs.constants.X_OK);
+    return true;
+  } catch {
+    return false;
   }
 }
 function status(p, connection) {
+  if (process.platform === 'win32') {
+    return { installed: false, ready: false, blocked: true, message: 'Paper Reed CLI 安装支持 macOS 和 Linux。' };
+  }
   try {
     let exists = true;
     try {
@@ -68,7 +76,9 @@ function status(p, connection) {
       saved.endpoint === connection.endpoint &&
       saved.token === connection.token &&
       (fs.statSync(p.profile).mode & 0o077) === 0 &&
-      fs.readFileSync(p.command, 'utf8') === launcher(p);
+      linkTarget(p.command) === p.installedExecutable &&
+      linkTarget(p.installedExecutable) === p.executable &&
+      isExecutable(p.executable);
     return { installed: true, ready };
   } catch (error) {
     return {
@@ -94,8 +104,17 @@ function privateWrite(filename, contents, mode) {
     }
   }
 }
+function writeLink(name, target) {
+  const temp = name + '.' + randomUUID() + '.tmp';
+  fs.symlinkSync(target, temp);
+  try {
+    fs.renameSync(temp, name);
+  } finally {
+    if (linkTarget(temp) !== undefined) fs.unlinkSync(temp);
+  }
+}
 function cleanEnv() {
-  const env = { ...process.env, ELECTRON_RUN_AS_NODE: '1' };
+  const env = { ...process.env };
   // The installed profile is authoritative; legacy development variables must not redirect it.
   for (const key of [
     'PAPER_REED_UPSTREAM',
@@ -108,7 +127,7 @@ function cleanEnv() {
 async function install(p, connection) {
   const state = status(p, connection);
   if (state.blocked) throw new Error(state.message);
-  const probe = await exec(p.executable, [p.entry, '--version'], {
+  const probe = await exec(p.executable, ['--version'], {
     env: cleanEnv(),
     timeout: 8000,
   });
@@ -119,17 +138,24 @@ async function install(p, connection) {
   if (fs.lstatSync(path.dirname(p.profile)).isSymbolicLink())
     throw new Error('连接目录不能是符号链接。');
   fs.chmodSync(path.dirname(p.profile), 0o700);
+  const inner = fs.lstatSync(p.installedExecutable, { throwIfNoEntry: false });
+  if (inner && !inner.isSymbolicLink()) throw new Error('连接目录中已有其他可执行文件。');
+  if (fs.lstatSync(p.command, { throwIfNoEntry: false }) && !owned(p)) {
+    throw new Error('命令已变化，未覆盖现有文件。');
+  }
   privateWrite(
     p.profile,
     JSON.stringify({ product: 'Paper Reed', ...connection }) + '\n',
     0o600
   );
-  privateWrite(p.command, launcher(p), 0o755);
+  writeLink(p.installedExecutable, p.executable);
+  writeLink(p.command, p.installedExecutable);
   return status(p, connection);
 }
 function uninstall(p) {
   if (!owned(p)) throw new Error('命令已变化，未移除其他文件。');
   fs.unlinkSync(p.command);
+  if (linkTarget(p.installedExecutable) !== undefined) fs.unlinkSync(p.installedExecutable);
   if (fs.existsSync(p.profile) && fs.lstatSync(p.profile).isFile())
     fs.unlinkSync(p.profile);
 }
@@ -212,4 +238,4 @@ function handoff(p, context) {
     2
   );
 }
-module.exports = { paths, status, install, uninstall, doctor, handoff, quote };
+module.exports = { paths, nativeExecutable, status, install, uninstall, doctor, handoff, quote };

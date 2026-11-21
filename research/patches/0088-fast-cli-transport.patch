@@ -1,0 +1,273 @@
+diff --git a/app/internal_packages/mcp-server/bin/paper-reed.cjs b/app/internal_packages/mcp-server/bin/paper-reed.cjs
+--- a/app/internal_packages/mcp-server/bin/paper-reed.cjs
++++ b/app/internal_packages/mcp-server/bin/paper-reed.cjs
+@@ -1,8 +1,6 @@
+ #!/usr/bin/env node
+-// Ships with the desktop app and uses its pinned MCP SDK. Never opens the mail database.
++// Ships with the desktop app and calls its loopback MCP server.
+ const fs = require('node:fs');
+-const path = require('node:path');
+-const { createRequire } = require('node:module');
+ const VERSION = '0.0.1';
+ const mailActions = {
+   'mark-read': 'read',
+@@ -292,7 +290,152 @@
+       (note ? note + '\n' : '');
+   }
+   return `Paper Reed CLI ${VERSION}\n\nStart here:\n  paper-reed doctor             Check the local connection (read-only)\n  paper-reed accounts           List authorized accounts\n  paper-reed <command> --help   Show a JSON example\n\nRead: accounts, folders, threads, search, thread-get, attachment-get\nDrafts: draft-get, draft-create, draft-reply, draft-update, draft-attach, draft-detach, draft-send, operation-get\nRules: rules, rule-save, rule-delete, rules-reorder, rules-preview, rules-apply\nClassification: classify, classify-auto\nLocal: pin, unpin, snooze, unsnooze, local-list, local-state, labels, label-create, label-update, label-delete, label-add, label-remove\nOrganize: mark-read, mark-unread, archive, spam, trash, restore-inbox, change-get, undo\n\nJSON input: --input '{...}' or stdin. JSON output; errors exit 1.\nInstall/connect from Paper Reed → Settings → Agent. Keep the app running.\nNo mail is sent by installation or doctor. Sending requires permission and user approval.\n`;
++}
++const protocolVersions = ['2025-11-25', '2025-06-18', '2025-03-26', '2024-11-05', '2024-10-07'];
++
++function invalidResponse() {
++  return fail(
++    'invalid-response',
++    'No structured response received.',
++    'Update Paper Reed and its CLI together.'
++  );
++}
++
++function rpcResult(body, contentType, id) {
++  // The desktop's POST response ends after sending its matching JSON-RPC reply.
++  const frames = contentType?.startsWith('text/event-stream')
++    ? body.split(/\r?\n\r?\n|\r\r/).map((event) =>
++        event.split(/\r?\n|\r/).filter((line) => line.startsWith('data:'))
++          .map((line) => line.slice(5).replace(/^ /, '')).join('\n')
++      ).filter(Boolean)
++    : [body];
++  for (const frame of frames) {
++    let decoded;
++    try {
++      decoded = JSON.parse(frame);
++    } catch {
++      throw invalidResponse();
++    }
++    for (const reply of Array.isArray(decoded) ? decoded : [decoded]) {
++      if (reply?.jsonrpc !== '2.0' || reply.id !== id) continue;
++      if (reply.error) throw new Error(reply.error.message || 'MCP request failed.');
++      if (reply.result && typeof reply.result === 'object') return reply.result;
++    }
++  }
++  throw invalidResponse();
++}
++
++async function callDesktopTool(endpoint, token, command, input) {
++  const attachment = command === 'attachment-get';
++  const http = require('node:http');
++  const agent = new http.Agent({ keepAlive: true, maxSockets: 1 });
++  const deadline = AbortSignal.timeout(attachment ? 45000 : 15000);
++  const headers = {
++    Authorization: `Bearer ${token}`,
++    Accept: 'application/json, text/event-stream',
++  };
++
++  function request(method, message, timeout = 10000) {
++    const body = message && JSON.stringify({ jsonrpc: '2.0', ...message });
++    const requestHeaders = body
++      ? { ...headers, 'Content-Type': 'application/json', 'Content-Length': Buffer.byteLength(body) }
++      : headers;
++    return new Promise((resolve, reject) => {
++      // Never follow redirects or replay tool requests.
++      const req = http.request(endpoint, {
++        agent, method, headers: requestHeaders,
++        signal: AbortSignal.any([deadline, AbortSignal.timeout(timeout)]),
++      }, (res) => {
++        res.setEncoding('utf8');
++        let text = '';
++        res.on('data', (chunk) => { text += chunk; });
++        res.on('error', reject);
++        res.on('end', () => {
++          if (res.statusCode < 200 || res.statusCode >= 300) {
++            let detail;
++            try { detail = JSON.parse(text)?.error?.message; } catch {}
++            reject(new Error(`MCP HTTP ${res.statusCode}${detail ? `: ${detail}` : ''}`));
++          } else {
++            resolve({ body: text, headers: res.headers });
++          }
++        });
++      });
++      req.on('error', reject);
++      req.end(body);
++    });
++  }
++
++  try {
++    const initialized = await request('POST', {
++      id: 0,
++      method: 'initialize',
++      params: {
++        protocolVersion: protocolVersions[0],
++        capabilities: {},
++        clientInfo: { name: 'paper-reed-cli', version: VERSION },
++      },
++    });
++    const session = initialized.headers['mcp-session-id'];
++    if (session) headers['Mcp-Session-Id'] = session;
++    const { protocolVersion } = rpcResult(initialized.body, initialized.headers['content-type'], 0);
++    if (!protocolVersions.includes(protocolVersion)) throw invalidResponse();
++    headers['MCP-Protocol-Version'] = protocolVersion;
++    await request('POST', { method: 'notifications/initialized' });
++    const reply = await request('POST', {
++      id: 1,
++      method: 'tools/call',
++      params: { name: command === 'doctor' ? 'list_accounts' : commands[command][0], arguments: input },
++    }, attachment ? 40000 : 10000);
++    printToolResult(command, endpoint, rpcResult(reply.body, reply.headers['content-type'], 1));
++  } finally {
++    // Release a stateful session without masking the original result.
++    try {
++      if (headers['Mcp-Session-Id']) await request('DELETE', undefined, 1000);
++    } catch {} finally {
++      agent.destroy();
++    }
++  }
++}
++
++function printToolResult(command, endpoint, result) {
++  const item = Array.isArray(result.content) && result.content.find((c) => c?.type === 'text');
++  if (!item || typeof item.text !== 'string') throw invalidResponse();
++  let output;
++  try {
++    output = JSON.parse(item.text);
++  } catch {
++    if (!result.isError)
++      throw fail(
++        'invalid-response',
++        'Invalid JSON response.',
++        'Update Paper Reed and its CLI together.'
++      );
++    output = { error: item.text };
++  }
++  if (result.isError) {
++    process.stdout.write(JSON.stringify(output) + '\n');
++    process.exitCode = 1;
++    return;
++  }
++  if (
++    output?.items?.some((item) =>
++      ['rejected', 'failed'].includes(item.status)
++    )
++  )
++    process.exitCode = 1;
++  if (command === 'doctor')
++    output = {
++      ok: true,
++      version: VERSION,
++      endpoint: endpoint.href,
++      authorizedAccounts: output.length,
++      next: output.length
++        ? 'Run paper-reed accounts.'
++        : 'Allow an account in Paper Reed → Settings → Agent.',
++    };
++  process.stdout.write(JSON.stringify(output) + '\n');
+ }
++
+ async function main() {
+   const [command, ...args] = process.argv.slice(2);
+   if (command === '--version') {
+@@ -324,83 +467,8 @@
+       'Connection token is empty.',
+       'Update the CLI connection in Paper Reed settings.'
+     );
+-  const appRoot = process.env.PAPER_REED_UPSTREAM
+-    ? path.resolve(process.env.PAPER_REED_UPSTREAM, 'app')
+-    : path.resolve(__dirname, '../../..');
+-  let Client, Transport;
+   try {
+-    const requireApp = createRequire(path.join(appRoot, 'package.json'));
+-    ({ Client } = requireApp('@modelcontextprotocol/sdk/client/index.js'));
+-    ({ StreamableHTTPClientTransport: Transport } = requireApp(
+-      '@modelcontextprotocol/sdk/client/streamableHttp.js'
+-    ));
+-  } catch {
+-    throw fail(
+-      'runtime-missing',
+-      'Desktop CLI dependencies are unavailable.',
+-      'Reinstall CLI from the current Paper Reed app. Source runs also need PAPER_REED_UPSTREAM.'
+-    );
+-  }
+-  const client = new Client({ name: 'paper-reed-cli', version: VERSION });
+-  const transport = new Transport(endpoint, {
+-    requestInit: {
+-      headers: { Authorization: `Bearer ${token}` },
+-      redirect: 'error',
+-      signal: AbortSignal.timeout(command === 'attachment-get' ? 45000 : 15000),
+-    },
+-  });
+-  try {
+-    await client.connect(transport, { timeout: 10000 });
+-    const result = await client.callTool(
+-      {
+-        name:
+-          command === 'doctor' ? 'list_accounts' : commands[command][0],
+-        arguments: input,
+-      },
+-      undefined,
+-      { timeout: command === 'attachment-get' ? 40000 : 10000 }
+-    );
+-    const item = result.content?.find((c) => c.type === 'text');
+-    if (!item)
+-      throw fail(
+-        'invalid-response',
+-        'No structured response received.',
+-        'Update Paper Reed and its CLI together.'
+-      );
+-    let output;
+-    try {
+-      output = JSON.parse(item.text);
+-    } catch {
+-      if (!result.isError)
+-        throw fail(
+-          'invalid-response',
+-          'Invalid JSON response.',
+-          'Update Paper Reed and its CLI together.'
+-        );
+-      output = { error: item.text };
+-    }
+-    if (result.isError) {
+-      process.stdout.write(JSON.stringify(output) + '\n');
+-      process.exitCode = 1;
+-      return;
+-    }
+-    if (
+-      output?.items?.some((item) =>
+-        ['rejected', 'failed'].includes(item.status)
+-      )
+-    )
+-      process.exitCode = 1;
+-    if (command === 'doctor')
+-      output = {
+-        ok: true,
+-        version: VERSION,
+-        endpoint: endpoint.href,
+-        authorizedAccounts: output.length,
+-        next: output.length
+-          ? 'Run paper-reed accounts.'
+-          : 'Allow an account in Paper Reed → Settings → Agent.',
+-      };
+-    process.stdout.write(JSON.stringify(output) + '\n');
++    await callDesktopTool(endpoint, token, command, input);
+   } catch (error) {
+     if (/401|Unauthorized/i.test(error.message))
+       throw fail(
+@@ -408,7 +476,7 @@
+         'The connection token was rejected.',
+         'Click Update connection in Paper Reed → Settings → Agent, then retry doctor.'
+       );
+-    if (/fetch failed|ECONNREFUSED|timeout|timed out/i.test(error.message))
++    if (['ABORT_ERR', 'ECONNRESET', 'ECONNREFUSED', 'EPIPE'].includes(error.code) || /timeout|timed out/i.test(error.message))
+       throw fail(
+         'connection-unavailable',
+         'Cannot reach Paper Reed.',
+@@ -417,12 +485,6 @@
+           : 'Keep Paper Reed running, enable Agent access, and update the CLI connection if the port changed.'
+       );
+     throw error;
+-  } finally {
+-    // Release the per-invocation HTTP session. Cleanup must not mask a send result.
+-    try {
+-      await transport.terminateSession();
+-    } catch {}
+-    await client.close();
+   }
+ }
+ main().catch((error) => {

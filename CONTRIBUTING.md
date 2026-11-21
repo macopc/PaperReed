@@ -37,4 +37,4 @@ Contribute only material you have the right to share, under GPL-3.0-only for ori
 
 遵守 [行为准则](CODE_OF_CONDUCT.md)。涉及漏洞或凭据泄露请使用 [安全报告方式](SECURITY.md)，不要提交公开 Issue。
 
-配置完整的 macOS 预览包使用 `python3 scripts/build-desktop.py --google-client <项目桌面客户端JSON路径> --skip-archive`。该入口要求项目自己的 Google Desktop 配置，写入 Paper Reed 版本和源码标识；不会打包邮箱授权令牌。前提、验证和未完成的正式发行事项见 [发行配置记录](research/distribution-validation-2026-11-17/README.md)。
+配置完整的 macOS 预览包使用 `python3 scripts/build-desktop.py --google-client <项目桌面客户端JSON路径> --skip-archive`。该入口要求项目自己的 Google Desktop 配置和 Go 1.23 或更新版本，写入 Paper Reed 版本和源码标识；不会打包邮箱授权令牌。前提、验证和未完成的正式发行事项见 [发行配置记录](research/distribution-validation-2026-11-17/README.md)。

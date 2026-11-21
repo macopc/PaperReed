@@ -1,0 +1,371 @@
+{
+  "1-paper-reed": {
+    "checks": {
+      "latest_update": true,
+      "targeted_organize": true,
+      "reply_draft": true,
+      "single_smtp_submission": true
+    },
+    "read_side_effect": false,
+    "before": {
+      "INBOX": {
+        "<old@bench.example.test>": [],
+        "<other@bench.example.test>": [],
+        "<latest@bench.example.test>": [],
+        "<finance@bench.example.test>": [],
+        "<travel@bench.example.test>": [],
+        "<decoy@bench.example.test>": []
+      },
+      "Archive": {}
+    },
+    "after": {
+      "INBOX": {
+        "<old@bench.example.test>": [],
+        "<other@bench.example.test>": [],
+        "<latest@bench.example.test>": [],
+        "<finance@bench.example.test>": [
+          "\\Seen"
+        ],
+        "<decoy@bench.example.test>": []
+      },
+      "Archive": {
+        "<travel@bench.example.test>": []
+      }
+    },
+    "drafts": [
+      {
+        "subject": "Re: PO-418 delivery update",
+        "reply": "latest@bench.example.test",
+        "to": [
+          "supplier@example.test"
+        ],
+        "body": "Thanks, please confirm the dispatch time.\n\n\n        <br/>\n        <br/>\n        <div class=\"gmail_quote_attribution\">On Nov 18 2026, at 10:52 am, Supplier &lt;supplier@example.test&gt; wrote:</div>\n        <blockquote class=\"gmail_quote\"\n          style=\"margin:0 0 0 .8ex;border-left:1px #ccc solid;padding-left:1ex;\">\n          <div style=\"white-space: pre-wrap;\">The revised delivery date is 2026-12-09. Confirmation: PR-418-NOVA.<br></div>\n          <br/>\n        </blockquote>\n        "
+      }
+    ],
+    "smtp": [
+      {
+        "sender": "work@example.test",
+        "recipients": [
+          "qa-recipient@example.test"
+        ],
+        "subject": "Loopback delivery check",
+        "body": "Approved synthetic delivery."
+      }
+    ],
+    "agent": {
+      "exit": 0,
+      "seconds": 67.7,
+      "answer": {
+        "delivery_date": "2026-12-09",
+        "confirmation_code": "PR-418-NOVA",
+        "supplier_update": "Read latest update.",
+        "finance_approval": "Marked as read.",
+        "travel_receipt": "Moved exact-subject message to Archive.",
+        "reply_draft": "Saved unsent, addressed to supplier, associated with latest update, with exact requested sentence.",
+        "loopback_delivery": "Submission completed: accepted; sent copy filed."
+      },
+      "calls": 26,
+      "help_calls": 11,
+      "nonzero_calls": 0,
+      "usage": [
+        {
+          "input_tokens": 190786,
+          "cached_input_tokens": 158976,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 1253,
+          "reasoning_output_tokens": 0
+        }
+      ]
+    },
+    "search_ms": [
+      7.8,
+      7.0,
+      6.8,
+      6.7,
+      6.8,
+      9.2,
+      6.9,
+      6.5,
+      6.5,
+      6.8
+    ],
+    "search_median_ms": 6.8
+  },
+  "1-himalaya": {
+    "checks": {
+      "latest_update": true,
+      "targeted_organize": true,
+      "reply_draft": true,
+      "single_smtp_submission": true
+    },
+    "read_side_effect": false,
+    "before": {
+      "INBOX": {
+        "<old@bench.example.test>": [],
+        "<other@bench.example.test>": [],
+        "<latest@bench.example.test>": [],
+        "<finance@bench.example.test>": [],
+        "<travel@bench.example.test>": [],
+        "<decoy@bench.example.test>": []
+      },
+      "Archive": {}
+    },
+    "after": {
+      "INBOX": {
+        "<old@bench.example.test>": [],
+        "<other@bench.example.test>": [],
+        "<latest@bench.example.test>": [],
+        "<finance@bench.example.test>": [
+          "\\Seen"
+        ],
+        "<decoy@bench.example.test>": []
+      },
+      "Archive": {
+        "<travel@bench.example.test>": []
+      }
+    },
+    "drafts": [
+      {
+        "subject": "Re: PO-418 delivery update",
+        "reply": "<latest@bench.example.test>",
+        "to": [
+          "supplier@example.test"
+        ],
+        "body": "Thanks, please confirm the dispatch time.\r\n"
+      }
+    ],
+    "smtp": [
+      {
+        "sender": "work@example.test",
+        "recipients": [
+          "qa-recipient@example.test"
+        ],
+        "subject": "Loopback delivery check",
+        "body": "Approved synthetic delivery."
+      }
+    ],
+    "agent": {
+      "exit": 0,
+      "seconds": 54.9,
+      "answer": {
+        "delivery_date": "2026-12-09",
+        "confirmation_code": "PR-418-NOVA",
+        "supplier_update": "Latest PO-418 update read.",
+        "finance_approval": "Marked as read.",
+        "travel_receipt": "Moved to Archive.",
+        "reply_draft": "One unsent draft saved to supplier with the exact sentence and reply association preserved.",
+        "loopback_delivery": "Exactly one message submitted successfully.",
+        "other_messages": "Unchanged."
+      },
+      "calls": 22,
+      "help_calls": 9,
+      "nonzero_calls": 0,
+      "usage": [
+        {
+          "input_tokens": 208425,
+          "cached_input_tokens": 188928,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 812,
+          "reasoning_output_tokens": 20
+        }
+      ]
+    },
+    "search_ms": [
+      6.6,
+      5.7,
+      5.6,
+      5.7,
+      5.5,
+      5.6,
+      5.5,
+      5.5,
+      5.4,
+      5.3
+    ],
+    "search_median_ms": 5.55
+  },
+  "2-himalaya": {
+    "checks": {
+      "latest_update": true,
+      "targeted_organize": true,
+      "reply_draft": true,
+      "single_smtp_submission": true
+    },
+    "read_side_effect": false,
+    "before": {
+      "INBOX": {
+        "<old@bench.example.test>": [],
+        "<other@bench.example.test>": [],
+        "<latest@bench.example.test>": [],
+        "<finance@bench.example.test>": [],
+        "<travel@bench.example.test>": [],
+        "<decoy@bench.example.test>": []
+      },
+      "Archive": {}
+    },
+    "after": {
+      "INBOX": {
+        "<old@bench.example.test>": [],
+        "<other@bench.example.test>": [],
+        "<latest@bench.example.test>": [],
+        "<finance@bench.example.test>": [
+          "\\Seen"
+        ],
+        "<decoy@bench.example.test>": []
+      },
+      "Archive": {
+        "<travel@bench.example.test>": []
+      }
+    },
+    "drafts": [
+      {
+        "subject": "Re: PO-418 delivery update",
+        "reply": "<latest@bench.example.test>",
+        "to": [
+          "supplier@example.test"
+        ],
+        "body": "Thanks, please confirm the dispatch time.\r\n"
+      }
+    ],
+    "smtp": [
+      {
+        "sender": "work@example.test",
+        "recipients": [
+          "qa-recipient@example.test"
+        ],
+        "subject": "Loopback delivery check",
+        "body": "Approved synthetic delivery."
+      }
+    ],
+    "agent": {
+      "exit": 0,
+      "seconds": 54.4,
+      "answer": {
+        "delivery_date": "2026-12-09",
+        "confirmation_code": "PR-418-NOVA",
+        "supplier_update": "Latest PO-418 update read.",
+        "finance_approval": "Marked as read.",
+        "travel_receipt": "Moved to Archive.",
+        "reply_draft": "One unsent draft saved to supplier@example.test with the exact sentence and reply association preserved.",
+        "loopback_delivery": "Exactly one message sent to qa-recipient@example.test with the specified subject and body; submission completed."
+      },
+      "calls": 23,
+      "help_calls": 9,
+      "nonzero_calls": 1,
+      "usage": [
+        {
+          "input_tokens": 236547,
+          "cached_input_tokens": 204928,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 821,
+          "reasoning_output_tokens": 26
+        }
+      ]
+    },
+    "search_ms": [
+      6.5,
+      5.3,
+      5.3,
+      5.3,
+      5.3,
+      5.4,
+      5.3,
+      5.4,
+      5.3,
+      5.5
+    ],
+    "search_median_ms": 5.3
+  },
+  "2-paper-reed": {
+    "checks": {
+      "latest_update": true,
+      "targeted_organize": true,
+      "reply_draft": true,
+      "single_smtp_submission": true
+    },
+    "read_side_effect": false,
+    "before": {
+      "INBOX": {
+        "<old@bench.example.test>": [],
+        "<other@bench.example.test>": [],
+        "<latest@bench.example.test>": [],
+        "<finance@bench.example.test>": [],
+        "<travel@bench.example.test>": [],
+        "<decoy@bench.example.test>": []
+      },
+      "Archive": {}
+    },
+    "after": {
+      "INBOX": {
+        "<old@bench.example.test>": [],
+        "<other@bench.example.test>": [],
+        "<latest@bench.example.test>": [],
+        "<finance@bench.example.test>": [
+          "\\Seen"
+        ],
+        "<decoy@bench.example.test>": []
+      },
+      "Archive": {
+        "<travel@bench.example.test>": []
+      }
+    },
+    "drafts": [
+      {
+        "subject": "Re: PO-418 delivery update",
+        "reply": "latest@bench.example.test",
+        "to": [
+          "supplier@example.test"
+        ],
+        "body": "Thanks, please confirm the dispatch time.\n\n\n        <br/>\n        <br/>\n        <div class=\"gmail_quote_attribution\">On Nov 18 2026, at 10:52 am, Supplier &lt;supplier@example.test&gt; wrote:</div>\n        <blockquote class=\"gmail_quote\"\n          style=\"margin:0 0 0 .8ex;border-left:1px #ccc solid;padding-left:1ex;\">\n          <div style=\"white-space: pre-wrap;\">The revised delivery date is 2026-12-09. Confirmation: PR-418-NOVA.<br></div>\n          <br/>\n        </blockquote>\n        "
+      }
+    ],
+    "smtp": [
+      {
+        "sender": "work@example.test",
+        "recipients": [
+          "qa-recipient@example.test"
+        ],
+        "subject": "Loopback delivery check",
+        "body": "Approved synthetic delivery."
+      }
+    ],
+    "agent": {
+      "exit": 0,
+      "seconds": 65.3,
+      "answer": {
+        "delivery_date": "2026-12-09",
+        "confirmation_code": "PR-418-NOVA",
+        "supplier_update": "Read latest update from supplier@example.test.",
+        "finance_approval": "Marked as read.",
+        "travel_receipt": "Moved to Archive.",
+        "reply_draft": "Saved unsent with the exact sentence, addressed to supplier@example.test and associated with the latest update.",
+        "loopback_message": "Exactly one submitted; submission accepted. Sent copy pending."
+      },
+      "calls": 26,
+      "help_calls": 11,
+      "nonzero_calls": 0,
+      "usage": [
+        {
+          "input_tokens": 191470,
+          "cached_input_tokens": 177024,
+          "cache_write_input_tokens": 0,
+          "output_tokens": 1304,
+          "reasoning_output_tokens": 0
+        }
+      ]
+    },
+    "search_ms": [
+      8.3,
+      7.8,
+      7.2,
+      7.9,
+      8.2,
+      9.9,
+      7.4,
+      7.1,
+      7.4,
+      7.2
+    ],
+    "search_median_ms": 7.6
+  }
+}

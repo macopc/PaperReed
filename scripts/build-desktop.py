@@ -7,6 +7,8 @@ from pathlib import Path
 import subprocess
 import sys
 
+from stage_native_cli import require_go, stage_native_cli
+
 ROOT = Path(__file__).resolve().parent.parent
 parser = argparse.ArgumentParser(description=__doc__)
 parser.add_argument('--upstream', type=Path, default=ROOT / 'research/.local/Mailspring')
@@ -19,6 +21,20 @@ if sys.platform != 'darwin':
     parser.error('This entry point builds the macOS preview.')
 if not args.google_client or not args.google_client.is_file():
     parser.error('Provide the project Google Desktop client JSON with --google-client.')
+try:
+    require_go()
+    app = args.upstream / 'app'
+    cli_sources = ('install.cjs', 'paper-reed.cjs')
+    installer_dir = app / 'internal_packages/mcp-server/bin'
+    if ('await buildNativeCLI();' not in (app / 'build/build.js').read_text() or
+            any((installer_dir / name).read_bytes() != (ROOT / 'research/cli' / name).read_bytes()
+                for name in cli_sources)):
+        parser.error('Prepare the upstream checkout with scripts/prepare-desktop.py before building.')
+    stage_native_cli(args.upstream)
+except FileNotFoundError:
+    parser.error('Prepare the upstream checkout with scripts/prepare-desktop.py before building.')
+except RuntimeError as error:
+    parser.error(str(error))
 for asset, target in [('paper-reed.icns', 'app/build/resources/mac/paper-reed.icns'),
                       ('app-icon.png', 'app/static/paper-reed-icon.png'),
                       ('mark.svg', 'app/static/paper-reed-mark.svg')]:

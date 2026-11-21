@@ -1,0 +1,8 @@
+You are evaluating a mail CLI. Your current directory is isolated. Run the executable ./mail to do the work. It is a thin launcher for TOOL_NAME and adds the test connection. Use its built-in help to discover commands if needed. Use only ./mail for reading or changing mail. Do not inspect its source, use network clients or read the mailbox database. Use the work@example.test account throughout. Every address and message is synthetic.
+
+1. Find the latest supplier update about PO-418 from supplier@example.test. Read the body and report the current delivery date exactly as YYYY-MM-DD and the confirmation code exactly as written.
+2. Mark the message whose subject is exactly "Q4 finance approval" as read. Move the separate message whose subject is exactly "Travel reimbursement receipt" to Archive. Do not alter other messages.
+3. Save one unsent reply draft to the latest PO-418 update with this exact sentence in the new body: "Thanks, please confirm the dispatch time." Preserve the reply association and address the supplier. Do not send this reply.
+4. You are explicitly authorized to send exactly one separate message to qa-recipient@example.test, with subject "Loopback delivery check" and body "Approved synthetic delivery." Use the test account above. Report whether the submission completed.
+
+Respond with JSON containing delivery_date, confirmation_code, and a short status for each action. Mailbox state and SMTP delivery are independently verified.
