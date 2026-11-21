@@ -1,0 +1,573 @@
+diff --git a/MailSync/MailStore.cpp b/MailSync/MailStore.cpp
+index 830b9666626c36d73b1490d7480103ec36954569..bc8a03e0f1ca68eecd4d8df65d860f19c38a7231 100644
+--- a/MailSync/MailStore.cpp
++++ b/MailSync/MailStore.cpp
+@@ -1110,6 +1110,14 @@ void MailStore::setPlacementUnread(Message & msg, bool unread) {
+     msg.setPlacementsChanged(true);
+ }
+ 
++void MailStore::setPlacementUnread(Message & msg, bool unread, const Placement & copy) {
++    assertCorrectThread();
++    const auto changed = _execPlacement("setCopyUnread",
++        "UPDATE MessageFolder SET unread = ? WHERE messageId = ? AND rowid = ? AND folderId = ? AND remoteUID = ?",
++        unread, msg.id(), copy.rowid, copy.folderId, (long long)copy.remoteUID);
++    if (changed) msg.setPlacementsChanged(true);
++}
++
+ void MailStore::setPlacementStarred(Message & msg, bool starred) {
+     assertCorrectThread();
+     _execPlacement("setStarredAll", "UPDATE MessageFolder SET starred = ? WHERE messageId = ?", starred, msg.id());
+@@ -1123,6 +1131,14 @@ void MailStore::setPlacementLabels(Message & msg, const vector<string> & labels)
+     msg.setPlacementsChanged(true);
+ }
+ 
++void MailStore::setPlacementLabels(Message & msg, const vector<string> & labels, const string & folderId, uint32_t uid) {
++    assertCorrectThread();
++    const auto changed = _execPlacement("setCopyLabels",
++        "UPDATE MessageFolder SET remoteXGMLabels = ? WHERE messageId = ? AND folderId = ? AND remoteUID = ?",
++        json(labels).dump(), msg.id(), folderId, (long long)uid);
++    if (changed) msg.setPlacementsChanged(true);
++}
++
+ // Optimistic move of one copy: the row keeps its server folder and UID so the remote
+ // phase can address it, and the snapshot reports it under the destination immediately.
+ // Keyed by (folder, UID) because two copies in one folder can be bound for different
+diff --git a/MailSync/MailStore.hpp b/MailSync/MailStore.hpp
+index 987e15b81c4c43799336f0f55e432a4d19b715c3..42f34cd5a76b808aba518950ccc1b6a47446aa77 100644
+--- a/MailSync/MailStore.hpp
++++ b/MailSync/MailStore.hpp
+@@ -143,8 +143,10 @@ public:
+     string upsertPlacement(Message & msg, Folder & folder, uint32_t uid, const MessageAttributes & attrs);
+     void removePlacementsOutsideFolder(Message & msg, string folderId);
+     void setPlacementUnread(Message & msg, bool unread);
++    void setPlacementUnread(Message & msg, bool unread, const Placement & copy);
+     void setPlacementStarred(Message & msg, bool starred);
+     void setPlacementLabels(Message & msg, const vector<string> & labels);
++    void setPlacementLabels(Message & msg, const vector<string> & labels, const string & folderId, uint32_t uid);
+     void beginPlacementMove(Message & msg, string fromFolderId, uint32_t uid, string toFolderId);
+     // Returns the id of a different message that held (toFolderId, newUid) and lost it, or "".
+     string commitPlacementMove(Message & msg, string fromFolderId, uint32_t oldUid, string toFolderId, uint32_t newUid);
+diff --git a/MailSync/TaskProcessor.cpp b/MailSync/TaskProcessor.cpp
+index c38cb09ee5e44ec53a32f2747d091a7b8f9bc1ae..403f032a969687a2d2c966e28f8c37b91da94f2a 100644
+--- a/MailSync/TaskProcessor.cpp
++++ b/MailSync/TaskProcessor.cpp
+@@ -468,21 +468,143 @@ static void _removeMessageCopiesResilient(IMAPSession * session, MailStore * sto
+ 
+ // Small functions that we pass to the generic ChangeMessages runner.
+ 
++static string _unreadSource(const json & data) {
++    auto source = data.find("sourceFolderId");
++    return source != data.end() && source->is_string() ? source->get<string>() : "";
++}
++
++static bool _sameUnreadCopy(const Placement & copy, const json & proof) {
++    return copy.remoteUID && copy.rowid == proof["rowId"] && copy.folderId == proof["folderId"] &&
++        copy.remoteUID == proof["uid"];
++}
++
+ void _applyUnread(MailStore * store, Message * msg, const vector<Placement> & placements, json & data) {
+-    store->setPlacementUnread(*msg, data["unread"].get<bool>());
++    const auto unread = data["unread"].get<bool>();
++    const auto source = _unreadSource(data);
++    if (source.empty()) {
++        store->setPlacementUnread(*msg, unread);
++        return;
++    }
++    if (msg->isDraft()) return;
++    auto restore = data.find("restoreUnreadPlacements");
++    if (restore != data.end() && !restore->contains(msg->id())) return;
++    const auto validity = _localFolderUIDValidity(store, msg->accountId(), source);
++    if (!validity) throw SyncException("flag-source-unavailable", "The source mailbox generation is unknown.", false);
++    if (restore != data.end()) {
++        for (const auto & proof : (*restore)[msg->id()]) {
++            if (proof["folderId"] != source || proof["uidValidity"] != validity ||
++                std::none_of(placements.begin(), placements.end(), [&](const Placement & copy) {
++                    return _sameUnreadCopy(copy, proof) && copy.pendingFolderId.empty();
++                })) {
++                throw SyncException("flag-source-unavailable", "The copy to undo is no longer available.", false);
++            }
++        }
++        data["unreadPlacements"][msg->id()] = (*restore)[msg->id()];
++        return;
++    }
++    // Queue the eligible copies, regardless of their current flags. An earlier
++    // queued task can change those flags before this task reaches the server.
++    for (const auto & copy : placements) {
++        if (copy.folderId == source && copy.remoteUID && copy.pendingFolderId.empty()) {
++            data["unreadPlacements"][msg->id()].push_back({
++                {"rowId", copy.rowid}, {"folderId", copy.folderId}, {"uid", copy.remoteUID}, {"uidValidity", validity},
++            });
++        }
++    }
++}
++
++static void _storeUnread(IMAPSession * session, String * path, IndexSet * uids, bool unread) {
++    if (!uids->count()) return;
++    ErrorCode err = ErrorCode::ErrorNone;
++    session->storeFlagsByUID(path, uids, unread ? IMAPStoreFlagsRequestKindRemove : IMAPStoreFlagsRequestKindAdd,
++                             MessageFlagSeen, &err);
++    if (err != ErrorCode::ErrorNone) throw SyncException(err, "storeFlagsByUID");
+ }
+ 
+ void _applyUnreadInIMAPFolder(IMAPSession * session, MailStore * store, string accountId, Folder & source, vector<TaskPlacement *> & items, json & data) {
++    _storeUnread(session, AS_MCSTR(source.path()), _uidsOf(items), data["unread"].get<bool>());
++}
++
++static map<uint32_t, bool> _readScopedUnread(IMAPSession * session, String * path, uint32_t validity, IndexSet * uids) {
++    _selectExactSource(session, path, validity);
+     ErrorCode err = ErrorCode::ErrorNone;
++    auto fetched = session->fetchMessagesByUID(path, IMAPMessagesRequestKindFlags, uids, nullptr, &err);
++    if (err != ErrorCode::ErrorNone) throw SyncException(err, "Read scoped unread source");
++    map<uint32_t, bool> unread;
++    if (fetched) {
++        for (unsigned int i = 0; i < fetched->count(); ++i) {
++            auto remote = static_cast<IMAPMessage *>(fetched->objectAtIndex(i));
++            unread.emplace(remote->uid(), !(remote->flags() & MessageFlagSeen));
++        }
++    }
++    return unread;
++}
++
++static void _applyScopedUnreadInIMAPFolder(IMAPSession * session, MailStore * store, Folder & source,
++                                          vector<TaskPlacement *> & items, Task * task) {
++    auto & data = task->data();
++    const bool unread = data["unread"].get<bool>();
++    const auto validity = items.front()->unreadSourceValidity;
++    if (std::any_of(items.begin(), items.end(), [&](const TaskPlacement * item) {
++        return item->unreadSourceValidity != validity;
++    })) throw SyncException("flag-source-unavailable", "The recorded mailbox generations disagree.", false);
++
+     String * path = AS_MCSTR(source.path());
+-    IndexSet * uids = _uidsOf(items);
+-    if (data["unread"].get<bool>() == false) {
+-        session->storeFlagsByUID(path, uids, IMAPStoreFlagsRequestKindAdd, MessageFlagSeen, &err);
+-    } else {
+-        session->storeFlagsByUID(path, uids, IMAPStoreFlagsRequestKindRemove, MessageFlagSeen, &err);
++    auto uids = _uidsOf(items);
++    auto observed = _readScopedUnread(session, path, validity, uids);
++    const bool resuming = data.contains("unreadAttempt");
++    auto attempt = data.value("unreadAttempt", json::object());
++    auto remaining = IndexSet::indexSet();
++    for (auto item : items) {
++        const auto & copy = item->placement;
++        const auto current = observed.find(copy.remoteUID);
++        if (current == observed.end()) {
++            if (resuming) continue;
++            throw SyncException("flag-source-unavailable", "An expected copy is no longer available.", false);
++        }
++        if (current->second == unread) continue;
++        remaining->addIndex(copy.remoteUID);
++        if (!resuming) {
++            attempt[item->message->id()].push_back({
++                {"rowId", copy.rowid}, {"folderId", copy.folderId}, {"uid", copy.remoteUID}, {"uidValidity", validity},
++            });
++        }
+     }
+-    if (err != ErrorCode::ErrorNone) {
+-        throw SyncException(err, "storeFlagsByUID");
++    if (!resuming && !attempt.empty()) {
++        // Save the exact write set before STORE. After a crash, matching flags
++        // inside this set still belong in the undo receipt.
++        data["unreadAttempt"] = attempt;
++        store->save(task);
++    }
++    if (remaining->count()) {
++        _selectExactSource(session, path, validity);
++        _storeUnread(session, path, remaining, unread);
++        // UID STORE may report OK for copies that disappeared during the write.
++        observed = _readScopedUnread(session, path, validity, uids);
++    }
++
++    bool missing = false, unconfirmed = false;
++    auto & confirmed = data["unreadPlacements"];
++    for (auto entries = attempt.begin(); entries != attempt.end(); ++entries) {
++        for (const auto & proof : *entries) {
++            const auto flag = observed.find(proof["uid"].get<uint32_t>());
++            if (flag == observed.end()) missing = true;
++            else if (flag->second != unread) unconfirmed = true;
++            else confirmed[entries.key()].push_back(proof);
++        }
++    }
++    for (auto item : items) {
++        const auto flag = observed.find(item->placement.remoteUID);
++        if (flag == observed.end()) continue;
++        item->placement.unread = flag->second;
++        item->unreadConfirmed = true;
++    }
++    if (missing || unconfirmed) {
++        if (!confirmed.empty()) {
++            throw SyncException("flag-write-partial", "Only some flags were confirmed. Undo applies to those copies.", false);
++        }
++        if (missing) throw SyncException("flag-source-unavailable", "An expected copy is no longer available.", false);
++        throw SyncException("flag-write-unconfirmed", "The server did not confirm the requested flags.", false);
+     }
+ }
+ 
+@@ -643,12 +765,13 @@ static vector<PlacementMove> _movesForMessage(MailStore * store, Message * msg,
+         }
+         // Gmail archive/inbox may only change the Inbox label in All Mail. Keep the
+         // existing placement in the task so both phases and undo still use one operation.
+-        if (data.count("gmailInbox")) {
++        if (data.count("gmailInbox") && !data.value("exactPlacementUndo", false)) {
+             moves.push_back({p, dest});
+             continue;
+         }
+         if (data.value("exactPlacementUndo", false)) {
+-            if (p.folderId != dest && matches(p.folderId) && p.pendingFolderId.empty()) {
++            const bool inSource = sources.empty() ? matches(p.folderId) : sources.count(p.folderId) > 0;
++            if (p.folderId != dest && inSource && p.pendingFolderId.empty()) {
+                 moves.push_back({p, dest});
+             }
+             continue;
+@@ -696,10 +819,13 @@ static vector<PlacementMove> _exactSourceMoves(Message * msg, const vector<Place
+ void _applyFolder(MailStore * store, Message * msg, const vector<Placement> & placements, json & data) {
+     // Verify the physical source on the server before showing any exact undo move.
+     const bool exact = data.value("exactPlacementUndo", false);
+-    if (exact && data.count("restorePlacements")) return;
++    const bool exactRestore = exact && data.count("restorePlacements");
+     json shownIn = json::array();
+     bool gmail = data.count("gmailInbox");
+     if (gmail) {
++        if (exact && placements.size() != 1) {
++            throw SyncException("exact-move-source-unavailable", "The Gmail copy is not uniquely available.", false);
++        }
+         bool inbox = data["gmailInbox"].get<bool>();
+         if (data.count("restorePlacements")) {
+             // Only Inbox is changed by these actions. Preserve other labels added later.
+@@ -714,8 +840,9 @@ void _applyFolder(MailStore * store, Message * msg, const vector<Placement> & pl
+         if (inbox) labels.push_back("\\Inbox");
+         sort(labels.begin(), labels.end());
+         data["gmailLabels"][msg->id()] = labels;
+-        store->setPlacementLabels(*msg, labels);
++        if (!exact) store->setPlacementLabels(*msg, labels);
+     }
++    if (exactRestore) return;
+     auto moves = _movesForMessage(store, msg, placements, data);
+     if (exact) {
+         if (moves.empty()) {
+@@ -738,6 +865,7 @@ void _applyFolder(MailStore * store, Message * msg, const vector<Placement> & pl
+         if (gmail || move.placement.reportedFolderId() != move.destFolderId) {
+             json entry = {{"folderId", move.placement.reportedFolderId()}, {"bits", move.placement.flagBits()}};
+             if (gmail) entry["labels"] = move.placement.labels;
++            if (exact && gmail) entry["rowId"] = move.placement.rowid;
+             shownIn.push_back(entry);
+         }
+         const auto validity = _localFolderUIDValidity(store, msg->accountId(), move.placement.folderId);
+@@ -844,19 +972,33 @@ void _applyFolderMoveInIMAPFolder(IMAPSession * session, MailStore * store, stri
+             for (auto & label : labels) {
+                 // Sent/Drafts membership belongs to Gmail, not this organizer.
+                 if (label == "\\Sent" || label == "\\Draft" || label == "\\Drafts") continue;
++                if (exact && (label == "\\Spam" || label == "\\Trash")) continue;
+                 add->addObject(AS_MCSTR(label));
+             }
+             auto uids = IndexSet::indexSetWithIndex(item->movedUID);
+             ErrorCode error = ErrorNone;
+             if (add->count()) {
++                if (exact) _selectExactSource(session, AS_MCSTR(dest->path()), item->movedUIDValidity);
+                 session->storeLabelsByUID(AS_MCSTR(dest->path()), uids, IMAPStoreFlagsRequestKindAdd, add, &error);
+                 if (error != ErrorNone) throw SyncException(error, "Preserve Gmail labels after move");
+             }
+             if (std::find(labels.begin(), labels.end(), "\\Inbox") == labels.end()) {
++                if (exact) _selectExactSource(session, AS_MCSTR(dest->path()), item->movedUIDValidity);
+                 session->storeLabelsByUID(AS_MCSTR(dest->path()), uids, IMAPStoreFlagsRequestKindRemove,
+                                          Array::arrayWithObject(AS_MCSTR(string("\\Inbox"))), &error);
+                 if (error != ErrorNone) throw SyncException(error, "Remove Gmail Inbox label");
+             }
++            if (exact) {
++                auto path = AS_MCSTR(dest->path());
++                _selectExactSource(session, path, item->movedUIDValidity);
++                auto fetched = session->fetchMessagesByUID(path, IMAPMessagesRequestKindGmailLabels, uids, nullptr, &error);
++                if (error != ErrorCode::ErrorNone) throw SyncException(error, "Read labels after exact Gmail move");
++                if (!fetched || fetched->count() != 1) {
++                    throw SyncException("exact-move-unconfirmed", "The server did not confirm the destination labels.", false);
++                }
++                auto message = static_cast<IMAPMessage *>(fetched->objectAtIndex(0));
++                item->movedLabels = MessageAttributesForMessage(message).labels;
++            }
+         }
+     }
+ }
+@@ -1014,8 +1156,9 @@ void TaskProcessor::performLocal(Task * task) {
+ 
+     // An ingress retry must not overwrite a queued/completed operation. The
+     // durable send ledger also survives the normal Task history cleanup.
++    const bool scopedUnread = cname == "ChangeUnreadTask" && !_unreadSource(task->data()).empty();
+     const auto writesTaskReceipt = cname == "SendDraftTask" || cname == "MoveDraftTask" ||
+-        cname == "DestroyDraftRevisionTask";
++        cname == "DestroyDraftRevisionTask" || scopedUnread;
+     if (writesTaskReceipt) {
+         auto prior = store->find<Task>(Query().equal("id", task->id()));
+         if (prior) {
+@@ -1036,7 +1179,12 @@ void TaskProcessor::performLocal(Task * task) {
+         }
+ 
+         if (cname == "ChangeUnreadTask") {
++            if (scopedUnread) {
++                task->data().erase("unreadAttempt");
++                task->data()["unreadPlacements"] = json::object();
++            }
+             performLocalChangeOnMessages(task, _applyUnread);
++            if (scopedUnread) return;
+             
+         } else if (cname == "ChangeStarredTask") {
+             performLocalChangeOnMessages(task, _applyStarred);
+@@ -1167,6 +1315,7 @@ void TaskProcessor::performLocal(Task * task) {
+ 
+ void TaskProcessor::performRemote(Task * task) {
+     string cname = task->constructorName();
++    const bool scopedUnread = cname == "ChangeUnreadTask" && !_unreadSource(task->data()).empty();
+ 
+     logger->info("[{}] Running {} performRemote:", task->id(), cname);
+     
+@@ -1187,11 +1336,16 @@ void TaskProcessor::performRemote(Task * task) {
+             // Recovery still has to report acceptance or uncertainty, not cancellation.
+             task->data().erase("should_cancel");
+         }
++        if (scopedUnread && task->data().contains("unreadAttempt")) {
++            // A previously attempted STORE may already have taken effect.
++            task->data().erase("should_cancel");
++        }
+         if (task->shouldCancel()) {
+             task->setStatus("cancelled");
+         } else {
+             if (cname == "ChangeUnreadTask") {
+                 performRemoteChangeOnMessages(task, false, _applyUnreadInIMAPFolder);
++                if (scopedUnread) return; // Receipt and local flags committed together.
+                 
+             } else if (cname == "ChangeStarredTask") {
+                 performRemoteChangeOnMessages(task, false, _applyStarredInIMAPFolder);
+@@ -1280,6 +1434,7 @@ void TaskProcessor::performRemote(Task * task) {
+         task->setError(SyncException(ex.key, ex.what(), false).toJSON());
+         task->setStatus("complete");
+     } catch (SyncException & ex) {
++        if (scopedUnread && ex.isOffline()) throw; // Reconnect before continuing the queue.
+         logger->error("[{}] -- Failed ({}). Changing status to `complete`", task->id(), ex.toJSON().dump());
+         logger->flush();
+         task->setError(ex.toJSON());
+@@ -1415,6 +1570,14 @@ void TaskProcessor::performLocalChangeOnMessages(Task * task, LocalChangeFn modi
+         (models.messages.empty() || (data.count("messageIds") && models.messages.size() != data["messageIds"].size()))) {
+         throw SyncException("exact-move-source-unavailable", "An expected archive message is no longer available.", false);
+     }
++    const bool scopedUnread = modifyLocalMessage == _applyUnread && !_unreadSource(data).empty();
++    if (scopedUnread && data.contains("restoreUnreadPlacements")) {
++        for (const auto & expected : data["restoreUnreadPlacements"].items()) {
++            if (std::none_of(models.messages.begin(), models.messages.end(), [&](const shared_ptr<Message> & msg) {
++                return !msg->isDraft() && msg->id() == expected.key();
++            })) throw SyncException("flag-source-unavailable", "The message to undo is no longer available.", false);
++        }
++    }
+ 
+     for (auto msg : models.messages) {
+         // TEMPORARY
+@@ -1463,7 +1626,7 @@ void TaskProcessor::performLocalChangeOnMessages(Task * task, LocalChangeFn modi
+     }
+     // END TEMPORARY
+ 
+-    if (modifyLocalMessage == _applyFolder) {
++    if (modifyLocalMessage == _applyFolder || scopedUnread) {
+         task->setStatus("remote");
+         store->save(task);
+     }
+@@ -1538,7 +1701,13 @@ static PlacementHistory _laterMoveHistory(MailStore * store, const vector<json>
+             const auto ids = move.find(threads ? "threadIds" : "messageIds");
+             const auto id = threads ? msg.threadId() : msg.id();
+             if (ids != move.end() && std::find(ids->begin(), ids->end(), json(id)) != ids->end()) {
++                const bool scoped = kind == "ChangeUnreadTask" && !_unreadSource(move).empty();
++                const auto proof = scoped ? move.value("unreadPlacements", json::object()).value(msg.id(), json::array())
++                    : json::array();
+                 for (auto & copy : copies) {
++                    if (scoped && std::none_of(proof.begin(), proof.end(), [&](const json & candidate) {
++                        return _sameUnreadCopy(copy, candidate);
++                    })) continue;
+                     if (kind == "ChangeUnreadTask") copy.unread = move["unread"].get<bool>();
+                     else copy.starred = move["starred"].get<bool>();
+                 }
+@@ -1789,6 +1958,13 @@ void TaskProcessor::performRemoteChangeOnMessages(Task * task, bool isMove, Remo
+     const bool exact = isMove && data.value("exactPlacementUndo", false);
+     const bool exactRestore = exact && data.count("restorePlacements");
+     const auto recovered = isMove ? data.value("recoveredMoveCopies", json::object()) : json::object();
++    const auto flagSource = applyInFolder == _applyUnreadInIMAPFolder ? _unreadSource(data) : string();
++    const bool resumingUnread = !flagSource.empty() && data.contains("unreadAttempt");
++    // Copies already in the requested state when STORE was planned are outside
++    // the write and undo scope, even if they change or disappear during recovery.
++    const auto flags = flagSource.empty() ? json::object()
++        : data.value(resumingUnread ? "unreadAttempt" : "unreadPlacements", json::object());
++    if (!flagSource.empty()) data["unreadPlacements"] = json::object();
+     bool incompleteHistory = false;
+     for (auto plan = recovered.begin(); plan != recovered.end(); ++plan) {
+         incompleteHistory |= plan->value("incomplete", false) ||
+@@ -1843,6 +2019,18 @@ void TaskProcessor::performRemoteChangeOnMessages(Task * task, bool isMove, Remo
+                 ++selected;
+             }
+             if (plan != recovered.end() && selected != (*plan)["copies"].size()) incompleteHistory = true;
++        } else if (!flagSource.empty()) {
++            if (!flags.contains(msg->id())) continue;
++            for (const auto & proof : flags[msg->id()]) {
++                const auto uidValidity = proof.value("uidValidity", 0U);
++                const auto placement = std::find_if(placements.begin(), placements.end(), [&](const Placement & copy) {
++                    return copy.folderId == flagSource && _sameUnreadCopy(copy, proof);
++                });
++                if (uidValidity && placement != placements.end()) {
++                    items.push_back(TaskPlacement{msg, *placement, ""});
++                    items.back().unreadSourceValidity = uidValidity;
++                }
++            }
+         } else {
+             for (auto & p : placements) {
+                 if (p.remoteUID > 0) {
+@@ -1859,7 +2047,15 @@ void TaskProcessor::performRemoteChangeOnMessages(Task * task, bool isMove, Remo
+         itemsByMessage[item.message->id()].push_back(&item);
+     }
+     std::exception_ptr failure = nullptr;
+-    if (items.empty() && incompleteHistory) {
++    if (!flagSource.empty()) {
++        size_t expected = 0;
++        for (const auto & entries : flags) expected += entries.size();
++        if ((!resumingUnread && items.size() != expected) ||
++            (expected && (items.empty() || !store->folderById(account->id(), flagSource)))) {
++            failure = std::make_exception_ptr(SyncException(
++                "flag-source-unavailable", "An expected copy is no longer in the source mailbox.", false));
++        }
++    } else if (items.empty() && incompleteHistory) {
+         failure = historyUnavailable();
+     } else if (exact) {
+         size_t expected = 0;
+@@ -1885,6 +2081,15 @@ void TaskProcessor::performRemoteChangeOnMessages(Task * task, bool isMove, Remo
+             logger->warn("-- {} copies are in a folder ({}) that no longer exists, skipping", pair.second.size(), pair.first);
+             continue;
+         }
++        if (!flagSource.empty()) {
++            try {
++                _applyScopedUnreadInIMAPFolder(session, store, *folder, pair.second, task);
++            } catch (SyncException & ex) {
++                if (ex.isOffline()) throw;
++                failure = std::current_exception();
++            }
++            break;
++        }
+         try {
+             vector<TaskPlacement *> ordinary;
+             for (auto item : pair.second) {
+@@ -1949,11 +2154,15 @@ void TaskProcessor::performRemoteChangeOnMessages(Task * task, bool isMove, Remo
+         map<string, json> recoveredTasks;
+         
+         vector<string> displacedIds;
++        const auto flagValidity = flagSource.empty() ? 0U : _localFolderUIDValidity(store, task->accountId(), flagSource);
+         for (auto safe : safeMessages) {
+             json before = _clientVisibleState(*safe);
+             auto rows = store->placementsForMessage(safe->id());
+             const auto plan = recovered.find(safe->id());
+             for (auto item : itemsByMessage[safe->id()]) {
++                if (item->unreadConfirmed && flagValidity == item->unreadSourceValidity) {
++                    store->setPlacementUnread(*safe, item->placement.unread, item->placement);
++                }
+                 if (failure && !item->moved && !item->destFolderId.empty()) {
+                     if (!rollingBackExactMove && plan == recovered.end()) {
+                         store->abandonPlacementMove(*safe, item->placement.folderId, item->placement.remoteUID, item->destFolderId);
+@@ -2066,9 +2275,26 @@ void TaskProcessor::performRemoteChangeOnMessages(Task * task, bool isMove, Remo
+         if (!clientVisibleChange) {
+             store->unsafeEraseTransactionDeltas();
+         }
++        if (!flagSource.empty()) {
++            if (failure) {
++                try {
++                    std::rethrow_exception(failure);
++                } catch (SyncException & ex) {
++                    task->setError(ex.toJSON());
++                }
++            }
++            data.erase("unreadAttempt");
++            task->setStatus("complete");
++            store->save(task);
++        }
+         transaction.commit();
+     }
+ 
++    if (!flagSource.empty()) {
++        // Let the normal sync reconcile copies that are outside the resumed write.
++        if (resumingUnread || failure) _rescanFolder(store, account->id(), flagSource);
++        return;
++    }
+     if (failure) {
+         if (exact || !recovered.empty()) {
+             set<string> affectedFolders;
+@@ -2105,11 +2331,20 @@ void TaskProcessor::performRemoteChangeOnMessages(Task * task, bool isMove, Remo
+             if (!previous.count(group.first) || previous[group.first].size() != group.second.size()) return;
+             for (auto item : group.second) {
+                 if (!item->moved || !item->movedUIDValidity) return;
+-                recorded[group.first].push_back({
++                json entry = {
+                     {"folderId", item->placement.folderId}, {"bits", item->placement.flagBits()},
+                     {"movedFolderId", item->destFolderId}, {"movedUID", item->movedUID},
+                     {"movedUIDValidity", item->movedUIDValidity},
+-                });
++                };
++                if (data.count("gmailInbox")) {
++                    const auto & originals = previous[group.first];
++                    auto original = std::find_if(originals.begin(), originals.end(), [&](const json & copy) {
++                        return copy["rowId"] == item->placement.rowid;
++                    });
++                    if (original == originals.end()) return;
++                    entry["labels"] = (*original)["labels"];
++                }
++                recorded[group.first].push_back(entry);
+             }
+         }
+         data["undoPlacements"] = recorded;
+@@ -2128,6 +2363,11 @@ string TaskProcessor::confirmPlacementChange(Message & msg, TaskPlacement & item
+         return "";
+     }
+     auto & p = item.placement;
++    auto confirmLabels = [&] {
++        if (item.movedLabels.is_array()) {
++            store->setPlacementLabels(msg, item.movedLabels.get<vector<string>>(), item.destFolderId, item.movedUID);
++        }
++    };
+     const Placement * current = nullptr;
+     for (auto & r : rows) {
+         if (r.folderId == p.folderId && r.remoteUID == p.remoteUID &&
+@@ -2137,11 +2377,13 @@ string TaskProcessor::confirmPlacementChange(Message & msg, TaskPlacement & item
+         }
+     }
+     if (current == nullptr) {
++        confirmLabels();
+         logger->warn("-- Message {} no longer has a placement at ({}, {}); leaving its move to be re-derived", msg.id(), p.folderId, p.remoteUID);
+         return "";
+     }
+     string laterPending = current->pendingFolderId;
+     string displaced = store->commitPlacementMove(msg, p.folderId, p.remoteUID, item.destFolderId, item.movedUID);
++    confirmLabels();
+     if (!laterPending.empty() && laterPending != item.destFolderId) {
+         store->beginPlacementMove(msg, item.destFolderId, item.movedUID, laterPending);
+     }
+diff --git a/MailSync/TaskProcessor.hpp b/MailSync/TaskProcessor.hpp
+index e4b6df6354fedae910eda61dc409c26ab2138775..310faf25e09b0c8cac1d3ee231facec0327a3bef 100644
+--- a/MailSync/TaskProcessor.hpp
++++ b/MailSync/TaskProcessor.hpp
+@@ -45,6 +45,9 @@ struct TaskPlacement {
+     uint32_t movedUID = 0;
+     uint32_t movedUIDValidity = 0;
+     uint32_t recoveredSourceValidity = 0;
++    json movedLabels;
++    uint32_t unreadSourceValidity = 0;
++    bool unreadConfirmed = false;
+ };
+ 
+ // The local variant runs inside a transaction with the message's placements in hand;
+diff --git a/test/fakeimap/store.py b/test/fakeimap/store.py
+index 7d93611304414cb3d46379f34706a86bc3be9e47..4ea16f936c367f5c8202aa44cc630b452712aeb7 100644
+--- a/test/fakeimap/store.py
++++ b/test/fakeimap/store.py
+@@ -625,10 +625,11 @@ class GmailStore(Store):
+                     pairs.append((s.view_uid(m) if isinstance(s, LabelView) else m.uid, d.view_uid(m)))
+             elif d.name == "[Gmail]/All Mail":
+                 for m in msgs:
++                    src_uid = s.view_uid(m) if isinstance(s, LabelView) else m.uid
+                     if self._physical(s) is not d:
+                         self._move_physical(self._physical(s), [m], d, origin)
+                         m = d.gm_index[m.gm_msgid]
+-                    pairs.append((m.uid, m.uid))
++                    pairs.append((src_uid, m.uid))
+             else:  # Trash or Spam: a physical move
+                 for m in msgs:
+                     src_uid = s.view_uid(m) if isinstance(s, LabelView) else m.uid

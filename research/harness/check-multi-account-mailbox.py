@@ -22,6 +22,7 @@ from harness.mailgen import message
 from fakeimap.personalities import personality
 work=Path(tempfile.mkdtemp(prefix='multi-mailbox-',dir=upstream.parent))
 archive_phase=os.environ.get('PAPER_REED_ARCHIVE_PAGE_CHECK', '')
+spam_phase=os.environ.get('PAPER_REED_SPAM_PAGE_CHECK', '')
 ordinary = personality('dovecot').without('MOVE') if archive_phase.startswith('copy') else 'dovecot'
 servers=[FakeServer('gmail',smtp=True,email='account0@example.test'),FakeServer(ordinary,smtp=True,email='account1@example.test')]
 run=None
@@ -82,7 +83,9 @@ def arm_archive_rebuild(server):
 try:
     accounts=[]
     for i,server in enumerate(servers):
-        server.append('INBOX',message(1,subject='Shared subject',message_id='<same-message@example.test>'))
+        inbox_flags = [] if spam_phase == 'review-search-reader' and i == 1 else ['\\Seen']
+        server.append('INBOX', message(1, subject='Shared subject', message_id='<same-message@example.test>'),
+                      flags=inbox_flags)
         if i==0:
             server.create_mailbox('Projects')
             server.store.set_labels('[Gmail]/All Mail',[1],'add',['Projects'])
@@ -98,6 +101,20 @@ try:
                           in_reply_to='<same-message@example.test>', references=['<same-message@example.test>']))
             server.append(sent_folder, message(4, subject='Sent only',
                           message_id='<sent-only@example.test>'))
+        if spam_phase:
+            raw=message(5, subject='Message to review', message_id=f'<spam-review-{i}@example.test>')
+            spam_flags = [] if spam_phase == 'review-reader' and i == 1 else ['\\Seen']
+            spam_uid = server.append('[Gmail]/Spam' if i == 0 else 'Junk', raw, flags=spam_flags)
+            if i == 1:
+                server.append('Archive', raw, flags=['\\Flagged'])
+                if spam_phase == 'review-partial-flags':
+                    server.append('Junk', raw, flags=spam_flags)
+                    server.at('before_command', lambda _, uid=spam_uid: server.expunge('Junk', [uid]),
+                              command=r'UID STORE ', mailbox='Junk')
+                if spam_phase == 'review-pagination':
+                    for index in range(100):
+                        server.append('Junk', message(20 + index, subject=f'Junk fixture {index}',
+                                      message_id=f'<junk-page-{index}@example.test>'), flags=['\\Seen'])
         server.start()
         accounts.append(account_json(**server.account_kwargs(),account_id=f'c-mixed-{i}'))
     (work/'accounts.json').write_text(json.dumps(accounts))
@@ -195,5 +212,11 @@ finally:
                     if direction == 'C' and any(command in line.upper() for command in
                         (' SELECT ', ' UID MOVE ', ' UID COPY ', ' UID STORE ', ' UID EXPUNGE '))]
         (work/'archive-source-commands.log').write_text('\n'.join(commands)+'\n')
+    if spam_phase:
+        for i, server in enumerate(servers):
+            commands = [line for _, _, direction, line in server.imap.transcript
+                        if direction == 'C' and any(op in line.upper() for op in
+                            (' UID MOVE ', ' UID COPY ', ' UID STORE ', ' UID EXPUNGE '))]
+            (work/f'spam-commands-{i}.log').write_text('\n'.join(commands)+'\n')
     for s in servers:s.stop()
     print('Artifacts:',work)
