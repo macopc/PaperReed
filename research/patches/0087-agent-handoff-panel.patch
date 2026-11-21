@@ -1,0 +1,551 @@
+diff --git a/app/internal_packages/composer/lib/composer-view.tsx b/app/internal_packages/composer/lib/composer-view.tsx
+index 61ce50f4325908c2650adc852a6b07a97a62e097..1e723bca665815a1e95f5809229d0306907a8ad7 100644
+--- a/app/internal_packages/composer/lib/composer-view.tsx
++++ b/app/internal_packages/composer/lib/composer-view.tsx
+@@ -1,5 +1,5 @@
+ import { clipboard } from '@electron/remote';
+-import { agentHandoff, cliStatus } from '../../mcp-server/lib/paper-reed-cli';
++import { agentHandoff, cliStatus, prepareDraftHandoff } from '../../mcp-server/lib/paper-reed-cli';
+ import TemplatePicker from '../../composer-templates/lib/template-picker';
+ import PaperReedDraftStatus from '../../paper-reed/lib/draft-status';
+ import React from 'react';
+@@ -45,6 +45,7 @@ interface ComposerViewProps {
+   className?: string;
+   children?: React.ReactNode;
+   workspace?: boolean;
++  onAgentHandoff?: () => void;
+ }
+ interface ComposerViewState {
+   quotedTextHidden: boolean;
+@@ -530,28 +531,25 @@ export default class ComposerView extends React.Component<ComposerViewProps, Com
+   };
+ 
+   copyForAgent = async () => {
++    const { session } = this.props;
+     try {
+-      await AttachmentStore.waitForDraftAttachments(this.props.session.headerMessageId, this.props.session.accountId);
+-      await this.props.session.changes.commit();
+-      if (this.props.session.changes.isDirty()) throw new Error('new-edits');
++      await AttachmentStore.waitForDraftAttachments(session.headerMessageId, session.accountId);
++      await session.changes.commit();
++      if (session.changes.isDirty() || !this._mounted || this.props.session !== session) throw new Error('new-edits');
+       if (!cliStatus().ready) {
+         Actions.switchPreferencesTab('MCP');
+         Actions.openPreferences();
+         return;
+       }
+-      const draft = this.props.session.draft();
+-      await clipboard.writeText(
+-        agentHandoff({
+-          scope: 'draft',
+-          accountId: draft.accountId,
+-          draftId: draft.headerMessageId,
+-          revision: draft.version,
+-        })
+-      );
++      const prepared = await prepareDraftHandoff(session);
++      if (!prepared || !this._mounted || this.props.session !== session || !prepared.isCurrent()) {
++        throw new Error('draft-handoff-unavailable');
++      }
++      await clipboard.writeText(agentHandoff(prepared.context));
+       if (this._mounted)
+         this.setState({ agentNotice: '已复制草稿引用和 CLI 指令，可粘贴到 Agent 会话。' });
+     } catch {
+-      if (this._mounted) this.setState({ agentNotice: '尚未交接。请先处理草稿保存状态，再重试。' });
++      if (this._mounted) this.setState({ agentNotice: '尚未交接。请核对草稿保存状态和 Agent 读取权限，再重试。' });
+     }
+   };
+ 
+@@ -588,8 +586,8 @@ export default class ComposerView extends React.Component<ComposerViewProps, Com
+             draft={this.props.draft}
+           />
+           <span className="pr-action-space" />
+-          <button type="button" className="pr-copy-agent" onClick={this.copyForAgent}>
+-            {cliStatus().ready ? '复制给 Agent' : '连接 Agent'}
++          <button type="button" className="pr-copy-agent" onClick={this.props.onAgentHandoff || this.copyForAgent}>
++            {cliStatus().ready ? this.props.onAgentHandoff ? '交给 Agent' : '复制给 Agent' : '连接 Agent'}
+           </button>
+           {!this.props.workspace && send}
+           <details className="pr-compose-more">
+diff --git a/app/internal_packages/mcp-server/bin/install.cjs b/app/internal_packages/mcp-server/bin/install.cjs
+index dba9fe8ccb370ab05bccc8382bae285269a14fbc..d4f438ca8f039a551eff41c52c038e5a5b395c9e 100644
+--- a/app/internal_packages/mcp-server/bin/install.cjs
++++ b/app/internal_packages/mcp-server/bin/install.cjs
+@@ -179,7 +179,7 @@ function handoff(p, context) {
+     ];
+   else if (context.scope === 'thread')
+     reads = [invoke('thread-get', { threadId: context.threadId })];
+-  else if (context.localView && context.mailbox !== 'drafts')
++  else if (context.localView && (context.mailbox !== 'drafts' || typeof context.localView.query === 'string'))
+     reads = (context.accountIds || []).map((accountId) =>
+       invoke('local-list', { accountId, ...context.localView, limit: 25 })
+     );
+diff --git a/app/internal_packages/mcp-server/lib/paper-reed-cli.ts b/app/internal_packages/mcp-server/lib/paper-reed-cli.ts
+index bf327f73e6ebfaa47375253f04e2a595e6c23744..f4c9d2424c8d2e7ccf34beb599a9ac45cae515cf 100644
+--- a/app/internal_packages/mcp-server/lib/paper-reed-cli.ts
++++ b/app/internal_packages/mcp-server/lib/paper-reed-cli.ts
+@@ -1,3 +1,7 @@
++import { AccountStore, DatabaseStore, DraftStore, Message } from 'mailspring-exports';
++import type { DraftEditingSession } from 'mailspring-exports';
++import { isMessageAllowed, isMessageVisible, mcpGrant } from './mcp-access-control';
++
+ const installer = require('../bin/install.cjs');
+ export function cliPaths() {
+   return installer.paths({
+@@ -32,3 +36,24 @@ export function agentHandoff(context: Record<string, unknown>) {
+   if (!cliStatus().ready) throw new Error('请先在 Agent 设置中安装 CLI 或更新连接。');
+   return installer.handoff(cliPaths(), context);
+ }
++
++export async function prepareDraftHandoff(session: DraftEditingSession) {
++  const draft = session.draft();
++  if (!draft) return null;
++  const { id, accountId, headerMessageId, version } = draft;
++  const grant = JSON.stringify(mcpGrant());
++  const isCurrent = () => {
++    const current = session.draft();
++    return current?.id === id && current.accountId === accountId &&
++      current.headerMessageId === headerMessageId && current.version === version &&
++      AccountStore.accountIds().includes(accountId) && AppEnv.config.get('core.mcp.enabled') &&
++      JSON.stringify(mcpGrant()) === grant && isMessageAllowed(current) &&
++      DraftStore.cachedDraftSession(headerMessageId, accountId) === session &&
++      !DraftStore.isSendingDraft(headerMessageId, accountId) &&
++      !DraftStore.hasUnsavedDraftWork(headerMessageId, accountId);
++  };
++  if (!isCurrent() || !(await isMessageVisible(draft))) return null;
++  const persisted = await DatabaseStore.findBy<Message>(Message, { id, accountId, headerMessageId, draft: true });
++  if (!persisted || persisted.version !== version || !isCurrent()) return null;
++  return { context: { scope: 'draft', accountId, draftId: headerMessageId, revision: version }, isCurrent };
++}
+diff --git a/app/internal_packages/paper-reed/lib/workspace.tsx b/app/internal_packages/paper-reed/lib/workspace.tsx
+index dd0fd289b90557516f8772fffdcbe47eb4985a86..4a13eaab2c44af23289197f3d906fdc4e1669d05 100644
+--- a/app/internal_packages/paper-reed/lib/workspace.tsx
++++ b/app/internal_packages/paper-reed/lib/workspace.tsx
+@@ -32,7 +32,8 @@ import { formatShortcut } from '../../../src/keymap-manager';
+ import { Folder } from '../../../src/flux/models/folder';
+ import MailSearch from './mail-search';
+ import CommandPanel, { MailCommand } from './command-panel';
+-import { agentHandoff, cliStatus } from '../../mcp-server/lib/paper-reed-cli';
++import { agentHandoff, cliStatus, prepareDraftHandoff } from '../../mcp-server/lib/paper-reed-cli';
++import { getAllowedAccountIds, isMessageAllowed, isThreadAllowed } from '../../mcp-server/lib/mcp-access-control';
+ import { clipboard } from '@electron/remote';
+ import {
+   AccountStore,
+@@ -56,7 +57,7 @@ import InflatesDraftClientId from '../../../src/decorators/inflates-draft-client
+ import DraftFactory from '../../../src/flux/stores/draft-factory';
+ import type { DraftAccountChange } from '../../../src/draft-identity';
+ 
+-const Composer = InflatesDraftClientId<{ workspace?: boolean }>(ComposerView);
++const Composer = InflatesDraftClientId<{ workspace?: boolean; onAgentHandoff?: () => void }>(ComposerView);
+ const folders = [
+   ['inbox', '收件箱'],
+   ['pinned', '置顶'],
+@@ -131,7 +132,7 @@ interface State {
+   more: boolean;
+   notice: string;
+   agent: boolean;
+-  copied: boolean;
++  agentReceipt?: { scope: string; status: 'copying' | 'copied' | 'failed' };
+   agentCopyCancelled?: boolean;
+   searchText: string;
+   searchPending?: boolean;
+@@ -157,7 +158,7 @@ interface State {
+ let lastLocation:
+   | Pick<
+       State,
+-      'folder' | 'accountId' | 'route' | 'selected' | 'query' | 'searchText' | 'unreadOnly' | 'labelManager'
++      'folder' | 'accountId' | 'route' | 'selected' | 'query' | 'searchText' | 'unreadOnly' | 'labelManager' | 'agent' | 'checked'
+     >
+   | undefined;
+ 
+@@ -238,7 +239,6 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     more: false,
+     notice: '',
+     agent: false,
+-    copied: false,
+     searchText: '',
+     searchVisit: 0,
+     query: '',
+@@ -263,6 +263,8 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   private main = React.createRef<HTMLElement>();
+   private labelManager = React.createRef<LabelManagerHandle>();
+   private labelManagerTrigger = React.createRef<HTMLButtonElement>();
++  private agentTrigger = React.createRef<HTMLButtonElement>();
++  private agentHeading = React.createRef<HTMLHeadingElement>();
+   private reader = React.createRef<HTMLElement>();
+   mounted = false;
+   refreshTimer: ReturnType<typeof setTimeout>;
+@@ -307,6 +309,9 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       }),
+     ];
+     this.unlisten.push(DraftStore.listen(() => this.forceUpdate()));
++    const grant = AppEnv.config.onDidChange('core.mcp', () => this.forceUpdate());
++    this.unlisten.push(() => grant.dispose());
++    if (this.state.agent) this.agentHeading.current?.focus();
+     this.unlisten.push(
+       Actions.draftDeliverySucceeded.listen(({ headerMessageId, accountId }) => {
+         const { selected } = this.state;
+@@ -389,8 +394,9 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     }
+   }
+   componentWillUnmount() {
+-    const { folder, accountId, route, selected, query, searchText, unreadOnly, labelManager } = this.state;
+-    lastLocation = { folder, accountId, route, selected, query, searchText, unreadOnly, labelManager };
++    const { folder, accountId, route, selected, query, searchText, unreadOnly, labelManager, agent, checked } = this.state;
++    lastLocation = { folder, accountId, route, selected, query, searchText, unreadOnly, labelManager,
++      agent, checked: agent ? checked : [] };
+ 
+     this.mounted = false;
+     if (activeWorkspace === this) activeWorkspace = null;
+@@ -718,7 +724,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       }
+     }
+   };
+-  move = async (next: () => void | boolean | Promise<void | boolean>) => {
++  move = async (next: () => void | boolean | Promise<void | boolean>, keepAgent = false) => {
+     const labelManager = this.labelManager.current;
+     if (this.moving || labelManager?.canLeave() === false) return false;
+     this.moving = true;
+@@ -735,7 +741,8 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+         this.setState({ notice: '保存期间又有新编辑，请完成编辑后再切换。' });
+         return false;
+       }
+-      this.setState({ notice: '', agent: false, copied: false });
++      if (keepAgent) this.setState({ notice: '' });
++      else this.setState({ notice: '', agent: false, agentReceipt: undefined });
+       saved = true;
+       return (await next()) !== false;
+     } catch (error) {
+@@ -902,58 +909,170 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       const { draft: persisted } = await DraftStore._finalizeAndPersistNewMessage(draft);
+       this.setState({ route: 'compose', selected: persisted });
+     });
+-  copyContext = () => {
+-    const listScope = this.state.route === 'list' ? this.listReadScope() : null;
+-    if (listScope && (this.isDraftList() || this.listActionsUnavailable())) return;
+-    const selection = () => JSON.stringify([...this.state.checked].sort());
+-    const requestedSelection = listScope && selection();
+-    return this.move(async () => {
+-      const { selected, route, folder } = this.state;
+-      if (listScope && (route !== 'list' || this.listActionsUnavailable() ||
+-          listScope !== this.listReadScope() || requestedSelection !== selection())) {
+-        this.setState({ agentCopyCancelled: true });
++  private agentAccounts(ids: string[]) {
++    return this.visibleAccounts(ids).map(account => account.emailAddress).join('、');
++  }
++
++  private agentRequest(): { label: string; accounts: string; context?: Record<string, unknown>; reason?: string } {
++    const { route, selected, folder, query, unreadOnly, checked, listRead, loading, labelManager } = this.state;
++    const enabled = AppEnv.config.get('core.mcp.enabled');
++    const disabled = '请在 Agent 连接设置中开启访问。';
++    const excluded = '当前范围包含 Agent 无权读取的邮件。请调整范围或检查连接设置。';
++    if (route !== 'list') {
++      const label = route === 'compose' ? '当前草稿' : '当前会话';
++      const accounts = this.agentAccounts(selected ? [selected.accountId] : []);
++      if (!enabled) return { label, accounts, reason: disabled };
++      if (!selected || !connectedAccountId(selected.accountId) ||
++          (route === 'compose' ? !isMessageAllowed(selected as Message) : !isThreadAllowed(selected as Thread))) {
++        return { label, accounts, reason: excluded };
++      }
++      const { accountId } = selected;
++      const context = selected instanceof Message
++        ? { scope: 'draft', accountId, draftId: selected.headerMessageId }
++        : { scope: 'thread', accountId, threadId: selected.id };
++      return { label, accounts, context };
++    }
++
++    const label = checked.length ? `已选 ${checked.length} 个会话` : query ? '搜索结果' : this.locationTitle();
++    const targets = this.selectedTargets();
++    const ids = checked.length ? [...new Set(targets.map(target => target.accountId))] : this.accountIds();
++    const accountIds = getAllowedAccountIds(ids);
++    const accounts = this.agentAccounts(accountIds);
++    if (!enabled) return { label, accounts, reason: disabled };
++    if (labelManager || this.isDraftList() || this.listActionsUnavailable() || loading ||
++        !listRead || listRead.failed || listRead.scope !== this.listReadScope()) {
++      return { label, accounts, reason: '请在当前邮件列表读取成功后复制。' };
++    }
++    if (!accountIds.length) return { label, accounts, reason: '当前没有可供 Agent 读取的邮箱。' };
++    if (checked.length) {
++      const selectedRows = this.state.rows.filter(
++        (row): row is Thread => row instanceof Thread && checked.includes(row.id)
++      );
++      if (targets.length !== checked.length || !selectedRows.every(row => connectedAccountId(row.accountId) && isThreadAllowed(row)))
++        return { label, accounts, reason: excluded };
++      return { label, accounts, context: { scope: 'selection', targets } };
++    }
++    const context = {
++      scope: 'mailbox',
++      accountIds,
++      mailbox: folder,
++      query: query || `in:${folder}${unreadOnly ? ' is:unread' : ''}`,
++      localView: query ? { query, unread: unreadOnly } : {
++        ...(['pinned', 'snoozed'].includes(folder) || folder.startsWith('label:') || folder.startsWith('category:')
++          ? { view: folder } : { folder }),
++        unread: unreadOnly,
++      },
++    };
++    return { label, accounts, context };
++  }
++
++  copyContext = async () => {
++    if (this.moving) return false;
++    if (!cliStatus().ready) {
++      if (!this.state.agent) this.toggleAgentPanel();
++      return false;
++    }
++    const { context } = this.agentRequest();
++    if (!context) return false;
++    const scope = JSON.stringify(context);
++    const wasOpen = this.state.agent;
++    this.setState({ agent: true, agentReceipt: { scope, status: 'copying' }, agentCopyCancelled: false },
++      () => { if (!wasOpen) this.agentHeading.current?.focus(); });
++    const current = () => this.mounted && scope === JSON.stringify(this.agentRequest().context);
++    let cancelled = false;
++    const copied = await this.move(async () => {
++      if (!current()) {
++        cancelled = true;
+         return false;
+       }
+-      let context: Record<string, unknown> = {
+-        scope: 'mailbox',
+-        accountIds: this.accountIds(),
+-        mailbox: folder,
+-      };
+-      if (route === 'list' && this.state.checked.length)
+-        context = { scope: 'selection', targets: this.selectedTargets() };
+-      else if (route === 'list')
+-        context = {
+-          ...context,
+-          query: this.state.query
+-            ? this.state.unreadOnly
+-              ? `(${this.state.query}) is:unread`
+-              : this.state.query
+-            : `in:${folder}${this.state.unreadOnly ? ' is:unread' : ''}`,
+-        };
+-      if (route === 'list' && !this.state.checked.length && !this.state.query)
+-        context.localView = {
+-          ...(['pinned', 'snoozed'].includes(folder) ||
+-          folder.startsWith('label:') ||
+-          folder.startsWith('category:')
+-            ? { view: folder }
+-            : { folder }),
+-          unread: this.state.unreadOnly,
+-        };
+-      if (route === 'compose' && selected instanceof Message) {
+-        const session = await DraftStore.sessionForClientId(selected.headerMessageId, selected.accountId);
+-        if (!session.draft() || this.state.selected !== selected || this.state.route !== route) return false;
+-        context = {
+-          scope: 'draft',
+-          accountId: session.draft().accountId,
+-          draftId: session.headerMessageId,
+-          revision: session.draft().version,
+-        };
+-      } else if (route === 'thread' && selected)
+-        context = { scope: 'thread', accountId: selected.accountId, threadId: selected.id };
+-      await clipboard.writeText(agentHandoff(context));
+-      this.setState({ agent: true, copied: true, agentCopyCancelled: false });
++      let request = context;
++      if (context.scope === 'draft') {
++        const draft = this.state.selected as Message;
++        const session = await DraftStore.sessionForClientId(draft.headerMessageId, draft.accountId);
++        const prepared = await prepareDraftHandoff(session);
++        if (!prepared || prepared.context.accountId !== context.accountId ||
++            prepared.context.draftId !== context.draftId || !current() || !prepared.isCurrent()) {
++          cancelled = true;
++          return false;
++        }
++        request = prepared.context;
++      }
++      try {
++        await clipboard.writeText(agentHandoff(request));
++        return true;
++      } catch {
++        return false;
++      }
++    }, true);
++    if (this.mounted) {
++      const changed = cancelled || !current();
++      this.setState({
++        agentReceipt: changed ? undefined : { scope, status: copied ? 'copied' : 'failed' },
++        agentCopyCancelled: changed,
++      });
++    }
++    return copied;
++  };
++
++  toggleAgentPanel = () => {
++    if (this.state.agentReceipt?.status === 'copying') return;
++    const closing = this.state.agent;
++    this.setState({ agent: !closing, agentReceipt: undefined, agentCopyCancelled: false }, () => {
++      if (!closing) this.agentHeading.current?.focus();
++      else if (this.state.route === 'compose')
++        this.main.current?.querySelector<HTMLElement>('.pr-editor .pr-copy-agent')?.focus();
++      else this.agentTrigger.current?.focus();
+     });
+   };
++
++  renderAgentPanel(ready: boolean) {
++    const { label, accounts, context, reason } = this.agentRequest();
++    const receipt = this.state.agentReceipt;
++    const status = receipt?.status === 'copying' || receipt?.scope === JSON.stringify(context)
++      ? receipt?.status : undefined;
++    const listing = context?.scope === 'mailbox';
++    const { selected } = this.state;
++    const shown = selected instanceof Message
++      ? DraftStore.cachedDraftSession(selected.headerMessageId, selected.accountId)?.draft() ?? selected
++      : selected;
++    return (
++      <section className="pr-agent-panel" aria-labelledby="pr-agent-title"
++        onKeyDown={(event) => {
++          keepNativeButtonActivation(event);
++          if (event.key === 'Escape') {
++            event.stopPropagation();
++            this.toggleAgentPanel();
++          }
++        }}>
++        <h2 id="pr-agent-title" ref={this.agentHeading} tabIndex={-1}>Agent 交接</h2>
++        <dl className="pr-agent-scope">
++          <div><dt>交接范围</dt><dd>{label}{listing && this.state.unreadOnly && ' · 仅未读'}</dd></div>
++          {accounts && <div><dt>邮箱</dt><dd>{accounts}</dd></div>}
++          {this.state.route !== 'list' && shown?.subject &&
++            <div><dt>主题</dt><dd>{shown.subject}</dd></div>}
++          {this.state.route === 'list' && !this.state.checked.length && this.state.query &&
++            <div><dt>关键词</dt><dd>{this.state.query}</dd></div>}
++        </dl>
++        {!ready ? <p>请在连接设置中安装 CLI 或更新连接。</p> :
++          !reason && <p>{listing ? '读取受授权范围限制，每个邮箱最多读取 25 封。' :
++            '复制邮件引用和读取指令，粘贴到你的 Agent 会话。'}</p>}
++        {reason && <p className="pr-agent-reason">{reason}</p>}
++        <div className="pr-agent-actions">
++          {ready && <button type="button" className="pr-agent-copy" aria-disabled={!context || status === 'copying'}
++            onClick={() => void this.copyContext()}>{status === 'copied' ? '再次复制' : '复制给 Agent'}</button>}
++          <button type="button" aria-disabled={status === 'copying'} onClick={this.agentPreferences}>
++            打开连接设置
++          </button>
++        </div>
++        {status === 'copying' && <p role="status">正在准备交接…</p>}
++        {status === 'copied' && <p className="pr-agent-success" role="status">已复制任务，可粘贴到 Agent 会话。</p>}
++        {status === 'failed' && <p className="pr-agent-reason" role="alert">未能复制任务，请重试。</p>}
++        {this.state.agentCopyCancelled && <p role="status">交接已取消。请核对当前范围和编辑状态后重试。</p>}
++        <small>任务说明包含读取命令，不包含令牌。发送前仍需确认。</small>
++      </section>
++    );
++  }
++
+   preferences = () =>
+     this.move(() => {
+       Actions.openPreferences();
+@@ -962,7 +1081,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     this.move(() => {
+       Actions.switchPreferencesTab('MCP');
+       Actions.openPreferences();
+-    });
++    }, true);
+   openLabelManagement = () =>
+     this.move(() => {
+       Actions.setFocus({ collection: 'thread', item: null });
+@@ -1200,7 +1319,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+         run: () => this.organize('inbox'),
+       })),
+       { id: 'paper-reed:settings', title: '打开设置', shortcutId: 'application:open-preferences', run: this.preferences },
+-      { id: 'paper-reed:agent', title: '交给 Agent', disabled: this.state.labelManager || (list && (!listReady || this.isDraftList())), run: this.copyContext },
++      { id: 'paper-reed:agent', title: '交给 Agent', disabled: !this.agentRequest().context, run: this.copyContext },
+     ];
+   };
+   renderLocalControls(targets = this.selectedTargets()) {
+@@ -1797,6 +1916,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     const [commandShortcut] = AppEnv.keymaps.getBindingsForCommand('paper-reed:commands');
+     const { route, folder, selected, rows, loading, agent } = this.state;
+     const managingLabels = route === 'list' && this.state.labelManager;
++    const cliReady = cliStatus().ready;
+     const accounts = this.visibleAccounts();
+     const failed = accounts.filter((a) => a.hasSyncStateError() || !OnlineStatusStore.isAccountOnline(a.id));
+     const listRead = this.state.listRead?.scope === this.listReadScope() ? this.state.listRead : null;
+@@ -1940,13 +2060,13 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+               {!draftList && (route !== 'compose' || agent) && (
+                 <button
+                   className="pr-agent-button"
++                  ref={this.agentTrigger}
+                   aria-expanded={agent}
+-                  onClick={() => this.setState({ agent: !agent, copied: false }, () => {
+-                    if (agent && route === 'compose')
+-                      document.querySelector<HTMLElement>('.pr-editor .pr-copy-agent')?.focus();
+-                  })}
++                  aria-disabled={this.state.agentReceipt?.status === 'copying'}
++                  onKeyDown={keepNativeButtonActivation}
++                  onClick={this.toggleAgentPanel}
+                 >
+-                  {agent ? '收起交接' : cliStatus().ready ? '交给 Agent ↗' : '连接 Agent ↗'}
++                  {agent ? '收起交接' : cliReady ? '交给 Agent ↗' : '连接 Agent ↗'}
+                 </button>
+               )}
+             </div>}
+@@ -1964,34 +2084,13 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                 <button onKeyDown={keepNativeButtonActivation} onClick={this.refresh}>重新读取</button>
+               </div>
+             )}
+-            {agent && !draftList && (
+-              <section className="pr-agent-panel" aria-label="Agent 交接">
+-                <strong>{cliStatus().ready ? '交给你的 Agent' : '先连接 CLI'}</strong>
+-                <p>
+-                  {cliStatus().ready
+-                    ? '复制当前邮件引用和 CLI 指令，粘贴到 Claude Code、Codex 或 OpenCode 会话。复制前会保存当前编辑。'
+-                    : '在连接设置中安装 CLI 并检查连接，再把当前任务交给 Agent。'}
+-                </p>
+-                <div>
+-                  <button disabled={searchUnavailable && cliStatus().ready}
+-                    onClick={cliStatus().ready ? this.copyContext : this.agentPreferences}>
+-                    {cliStatus().ready
+-                      ? this.state.copied
+-                        ? '已复制任务'
+-                        : '复制给 Agent'
+-                      : '安装与检查 CLI'}
+-                  </button>
+-                  <button onClick={this.agentPreferences}>打开连接设置</button>
+-                </div>
+-                <small>任务说明包含读取命令，不包含令牌。发送前仍需确认。</small>
+-              </section>
+-            )}
++            {agent && !draftList && this.renderAgentPanel(cliReady)}
+             {route === 'list' ? (
+               <>
+                 <MailSearch key={this.state.searchVisit} query={this.state.searchText}
+                   onSearch={this.search} onPending={this.onSearchPending} />
+                 {searchActive && this.renderSearchSummary(searchUnavailable, readFailed && !loading)}
+-                {this.state.agentCopyCancelled && (
++                {this.state.agentCopyCancelled && !agent && (
+                   <p className="pr-notice" role="status">交接已取消。核对当前结果后重新复制给 Agent。</p>
+                 )}
+                 {readBelowSearch && readFailed && !loading && !this.state.searchPending && (
+@@ -2127,7 +2226,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                     <p role="status">正在发送，请等待服务器确认…</p>
+                   ) : (
+                     <Composer workspace headerMessageId={selected.headerMessageId} accountId={selected.accountId}
+-                      onDraftUnavailable={this.backToList} onDraftReady={() => {}}>{back}</Composer>
++                      onAgentHandoff={this.toggleAgentPanel} onDraftUnavailable={this.backToList} onDraftReady={() => {}}>{back}</Composer>
+                   )}
+                 </div>
+               )
+diff --git a/app/internal_packages/paper-reed/styles/paper-reed.less b/app/internal_packages/paper-reed/styles/paper-reed.less
+index 1bf209436b896bb43d903c78566f6e679c5872a6..aa3242c29d4023e710e48d806d4df6d34937cb53 100644
+--- a/app/internal_packages/paper-reed/styles/paper-reed.less
++++ b/app/internal_packages/paper-reed/styles/paper-reed.less
+@@ -91,7 +91,17 @@
+   .pr-notice button { margin-left: 12px; }
+   .pr-pin-feedback[role=alert] { border-left-color: #9a433e; color: #9a433e; }
+   .pr-route-thread .pr-agent-panel, .pr-route-compose .pr-agent-panel { max-width: 640px; margin-inline: auto; }
+-  .pr-agent-panel strong { font-weight: 500; }
++  .pr-agent-panel h2 { margin: 0 0 10px; font-size: 15px; font-weight: 600; }
++  .pr-agent-panel h2:focus { outline: none; }
++  .pr-agent-scope { margin: 0 0 12px; padding-bottom: 8px; border-bottom: 1px solid var(--pr-line); }
++  .pr-agent-scope > div { display: grid; grid-template-columns: 72px minmax(0, 1fr); gap: 10px; padding: 3px 0; }
++  .pr-agent-scope dt { color: var(--pr-muted); }
++  .pr-agent-scope dd { margin: 0; min-width: 0; overflow-wrap: anywhere; }
++  .pr-agent-actions { display: flex; flex-wrap: wrap; gap: 8px; margin-top: 10px; }
++  .pr-agent-actions .pr-agent-copy { background: var(--pr-reed); color: #fffefa; }
++  .pr-agent-panel button[aria-disabled=true] { opacity: .5; cursor: default; }
++  .pr-agent-panel .pr-agent-reason { color: #9a433e; }
++  .pr-agent-panel .pr-agent-success { color: var(--pr-reed); }
+   .pr-agent-panel p { margin: 6px 0 8px; color: var(--pr-muted); }
+   .pr-agent-panel small { display: block; margin-top: 8px; color: var(--pr-muted); }
+   .pr-editor, .pr-reader { max-width: 640px; margin: 28px auto 0; }

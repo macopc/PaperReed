@@ -6,7 +6,7 @@ const account=JSON.parse(fs.readFileSync(path.join(work,'account.json')));
 const draftUpgradeSource=process.env.PAPER_REED_DRAFT_UPGRADE_SOURCE;
 const secondAccount=['identity','account-move-workspace','account-move-popout','account-move-collision','account-move-agent',
  'account-move-stale','account-move-attachments','account-move-dirty-popout','account-move-provenance','account-move-roundtrip-delete','account-move-picker-popout','account-move-original-provenance','draft-upgrade-provenance','draft-upgrade-duplicate-provenance']
- .includes(process.env.PAPER_REED_DRAFT_LIST_CHECK) || ['scope','removal','removal-reader','removal-all'].includes(process.env.PAPER_REED_SENT_PAGE_CHECK)
+ .includes(process.env.PAPER_REED_DRAFT_LIST_CHECK) || ['scope','removal','removal-reader','removal-all'].includes(process.env.PAPER_REED_SENT_PAGE_CHECK) || !!process.env.PAPER_REED_AGENT_PAGE_CHECK
  ? {...account,id:'c0ffee-draft-identity-b',emailAddress:'other@example.test',name:'Second fixture account'}
  : null;
 const accounts=secondAccount ? [account,secondAccount] : [account];
@@ -61,6 +61,10 @@ async function startDesktop(build=upstream){
    return;
  }
  if(mode==='workspace') {
+   if (process.env.PAPER_REED_AGENT_PAGE_CHECK) {
+     await require('./check-agent-page.cjs')({main,cdp,evaluate,until,account,secondAccount,cli});
+     return;
+   }
    if (process.env.PAPER_REED_LABEL_PAGE_CHECK) {
      await require('./check-label-page.cjs')({main,cdp,evaluate,until,account,cli});
      return;
