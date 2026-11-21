@@ -180,21 +180,28 @@ module.exports=async({app,main,cdp,work,account,cli,click,evaluate,until,restart
  await action('[data-mailbox="drafts"]');
  await action(`[data-draft-id="${created.draftId}"]`);
  await until(()=>evaluate(cdp,'!!document.querySelector(".pr-editor [contenteditable=true]")'),'original restored');
- await edit('Unsaved edit before Agent setup');
+ const restoredEditor=main.locator('.pr-editor [contenteditable=true]');
+ const selectDraftBody=async (body) => {
+   await restoredEditor.click();
+   await until(async()=>{
+     await restoredEditor.press('Meta+A');
+     return evaluate(cdp,`(()=>{
+       const editor=document.querySelector('.pr-editor [contenteditable=true]');
+       const selection=getSelection();
+       return editor===document.activeElement && editor.contains(selection.anchorNode) &&
+         selection.toString().trim()===${JSON.stringify(body)};
+     })()`);
+   },'editor has selected the previous body',5000);
+ };
+ await selectDraftBody('CLI newer version');
+ await main.keyboard.insertText('Unsaved edit before Agent setup');
+ assert.equal((await restoredEditor.innerText()).trim(),'Unsaved edit before Agent setup');
  const firstAgentAction=main.getByRole('button',{name:'连接 Agent',exact:true});
  await firstAgentAction.click();
  await until(()=>evaluate(cdp,'!document.querySelector(".pr-workspace")'),'unsaved draft saved and Agent preferences opened');
  assert((await cli('draft-get',ref)).body.includes('Unsaved edit before Agent setup'));
  await evaluate(cdp,'require("mailspring-exports").Actions.selectRootSheet(require("mailspring-exports").WorkspaceStore.Sheet.Threads);true');
- const restoredEditor=main.locator('.pr-editor [contenteditable=true]');
- await restoredEditor.click();
- await restoredEditor.press('Meta+A');
- await until(()=>evaluate(cdp,`(()=>{
-   const editor=document.querySelector('.pr-editor [contenteditable=true]');
-   const selection=getSelection();
-   return editor===document.activeElement && editor.contains(selection.anchorNode) &&
-     selection.toString().trim()==='Unsaved edit before Agent setup';
- })()`),'restored editor has selected the previous body',5000);
+ await selectDraftBody('Unsaved edit before Agent setup');
  await evaluate(cdp,`(() => {
    const editor = document.querySelector('.pr-editor [contenteditable=true]');
    window.restoredTextInput = [];

@@ -34,7 +34,6 @@ module.exports = async ({ main, cdp, evaluate, until, account }) => {
     while (fiber && !fiber.stateNode?.refreshOperations) fiber = fiber.return;
     window.ws = fiber.stateNode;
     const mail = require('../src/services/mail-core/inbox');
-    const queryInbox = mail.queryInbox;
     window.searchProbe = { calls: [], holds: new Map(), active: new Map(), fail: null };
     const refresh = ws.refresh;
     ws.refresh = async () => {
@@ -47,9 +46,9 @@ module.exports = async ({ main, cdp, evaluate, until, account }) => {
         active.set(query, active.get(query) - 1);
       }
     };
-    mail.queryInbox = async (options, access) => {
+    const probe = query => async (options, access) => {
       searchProbe.calls.push({ query: options.query, ids: options.accountIds });
-      const result = await queryInbox(options, access);
+      const result = await query(options, access);
       const hold = searchProbe.holds.get(options.query);
       if (hold) {
         hold.reached = true;
@@ -58,6 +57,8 @@ module.exports = async ({ main, cdp, evaluate, until, account }) => {
       if (options.query === searchProbe.fail) throw Error('fixture read failure');
       return result;
     };
+    mail.queryInbox = probe(mail.queryInbox);
+    mail.queryInboxPage = probe(mail.queryInboxPage);
   })()`);
   const project = 'Project kickoff';
   const design = 'Design review';

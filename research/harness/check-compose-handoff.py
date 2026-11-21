@@ -32,6 +32,8 @@ try:
     if os.environ.get('PAPER_REED_ORGANIZATION_CHECK') == 'folders':
         server.create_mailbox('All Mail', special_use='\\All')
         server.create_mailbox('[Mailspring]/Snoozed')
+    if os.environ.get('PAPER_REED_SENT_PAGE_CHECK') in ('removal-reader','removal-all'):
+        server.append('Sent', message(1000, subject='Sent account removal fixture', body='Fixture sent body.'))
     server.start()
     (work/'account.json').write_text(json.dumps(account_json(**server.account_kwargs())))
     run=subprocess.Popen(['node',str(Path(__file__).with_suffix('.cjs')),str(upstream),str(work),'controls' if a.controls else 'workspace' if a.workspace else 'audit' if a.audit else 'recover' if a.recover else 'conflict' if a.conflict else 'close-save' if a.close_save else 'handoff'],start_new_session=True)
@@ -44,6 +46,18 @@ try:
     sent=server.sent_messages()
     (work/'smtp-result.json').write_text(json.dumps({'submissions':len(sent),'subjects':[m.header('Subject') for m in sent]}))
     assert run.returncode==0
+    if a.workspace and os.environ.get('PAPER_REED_SENT_PAGE_CHECK'):
+        if os.environ['PAPER_REED_SENT_PAGE_CHECK'] in ('scope','removal','removal-reader','removal-all'):
+            assert not sent, len(sent)
+        else:
+            assert len(sent)==1 and 'Paper Reed outgoing list' in sent[0].header('Subject'), len(sent)
+            assert set(sent[0].recipients)=={'avery@example.test','sam@example.test'}, sent[0].recipients
+        result_path=Path(os.environ['PAPER_REED_UI_OUTPUT'])/'result.json'
+        result=json.loads(result_path.read_text())
+        result['observedSMTPSubmissions']=len(sent)
+        result_path.write_text(json.dumps(result,indent=2)+'\n')
+        print(f'PASS isolated Sent list; SMTP={len(sent)}')
+        sys.exit(0)
     if a.workspace and any(os.environ.get(name) for name in (
         'PAPER_REED_COMPOSE_PAGE_CHECK', 'PAPER_REED_SEARCH_PAGE_CHECK', 'PAPER_REED_SNOOZE_PAGE_CHECK',
         'PAPER_REED_PINNED_PAGE_CHECK',

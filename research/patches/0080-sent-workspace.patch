@@ -1,0 +1,635 @@
+diff --git a/app/internal_packages/paper-reed/lib/workspace.tsx b/app/internal_packages/paper-reed/lib/workspace.tsx
+index cdc7eec463cda58ffa3856317335e2e5c5c6f45e..ee3ac787c05397509500857390a96c6b50cd8042 100644
+--- a/app/internal_packages/paper-reed/lib/workspace.tsx
++++ b/app/internal_packages/paper-reed/lib/workspace.tsx
+@@ -13,6 +13,7 @@ import { randomUUID } from 'crypto';
+ import {
+   queryInbox,
+   queryInboxPage,
++  sentCategoryIds,
+   organizeMail,
+   undoMail,
+   mailTaskStatus,
+@@ -118,6 +119,7 @@ interface State {
+   popInRequest?: PopInRequest;
+   recovery: DraftRecoveryInfo[];
+   snippets: Record<string, string>;
++  sentMessages: Record<string, Message>;
+   loading: boolean;
+   listRead: { scope: string; inboxScan: string | null; failed: boolean } | null;
+   limit: number;
+@@ -138,7 +140,7 @@ interface State {
+   followUpFeedback?: { scope: string; text: string; failed?: boolean };
+   receipt: MailReceipt[];
+   receiptAction: string;
+-  operationsError: string;
++  operationsRead: { scope: string; failed: boolean } | null;
+   operations: {
+     accountId: string;
+     requestId: string;
+@@ -154,6 +156,10 @@ let lastLocation:
+     >
+   | undefined;
+ 
++function connectedAccountId(accountId?: string) {
++  return accountId && AccountStore.accountIds().includes(accountId) ? accountId : '';
++}
++
+ interface ThreadOpenOptions {
+   inbox?: boolean;
+   popIn?: PopInRequest & {
+@@ -213,12 +219,12 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     local: {},
+     labelManager: false,
+     folder: 'inbox',
+-    accountId: '',
+     route: 'list',
+     rows: [],
+     selected: null,
+     recovery: [],
+     snippets: {},
++    sentMessages: {},
+     loading: true,
+     listRead: null,
+     limit: 50,
+@@ -235,13 +241,19 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     receipt: [],
+     receiptAction: '',
+     operations: [],
+-    operationsError: '',
++    operationsRead: null,
+     ...lastLocation,
++    ...(lastLocation?.route === 'thread' && !connectedAccountId(lastLocation.selected?.accountId)
++      ? { route: 'list' as const, selected: null }
++      : {}),
++    accountId: connectedAccountId(lastLocation?.accountId),
+   };
+   unlisten: (() => void)[] = [];
+   generation = 0;
+   private inboxMapping = '';
+   private inboxMappingRevision = 0;
++  private connectedAccountIds = AccountStore.accountIds();
++  private main = React.createRef<HTMLElement>();
+   private reader = React.createRef<HTMLElement>();
+   mounted = false;
+   refreshTimer: ReturnType<typeof setTimeout>;
+@@ -276,10 +288,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+         this.scheduleRefresh();
+       }),
+       FolderSyncProgressStore.listen(() => this.forceUpdate()),
+-      AccountStore.listen(() => {
+-        this.forceUpdate();
+-        this.scheduleRefresh();
+-      }),
++      AccountStore.listen(this.onAccountsChanged),
+       OnlineStatusStore.listen(() => this.forceUpdate()),
+       WorkspaceStore.setSectionLeaveGuard(() => {
+         if (!this.dirtySessions().length) return true;
+@@ -293,12 +302,23 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+         const { selected } = this.state;
+         if (this.state.route === 'compose' && selected instanceof Message &&
+             selected.headerMessageId === headerMessageId && selected.accountId === accountId) {
++          const sentAccountId = connectedAccountId(accountId);
++          const sameScope = sentAccountId === this.state.accountId;
++          this.listPageBeforeLoad = undefined;
++          this.searchBlockedBySave = false;
+           this.setState(
+-            { route: 'list', folder: 'sent', selected: null, rows: [], loading: true },
+-            this.refresh
++            (previous) => ({
++              route: 'list', folder: 'sent', accountId: sentAccountId, selected: null, rows: [], loading: true,
++              more: false, limit: 50, checked: [], unreadOnly: false, listRead: null,
++              query: '', searchText: '', searchPending: false, searchClearing: false,
++              searchVisit: previous.searchVisit + 1, notice: '',
++            }),
++            () => {
++              this.retrySearchRead();
++              if (sameScope) this.refreshOperations();
++            }
+           );
+-        }
+-        this.refreshOperations();
++        } else this.refreshOperations();
+       })
+     );
+     const networkChanged = () => this.forceUpdate();
+@@ -342,6 +362,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   }
+   componentDidUpdate(_previousProps: unknown, previous: State) {
+     const { route, searchPending, agentCopyCancelled, accountId, unreadOnly, searchVisit } = this.state;
++    if (accountId !== previous.accountId) this.refreshOperations();
+     if (previous.route === 'list' && this.followUpView(previous) &&
+         (route !== 'list' || this.followUpView() !== this.followUpView(previous) ||
+           accountId !== previous.accountId ||
+@@ -367,7 +388,61 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     clearTimeout(this.refreshTimer);
+     clearInterval(this.operationTimer);
+   }
+-  accountIds = () => (this.state.accountId ? [this.state.accountId] : AccountStore.accountIds());
++  accountIds = () => {
++    const ids = AccountStore.accountIds();
++    const { accountId } = this.state;
++    return accountId && ids.includes(accountId) ? [accountId] : ids;
++  };
++  private onAccountsChanged = () => {
++    const ids = new Set(AccountStore.accountIds());
++    const { accountId, route, selected, popInRequest } = this.state;
++    const lostMailbox = !!accountId && !ids.has(accountId);
++    const lostReader = route === 'thread' && !!selected && !ids.has(selected.accountId);
++    const scopeShrank = !accountId && this.connectedAccountIds.some(id => !ids.has(id));
++    this.connectedAccountIds = [...ids];
++
++    if (lostMailbox || lostReader || scopeShrank) {
++      const focused = document.activeElement;
++      const focusInMain = this.main.current?.contains(focused) || (lostReader && focused === document.body);
++      clearTimeout(this.refreshTimer);
++      this.generation++;
++      this.listPageBeforeLoad = undefined;
++      if (lostReader) {
++        Actions.setFocus({ collection: 'thread', item: null });
++        if (popInRequest) Actions.popInThreadResult(popInRequest.requestId, false);
++      }
++      this.setState(previous => {
++        const rows = lostMailbox ? [] : previous.rows.filter(row => ids.has(row.accountId));
++        const rowIds = new Set(rows.map(row => row.id));
++        return {
++          accountId: lostMailbox ? '' : previous.accountId,
++          route: lostReader ? 'list' : previous.route,
++          selected: lostReader ? null : previous.selected,
++          popInRequest: lostReader ? undefined : previous.popInRequest,
++          rows,
++          checked: previous.checked.filter(id => rowIds.has(id)),
++          more: false,
++          limit: lostMailbox ? 50 : previous.limit,
++          loading: true,
++          listRead: null,
++        };
++      }, () => {
++        if (focusInMain && this.state.route === 'list' &&
++            (focused === document.body || !focused.isConnected || focused.matches(':disabled')) &&
++            (document.activeElement === focused || document.activeElement === document.body)) {
++          this.main.current?.querySelector<HTMLInputElement>('.pr-search-input')?.focus();
++        }
++        void this.refresh();
++        if (!lostMailbox && this.state.operationsRead?.scope !== this.operationsScope()) {
++          void this.refreshOperations();
++        }
++      });
++      return;
++    }
++    this.forceUpdate();
++    this.scheduleRefresh();
++    if (this.state.operationsRead?.scope !== this.operationsScope()) void this.refreshOperations();
++  };
+   dirtySessions = () =>
+     Object.values(DraftStore._draftSessions).filter(
+       (s) =>
+@@ -400,6 +475,8 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     const ids = this.accountIds();
+     const scope = this.listReadScope(ids);
+     const readingInbox = folder === 'inbox' && !query;
++    const readingSent = folder === 'sent' && !query;
++    let sentPage: Awaited<ReturnType<typeof queryInboxPage>>['sent'];
+     if (readingInbox) this.updateInboxMapping(ids);
+     const mappingRevision = this.inboxMappingRevision;
+     const inboxScan = readingInbox
+@@ -410,6 +487,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     const current = () =>
+       this.mounted && !this.state.searchPending &&
+       generation === this.generation && scope === this.listReadScope() && limit === this.state.limit &&
++      (!sentPage || JSON.stringify(sentPage.categoryIds) === JSON.stringify(sentCategoryIds(ids))) &&
+       (!readingInbox || mappingRevision === this.inboxMappingRevision);
+     try {
+       let rows: (Thread | Message)[] = [];
+@@ -443,8 +521,8 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+           unread: unreadOnly,
+           limit: limit + 1,
+         };
+-        if (input.localView === 'snoozed') {
+-          ({ rows, reminders } = await queryInboxPage(input, inboxDesktopAccess));
++        if (input.localView === 'snoozed' || readingSent) {
++          ({ rows, reminders, sent: sentPage } = await queryInboxPage(input, inboxDesktopAccess));
+         } else {
+           rows = await queryInbox(input, inboxDesktopAccess);
+         }
+@@ -454,6 +532,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       if (
+         this.state.route === 'thread' &&
+         this.state.selected instanceof Thread &&
++        ids.includes(this.state.selected.accountId) &&
+         !stateRows.some((t) => t.id === this.state.selected.id)
+       )
+         stateRows.push(this.state.selected);
+@@ -471,7 +550,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       const recovery =
+         folder === 'drafts' && !query ? await desktopDraftRecoveryInfo(rows as Message[]) : [];
+       const snippets: Record<string, string> = {};
+-      if ((folder !== 'drafts' || query) && rows.length) {
++      if (!readingSent && (folder !== 'drafts' || query) && rows.length) {
+         const ids = rows.slice(0, limit).map((row) => row.id);
+         const latest = await DatabaseStore._query(
+           `SELECT threadId, data FROM (
+@@ -493,6 +572,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+           local,
+           recovery,
+           snippets,
++          sentMessages: sentPage?.messages || {},
+           more,
+           loading: false,
+           listRead: { scope, inboxScan, failed: false },
+@@ -517,7 +597,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   };
+   private loadMore = () => {
+     if (this.state.limit >= 100 || this.listActionsUnavailable()) return;
+-    if (this.followUpView() || this.isDraftList()) this.listPageBeforeLoad = {
++    if (this.followUpView() || this.isDraftList() || this.isSentList()) this.listPageBeforeLoad = {
+       scope: this.listReadScope(),
+       ids: new Set(this.state.rows.map(row => row.id)),
+     };
+@@ -526,13 +606,15 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   private restoreListFocus(leavingView = false, previousPage?: ReadonlySet<string>) {
+     const view = this.followUpView();
+     const drafts = this.isDraftList();
++    const sent = this.isSentList();
+     const bulkUnpin = '.pr-local-controls [data-local-action=unpin]';
+     let selector = '.pr-mail-row, .pr-follow-up-action, .pr-follow-up-empty button, .pr-follow-up-row input';
+     if (view) {
+       selector += ', .pr-load-more, .pr-local-controls :is(button,input,select), .pr-selection-actions button';
+     }
+     if (drafts) selector += ', .pr-load-more, .pr-drafts-empty button, .pr-draft-read-error button';
+-    const row = this.state.route === 'list' && (this.state.query || view || drafts) &&
++    if (sent) selector += ', .pr-load-more, .pr-sent-empty button, .pr-sent-read-error button';
++    const row = this.state.route === 'list' && (this.state.query || view || drafts || sent) &&
+       document.activeElement?.closest<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>(selector);
+     const id = row && (row.dataset.listId || row.closest<HTMLElement>('.pr-follow-up-row')?.dataset.followUpId);
+     const loadingMore = row && row.matches('.pr-load-more');
+@@ -545,11 +627,13 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       if (row && this.state.route === 'list' && (row.disabled || !row.isConnected || reachedLimit) &&
+           (document.activeElement === row || document.activeElement === document.body)) {
+         const sameDrafts = !leavingView && drafts && this.isDraftList();
++        const sameSent = !leavingView && sent && this.isSentList();
+         const selector = sameDrafts ? '.pr-mail-row[data-draft-id]'
++          : sameSent ? '.pr-mail-row'
+           : row.matches('.pr-follow-up-action') ? '.pr-follow-up-action'
+           : row.matches('.pr-follow-up-row input') ? '.pr-follow-up-row input' : '.pr-follow-up-row .pr-mail-row';
+         const sameView = !leavingView && view && view === this.followUpView();
+-        const candidates = sameView || sameDrafts
++        const candidates = sameView || sameDrafts || sameSent
+           ? Array.from(document.querySelectorAll<HTMLElement>(selector + ':not(:disabled)'))
+           : [];
+         const replacement = (sameView && row.matches(bulkUnpin) &&
+@@ -558,15 +642,20 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+           || candidates[Math.min(Math.max(index, 0), candidates.length - 1)];
+         const fallback = (sameView && document.querySelector<HTMLElement>('.pr-follow-up-empty button'))
+           || (sameDrafts && document.querySelector<HTMLElement>('.pr-drafts-empty button'))
++          || (sameSent && document.querySelector<HTMLElement>('.pr-sent-empty button'))
+           || document.querySelector<HTMLInputElement>('.pr-search-input');
+         (replacement || fallback)?.focus();
+       }
+     };
+   }
++  private operationsScope(ids = this.accountIds()) {
++    return JSON.stringify([...ids].sort());
++  }
+   refreshOperations = async () => {
+     const generation = ++this.operationGeneration;
+-    const accountId = this.state.accountId;
+     const ids = this.accountIds();
++    const scope = this.operationsScope(ids);
++    const current = () => this.mounted && generation === this.operationGeneration && scope === this.operationsScope();
+     this.refreshMailReceipt();
+     try {
+       const rows = await DatabaseStore._query(
+@@ -580,13 +669,17 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+         sentCopy: r.sentCopy,
+         subject: JSON.parse(r.payload).draft.subject || '无主题',
+       }));
+-      if (this.mounted && generation === this.operationGeneration && accountId === this.state.accountId &&
+-          (this.state.operationsError || JSON.stringify(operations) !== JSON.stringify(this.state.operations)))
+-        this.setState({ operationsError: '', operations });
++      const previous = this.state.operationsRead;
++      if (current() && (scope !== previous?.scope || previous.failed ||
++          JSON.stringify(operations) !== JSON.stringify(this.state.operations))) {
++        this.setState({ operationsRead: { scope, failed: false }, operations });
++      }
+     } catch (error) {
+       console.error('Paper Reed send results:', error);
+-      if (this.mounted && generation === this.operationGeneration && accountId === this.state.accountId && !this.state.operationsError)
+-        this.setState({ operations: [], operationsError: '发送结果暂时无法读取。' });
++      const previous = this.state.operationsRead;
++      if (current() && (scope !== previous?.scope || !previous.failed)) {
++        this.setState({ operations: [], operationsRead: { scope, failed: true } });
++      }
+     }
+   };
+   move = async (next: () => void | boolean | Promise<void | boolean>) => {
+@@ -626,9 +719,10 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       if (this.mounted && pendingThread?.options.inbox) void this.openPendingThread();
+     }
+   };
+-  navigate = (folder: string, accountId = this.state.accountId) =>
++  navigate = (folder: string, requestedAccountId = this.state.accountId) =>
+     this.move(() => {
+-      const restoreFocus = (this.followUpView() || this.isDraftList()) && this.restoreListFocus(true);
++      const accountId = connectedAccountId(requestedAccountId);
++      const restoreFocus = (this.followUpView() || this.isDraftList() || this.isSentList()) && this.restoreListFocus(true);
+       this.listPageBeforeLoad = undefined;
+       const changingAccount = accountId !== this.state.accountId;
+       const { query, searchText, searchPending, searchClearing, searchVisit } = this.state;
+@@ -686,8 +780,9 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+         if (this.mounted) void this.refresh();
+         return false;
+       }
++      if (!connectedAccountId(row.accountId)) return false;
+       const source = popIn ? MailboxPerspective.fromJSON(popIn.perspectiveJSON) : null;
+-      if (popIn && (!source || !AccountStore.accountForId(row.accountId))) {
++      if (popIn && !source) {
+         throw new Error('The original mailbox is unavailable');
+       }
+ 
+@@ -696,9 +791,9 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       const folder = popIn
+         ? popIn.location?.folder || (folders.some(([id]) => id === sourceFolder) ? sourceFolder : 'inbox')
+         : inbox ? 'inbox' : this.state.folder;
+-      const accountId = popIn
++      const accountId = connectedAccountId(popIn
+         ? popIn.location?.accountId ?? (source.accountIds.length === AccountStore.accountIds().length ? '' : row.accountId)
+-        : row.accountId;
++        : row.accountId);
+       const accountIds = inbox ? [accountId] : this.accountIds();
+       const perspective = source || MailboxPerspective.forStandardCategories(
+         accountIds,
+@@ -864,6 +959,9 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   private isDraftList() {
+     return this.state.folder === 'drafts' && !this.state.query;
+   }
++  private isSentList() {
++    return this.state.folder === 'sent' && !this.state.query;
++  }
+   private followUpRefilling() {
+     const { route, searchPending, followUpRefillScope } = this.state;
+     return route === 'list' && !searchPending &&
+@@ -871,7 +969,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   }
+   listActionsUnavailable() {
+     const { loading, listRead } = this.state;
+-    return this.followUpRefilling() || this.searchResultsUnavailable() || ((!!this.followUpView() || this.isDraftList()) &&
++    return this.followUpRefilling() || this.searchResultsUnavailable() || ((!!this.followUpView() || this.isDraftList() || this.isSentList()) &&
+       (loading || listRead?.failed || listRead?.scope !== this.listReadScope()));
+   }
+   retrySearchRead = () => {
+@@ -1153,12 +1251,13 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       </div>
+     );
+   }
+-  renderSearchEmpty() {
++  renderSearchEmpty(sent = false) {
+     return (
+       <div className="pr-search-empty">
+         <div role="status">
+-          <p>{this.state.unreadOnly ? '没找到匹配的未读邮件' : '没找到匹配的邮件'}</p>
+-          <small>可以更换关键词或邮箱范围。</small>
++          <p>{sent ? '没有未读的已发送邮件' :
++            this.state.unreadOnly ? '没找到匹配的未读邮件' : '没找到匹配的邮件'}</p>
++          {!sent && <small>可以更换关键词或邮箱范围。</small>}
+         </div>
+         {this.state.unreadOnly && (
+           <button onKeyDown={keepNativeButtonActivation} onClick={() => {
+@@ -1272,8 +1371,16 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     const person =
+       contacts?.find((c) => c.email !== AccountStore.accountForId(row.accountId)?.emailAddress) ||
+       contacts?.[0];
+-    const name = person?.displayName() || '未知发件人';
+-    const date = row.lastMessageReceivedTimestamp;
++    const sent = this.isSentList();
++    const outgoing = sent ? this.state.sentMessages[row.id] : undefined;
++    const recipients = outgoing?.participants({ includeFrom: false, includeBcc: true }) || [];
++    const recipientNames = recipients.slice(0, 2)
++      .map(contact => contact.fullName() || contact.email).join('、');
++    const name = sent
++      ? (recipientNames + (recipients.length > 2 ? ` 等 ${recipients.length} 人` : '') ||
++        (outgoing ? '未记录收件人' : '收件人未同步'))
++      : person?.displayName() || '未知发件人';
++    const date = sent ? outgoing?.date : row.lastMessageReceivedTimestamp;
+     const local = this.state.local[row.id];
+     const color =
+       AccountStore.accountForId(row.accountId)?.color ||
+@@ -1281,23 +1388,30 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     const content = (
+       <button
+         type="button"
+-        className={`pr-mail-row ${row.unread ? 'unread' : ''}`}
++        className={`pr-mail-row ${sent ? 'pr-sent-row' : ''} ${row.unread ? 'unread' : ''}`}
+         key={row.id}
+         onKeyDown={keepNativeButtonActivation}
+         onClick={() => this.open(row)}
+         disabled={searchUnavailable}
+         data-list-id={row.id}
+         data-thread-id={row.id}
+-        aria-label={`${row.unread ? '未读，' : ''}${name}，${row.subject || '无主题'}${reminder ? `，提醒 ${reminder}` : ''}`}
++        aria-label={`${row.unread ? '未读，' : ''}${sent && recipients.length ? '发给 ' : ''}${name}，${row.subject || '无主题'}${reminder ? `，提醒 ${reminder}` : ''}`}
+       >
+         <span
+           className="pr-avatar"
+           style={{ borderColor: color }}
+           title={AccountStore.accountForId(row.accountId)?.emailAddress}
+         >
+-          <span>{Array.from(name)[0]}</span>
++          <span>{!sent || recipients.length ? Array.from(name)[0] : '·'}</span>
++        </span>
++        <span className={sent ? 'pr-sender pr-sent-recipient' : 'pr-sender'} title={sent ? name : undefined}>
++          {sent && recipients.length ? (
++            <>
++              <span className="pr-sent-recipient-names">发给 {recipientNames}</span>
++              {recipients.length > 1 && <span className="pr-sent-recipient-count" aria-hidden="true">{recipients.length} 人</span>}
++            </>
++          ) : name}
+         </span>
+-        <span className="pr-sender">{name}</span>
+         <span className="pr-summary">
+           <span className="pr-subject">{row.subject || '无主题'}</span>
+           {(local?.labels.length > 0 || (!snoozeUntil && local?.snoozeUntil)) && (
+@@ -1320,7 +1434,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+               )}
+             </span>
+           )}
+-          <span className="pr-snippet">{this.state.snippets[row.id] || row.snippet}</span>
++          <span className="pr-snippet">{sent ? outgoing?.snippet : this.state.snippets[row.id] || row.snippet}</span>
+         </span>
+         <span className="pr-date">
+           {local?.pinned && <PinMark />}
+@@ -1564,9 +1678,13 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     const searchActive = route === 'list' && (!!this.state.query || !!this.state.searchPending);
+     const draftList = route === 'list' && this.isDraftList();
+     const drafts = draftList && !searchActive;
++    const sent = route === 'list' && !searchActive && this.isSentList();
++    const operationsRead = this.state.operationsRead?.scope === this.operationsScope()
++      ? this.state.operationsRead : null;
++    const operations = operationsRead ? this.state.operations : [];
+     const followUp = route === 'list' ? this.followUpView() : null;
+     const snoozed = followUp === 'snoozed';
+-    const localList = !!followUp || drafts;
++    const localList = !!followUp || drafts || sent;
+     const atListLimit = this.state.limit >= 100;
+     const readBelowSearch = searchActive || localList || (route === 'list' && this.state.searchClearing);
+     const searchUnavailable = route === 'list' && this.listActionsUnavailable();
+@@ -1676,7 +1794,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+               <button onClick={this.preferences}>设置</button>
+             </div>
+           </aside>
+-          <main className={`pr-main pr-route-${route}`}>
++          <main className={`pr-main pr-route-${route}`} ref={this.main}>
+             {(!editingDraft || agent) && <div className="pr-page-head">
+               {route === 'list' ? <h1>{title}</h1> : !editingDraft && back}
+               {!draftList && (route !== 'compose' || agent) && (
+@@ -1744,8 +1862,9 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                   <p className="pr-notice" role="status">交接已取消。核对当前结果后重新复制给 Agent。</p>
+                 )}
+                 {readBelowSearch && readFailed && !loading && !this.state.searchPending && (
+-                  <div className={drafts ? 'pr-notice pr-draft-read-error' : 'pr-notice'} role="alert">
+-                    {drafts ? '草稿暂时无法读取。' : mailReadError}
++                  <div className={drafts ? 'pr-notice pr-draft-read-error' :
++                    sent ? 'pr-notice pr-sent-read-error' : 'pr-notice'} role="alert">
++                    {drafts ? '草稿暂时无法读取。' : sent ? '已发送邮件暂时无法读取。' : mailReadError}
+                     <button onKeyDown={keepNativeButtonActivation} onClick={this.retrySearchRead}>重新读取</button>
+                   </div>
+                 )}
+@@ -1775,11 +1894,20 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                       </button>
+                     </div>
+                   )}
++                  {sent && !searchUnavailable && !rows.length && (
++                    this.state.unreadOnly ? this.renderSearchEmpty(true) :
++                      <div className="pr-drafts-empty pr-sent-empty">
++                        <p role="status">本机暂无已发送邮件</p>
++                        <button type="button" onKeyDown={keepNativeButtonActivation} onClick={this.compose}>
++                          写邮件
++                        </button>
++                      </div>
++                  )}
+                   {searchActive && !searchUnavailable && !rows.length && this.renderSearchEmpty()}
+-                  {!searchActive && !rows.length && !emptyInbox && !readFailed &&
+-                    (drafts ? searchUnavailable : !followUp || loading) && (
++                  {!searchActive && !rows.length && !emptyInbox && (!readFailed || (sent && loading)) &&
++                    (drafts || sent ? searchUnavailable : !followUp || loading) && (
+                     <p className="pr-empty" role="status">
+-                      {drafts ? '正在读取草稿…' : loading ? '正在读取邮件…' : '这里还没有邮件'}
++                      {drafts ? '正在读取草稿…' : sent ? '正在读取已发送邮件…' : loading ? '正在读取邮件…' : '这里还没有邮件'}
+                     </p>
+                   )}
+                   {this.state.more && !searchUnavailable && (
+@@ -1793,7 +1921,8 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                       {atListLimit
+                         ? (localList && rows.length < 100 ? '正在加载更多…'
+                           : drafts ? '已显示前 100 份草稿'
+-                          : followUp === 'pinned' ? '已显示前 100 个置顶会话' : '已显示 100 个会话，请缩小搜索范围')
++                          : followUp === 'pinned' ? '已显示前 100 个置顶会话'
++                          : sent ? '已显示前 100 个已发送会话' : '已显示 100 个会话，请缩小搜索范围')
+                         : '加载更多'}
+                     </button>
+                   )}
+@@ -1823,11 +1952,11 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                 </div>
+               )
+             )}
+-            {this.state.operationsError && <p role="status">{this.state.operationsError}</p>}
+-            {!!this.state.operations.length && (
++            {operationsRead?.failed && <p className="pr-send-read-error" role="status">发送结果暂时无法读取。</p>}
++            {!!operations.length && (
+               <details className="pr-send-results">
+-                <summary>最近发送 · {sendLabel(this.state.operations[0])}</summary>
+-                {this.state.operations.map((op) => (
++                <summary>最近发送 · {sendLabel(operations[0])}</summary>
++                {operations.map((op) => (
+                   <p key={op.requestId}>
+                     <span>{op.subject}</span>
+                     <strong>{sendLabel(op)}</strong>
+diff --git a/app/internal_packages/paper-reed/styles/paper-reed.less b/app/internal_packages/paper-reed/styles/paper-reed.less
+index dc76adae1b8f6359575bb62a8738baf49090c6cb..7fd72abc35f027be8e470f57ab9b2473582c55ae 100644
+--- a/app/internal_packages/paper-reed/styles/paper-reed.less
++++ b/app/internal_packages/paper-reed/styles/paper-reed.less
+@@ -35,6 +35,10 @@
+   .pr-avatar { width: 32px; height: 32px; border: 1.5px solid; border-radius: 50%; padding: 3px; box-sizing: border-box; }
+   .pr-avatar > span { width: 100%; height: 100%; display: flex; align-items: center; justify-content: center; background: var(--pr-inset); border-radius: 50%; color: var(--pr-muted); font-size: 11px; }
+   .pr-sender { align-self: start; padding-top: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
++  .pr-workspace .pr-mail-row.pr-sent-row { grid-template-columns: 32px clamp(136px, 24%, 232px) minmax(0, 1fr) 78px; }
++  .pr-sent-recipient { display: flex; align-items: baseline; gap: 8px; min-width: 0; }
++  .pr-sent-recipient-names { min-width: 0; overflow: hidden; text-overflow: ellipsis; }
++  .pr-sent-recipient-count { flex: none; color: var(--pr-muted); font-size: 11px; }
+   .pr-summary { min-width: 0; display: flex; flex-direction: column; }
+   .pr-subject, .pr-snippet { white-space: nowrap; overflow: hidden; text-overflow: ellipsis; }
+   .pr-snippet { font-size: 12px; color: var(--pr-muted); margin-top: 4px; }
+diff --git a/app/src/services/mail-core/inbox.ts b/app/src/services/mail-core/inbox.ts
+index 2ff64e3fc4067b3f1131a9d4531017b2b0728c01..69e49517fb7a18563bd233a1cf41b9c12474a9c9 100644
+--- a/app/src/services/mail-core/inbox.ts
++++ b/app/src/services/mail-core/inbox.ts
+@@ -64,6 +64,11 @@ export async function queryInbox(input: InboxQuery, access: InboxAccess) {
+   return (await queryInboxPage(input, access)).rows;
+ }
+ 
++export function sentCategoryIds(ids: string[]) {
++  return ids.flatMap(id => CategoryStore.categories(id)
++    .filter(category => category.role === 'sent').map(category => category.id)).sort();
++}
++
+ export async function queryInboxPage(input: InboxQuery, access: InboxAccess) {
+   await ensureLocalTriage();
+   const grant = access.grant();
+@@ -73,6 +78,7 @@ export async function queryInboxPage(input: InboxQuery, access: InboxAccess) {
+   );
+   const searching = !!input.query?.trim();
+   const snoozed = input.localView === 'snoozed';
++  const readingSent = input.folder === 'sent' && !searching && !snoozed;
+   const limit = Math.min(input.limit, 201);
+   const offset = input.offset || 0;
+   const clauses: any[] = [];
+@@ -95,7 +101,39 @@ export async function queryInboxPage(input: InboxQuery, access: InboxAccess) {
+   };
+   let rows: Thread[];
+   let reminders: Map<string, number>;
+-  if (snoozed) {
++  let sent: { categoryIds: string[]; messages: Record<string, Message> } | undefined;
++  if (readingSent) {
++    const excluded = new Set(Object.values(grant.excludedFolderIds).flat());
++    const categoryIds = sentCategoryIds(ids).filter(id => !excluded.has(id));
++    sent = {categoryIds, messages: {}};
++    rows = [];
++    if (categoryIds.length) {
++      const eligible = makeQuery().idsOnly().limit(-1).sql();
++      const placeholders = categoryIds.map(() => '?').join(',');
++      // Choose the message once, before ordering and paging the conversations.
++      const result = await DatabaseStore._query(
++        `SELECT Thread.data, sentMessage.data AS messageData FROM Thread
++         JOIN Message sentMessage ON sentMessage.id = (
++           SELECT m.id FROM Message m
++           WHERE m.accountId = Thread.accountId AND m.threadId = Thread.id AND m.draft = 0
++             AND NOT EXISTS (SELECT 1 FROM MessageOrphan WHERE messageId = m.id)
++             AND (EXISTS (SELECT 1 FROM json_each(m.data, '$.folders') WHERE key IN (${placeholders}))
++               OR EXISTS (SELECT 1 FROM json_each(m.data, '$.labels') WHERE value = ?))
++           ORDER BY m.date DESC, m.id DESC LIMIT 1
++         )
++         LEFT JOIN PaperReedLocalThread local ON local.accountId = Thread.accountId AND local.threadId = Thread.id
++         WHERE Thread.id IN (${eligible})
++         ORDER BY ${input.pinFirst ? 'coalesce(local.pinned, 0) DESC, ' : ''}sentMessage.date DESC, Thread.id ASC
++         LIMIT ? OFFSET ?`, [...categoryIds, '\\Sent', limit, offset], true
++      );
++      for (const row of result) {
++        const thread = new Thread(JSON.parse(row.data));
++        rows.push(thread);
++        const message = new Message(JSON.parse(row.messageData));
++        if (isMessageAllowed(access.grant(), message)) sent.messages[thread.id] = message;
++      }
++    }
++  } else if (snoozed) {
+     // Select members and their reminder times together, before reading other local metadata.
+     const page = makeQuery().offset(offset).idsOnly().sql();
+     const result = await DatabaseStore._query(
+@@ -118,7 +156,7 @@ export async function queryInboxPage(input: InboxQuery, access: InboxAccess) {
+     rows = result.map(row => new Thread(JSON.parse(row.data)));
+   } else rows = await makeQuery().offset(offset);
+   input.accountIds.forEach((id) => access.check(id, false));
+-  return { rows: rows.filter(t => isThreadAllowed(access.grant(), t)), reminders };
++  return { rows: rows.filter(t => isThreadAllowed(access.grant(), t)), reminders, sent };
+ }
+ function taskId(accountId: string, requestId: string, threadId: string) {
+   return (
