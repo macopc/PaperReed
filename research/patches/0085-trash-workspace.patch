@@ -1,0 +1,776 @@
+diff --git a/app/internal_packages/mcp-server/lib/mcp-tools.ts b/app/internal_packages/mcp-server/lib/mcp-tools.ts
+index c3a981d55b8d28f3e58f81a28b6484b60a692c75..d5098e775d0fed199feecd1627ff7c20a074d6eb 100644
+--- a/app/internal_packages/mcp-server/lib/mcp-tools.ts
++++ b/app/internal_packages/mcp-server/lib/mcp-tools.ts
+@@ -1142,11 +1142,12 @@ export function registerTools(server: McpServer) {
+   defineTool(
+     server,
+     'organize_mail',
+-    'Set read/unread, archive, move to spam/trash or restore to Inbox. Set fromArchive to restore only archived copies, or fromSpam to mark or move only spam copies. Returns per-target queued tasks, not remote success.',
++    'Set read/unread, archive, move to spam/trash or restore to Inbox. Set fromArchive to restore only archived copies, or set fromSpam or fromTrash to limit an action to copies in that folder. Returns per-target queued tasks, not remote success.',
+     {
+       action: z.enum(['read', 'unread', 'archive', 'spam', 'trash', 'inbox']),
+       fromArchive: z.boolean().optional(),
+       fromSpam: z.boolean().optional(),
++      fromTrash: z.boolean().optional(),
+       targets: z
+         .array(z.object({ accountId: z.string().min(1), threadId: z.string().min(1) }))
+         .min(1)
+@@ -1257,7 +1258,7 @@ export function registerTools(server: McpServer) {
+     },
+     'read',
+     async ({ accountId, view, ...input }) => {
+-      const { rows, reminders, spamUnread } = await queryInboxPage(
++      const { rows, reminders, folderUnread } = await queryInboxPage(
+         { ...input, accountIds: [accountId], localView: view, pinFirst: true },
+         inboxAccess
+       );
+@@ -1272,7 +1273,7 @@ export function registerTools(server: McpServer) {
+             const local = states[t.id];
+             if (reminders) local.snoozeUntil = reminders.get(t.id);
+             if (view === 'pinned') local.pinned = true;
+-            return summary ? { ...summary, ...(spamUnread ? { unread: spamUnread[t.id] } : {}), local } : null;
++            return summary ? { ...summary, ...(folderUnread ? { unread: folderUnread[t.id] } : {}), local } : null;
+           })
+           .filter(Boolean)
+       );
+diff --git a/app/internal_packages/paper-reed/lib/workspace.tsx b/app/internal_packages/paper-reed/lib/workspace.tsx
+index eb50ee13d6385f82aeec2d7801f5138fc3061e8f..8ab2890f974272f436b874d20cd42d5ac750cfa8 100644
+--- a/app/internal_packages/paper-reed/lib/workspace.tsx
++++ b/app/internal_packages/paper-reed/lib/workspace.tsx
+@@ -19,7 +19,8 @@ import {
+   mailTaskStatus,
+   actionAvailable,
+   archiveFolder,
+-  spamFolder,
++  recoveryFolder,
++  RecoveryRole,
+   inboxDesktopAccess,
+   MailAction,
+   MailReceipt,
+@@ -122,8 +123,8 @@ interface State {
+   recovery: DraftRecoveryInfo[];
+   snippets: Record<string, string>;
+   sentMessages: Record<string, Message>;
+-  spamUnread: Record<string, boolean>;
+-  spamReaderScope: string | null;
++  folderUnread: Record<string, boolean>;
++  recoveryReaderScope: string | null;
+   loading: boolean;
+   listRead: { scope: string; inboxScan: string | null; failed: boolean } | null;
+   limit: number;
+@@ -229,8 +230,8 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     recovery: [],
+     snippets: {},
+     sentMessages: {},
+-    spamUnread: {},
+-    spamReaderScope: null,
++    folderUnread: {},
++    recoveryReaderScope: null,
+     loading: true,
+     listRead: null,
+     limit: 50,
+@@ -482,14 +483,14 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     const scope = this.listReadScope(ids);
+     const readingInbox = folder === 'inbox' && !query;
+     const readingSent = folder === 'sent' && !query;
+-    const readingSpam = folder === 'spam' && !query;
+-    const reader = readingSpam && this.state.route === 'thread' &&
++    const recoveryRole = this.recoveryList();
++    const reader = recoveryRole && this.state.route === 'thread' &&
+       this.state.selected instanceof Thread && ids.includes(this.state.selected.accountId)
+       ? this.state.selected : null;
+-    const readerFolder = reader && spamFolder(reader.accountId);
++    const readerFolder = reader && recoveryFolder(reader.accountId, recoveryRole);
+     const readerScope = readerFolder && JSON.stringify([reader.accountId, reader.id, readerFolder.id]);
+     let sentPage: Awaited<ReturnType<typeof queryInboxPage>>['sent'];
+-    let spamUnread: Awaited<ReturnType<typeof queryInboxPage>>['spamUnread'];
++    let folderUnread: Awaited<ReturnType<typeof queryInboxPage>>['folderUnread'];
+     if (readingInbox) this.updateInboxMapping(ids);
+     const mappingRevision = this.inboxMappingRevision;
+     const inboxScan = readingInbox
+@@ -534,8 +535,8 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+           unread: unreadOnly,
+           limit: limit + 1,
+         };
+-        if (input.localView === 'snoozed' || readingSent || readingSpam) {
+-          ({ rows, reminders, sent: sentPage, spamUnread } = await queryInboxPage(input, inboxDesktopAccess));
++        if (input.localView === 'snoozed' || readingSent || recoveryRole) {
++          ({ rows, reminders, sent: sentPage, folderUnread } = await queryInboxPage(input, inboxDesktopAccess));
+         } else {
+           rows = await queryInbox(input, inboxDesktopAccess);
+         }
+@@ -589,8 +590,8 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+           recovery,
+           snippets,
+           sentMessages: sentPage?.messages || {},
+-          spamUnread: spamUnread || {},
+-          spamReaderScope: readerPresent && previous.selected === reader ? readerScope : null,
++          folderUnread: folderUnread || {},
++          recoveryReaderScope: readerPresent && previous.selected === reader ? readerScope : null,
+           more,
+           loading: false,
+           listRead: { scope, inboxScan, failed: false },
+@@ -606,7 +607,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+         this.listPageBeforeLoad = undefined;
+         this.setState(previous => ({
+           loading: false,
+-          spamReaderScope: null,
++          recoveryReaderScope: null,
+           followUpRefillScope: previous.followUpRefillScope === scope
+             ? undefined : previous.followUpRefillScope,
+           listRead: { scope, inboxScan: null, failed: true },
+@@ -616,7 +617,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   };
+   private loadMore = () => {
+     if (this.state.limit >= 100 || this.listActionsUnavailable()) return;
+-    if (this.followUpView() || this.isDraftList() || this.isSentList() || this.isArchiveList() || this.isSpamList()) this.listPageBeforeLoad = {
++    if (this.followUpView() || this.isDraftList() || this.isSentList() || this.isArchiveList() || this.recoveryList()) this.listPageBeforeLoad = {
+       scope: this.listReadScope(),
+       ids: new Set(this.state.rows.map(row => row.id)),
+     };
+@@ -627,7 +628,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     const drafts = this.isDraftList();
+     const sent = this.isSentList();
+     const archive = this.isArchiveList();
+-    const spam = this.isSpamList();
++    const recoveryRole = this.recoveryList();
+     const bulkUnpin = '.pr-local-controls [data-local-action=unpin]';
+     let selector = '.pr-mail-row, .pr-follow-up-action, .pr-follow-up-empty button, .pr-follow-up-row input';
+     if (view) {
+@@ -636,8 +637,10 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     if (drafts) selector += ', .pr-load-more, .pr-drafts-empty button, .pr-draft-read-error button';
+     if (sent) selector += ', .pr-load-more, .pr-sent-empty button, .pr-sent-read-error button';
+     const rowCheckbox = '.pr-mail-item > input[type=checkbox]';
+-    if (archive || spam) selector += ', .pr-load-more, .pr-archive-empty button, .pr-spam-empty button, .pr-archive-read-error button, .pr-spam-read-error button, .pr-selection-actions button, .pr-mail-receipt button, ' + rowCheckbox;
+-    const row = this.state.route === 'list' && (this.state.query || view || drafts || sent || archive || spam) &&
++    if (archive || recoveryRole) selector += ', .pr-load-more, .pr-selection-actions button, .pr-mail-receipt button, ' +
++      `.pr-${archive ? 'archive' : recoveryRole}-empty button, .pr-${archive ? 'archive' : recoveryRole}-read-error button, ` +
++      '.pr-list-tools label:not(.pr-unread-filter) input[type=checkbox], ' + rowCheckbox;
++    const row = this.state.route === 'list' && (this.state.query || view || drafts || sent || archive || recoveryRole) &&
+       document.activeElement?.closest<HTMLInputElement | HTMLButtonElement | HTMLSelectElement>(selector);
+     const id = row && (row.dataset.listId || row.closest<HTMLElement>('.pr-follow-up-row')?.dataset.followUpId ||
+       row.closest('.pr-mail-item')?.querySelector<HTMLElement>('.pr-mail-row')?.dataset.listId);
+@@ -653,14 +656,14 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+         const sameDrafts = !leavingView && drafts && this.isDraftList();
+         const sameSent = !leavingView && sent && this.isSentList();
+         const sameArchive = !leavingView && archive && this.isArchiveList();
+-        const sameSpam = !leavingView && spam && this.isSpamList();
++        const sameRecovery = !leavingView && recoveryRole && recoveryRole === this.recoveryList();
+         const selector = sameDrafts ? '.pr-mail-row[data-draft-id]'
+-          : (sameArchive || sameSpam) && row.matches(rowCheckbox) ? rowCheckbox
+-          : sameSent || sameArchive || sameSpam ? '.pr-mail-row'
++          : (sameArchive || sameRecovery) && row.matches(rowCheckbox) ? rowCheckbox
++          : sameSent || sameArchive || sameRecovery ? '.pr-mail-row'
+           : row.matches('.pr-follow-up-action') ? '.pr-follow-up-action'
+           : row.matches('.pr-follow-up-row input') ? '.pr-follow-up-row input' : '.pr-follow-up-row .pr-mail-row';
+         const sameView = !leavingView && view && view === this.followUpView();
+-        const candidates = sameView || sameDrafts || sameSent || sameArchive || sameSpam
++        const candidates = sameView || sameDrafts || sameSent || sameArchive || sameRecovery
+           ? Array.from(document.querySelectorAll<HTMLElement>(selector + ':not(:disabled)'))
+           : [];
+         const replacement = (sameView && row.matches(bulkUnpin) &&
+@@ -671,7 +674,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+           || (sameDrafts && document.querySelector<HTMLElement>('.pr-drafts-empty button'))
+           || (sameSent && document.querySelector<HTMLElement>('.pr-sent-empty button'))
+           || (sameArchive && document.querySelector<HTMLElement>('.pr-archive-empty button'))
+-          || (sameSpam && document.querySelector<HTMLElement>('.pr-spam-empty button'))
++          || (sameRecovery && document.querySelector<HTMLElement>(`.pr-${recoveryRole}-empty button`))
+           || document.querySelector<HTMLInputElement>('.pr-search-input');
+         (replacement || fallback)?.focus();
+       }
+@@ -752,7 +755,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     this.move(() => {
+       const accountId = connectedAccountId(requestedAccountId);
+       const restoreFocus = (this.followUpView() || this.isDraftList() || this.isSentList() ||
+-        this.isArchiveList() || this.isSpamList()) && this.restoreListFocus(true);
++        this.isArchiveList() || this.recoveryList()) && this.restoreListFocus(true);
+       this.listPageBeforeLoad = undefined;
+       const changingAccount = accountId !== this.state.accountId;
+       const { query, searchText, searchPending, searchClearing, searchVisit } = this.state;
+@@ -825,7 +828,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+         ? popIn.location?.accountId ?? (source.accountIds.length === AccountStore.accountIds().length ? '' : row.accountId)
+         : row.accountId);
+       const accountIds = inbox ? [accountId] : this.accountIds();
+-      const readerFolder = folder === 'spam' && this.state.query ? 'all' : folder;
++      const readerFolder = (folder === 'spam' || folder === 'trash') && this.state.query ? 'all' : folder;
+       const perspective = source || (readerFolder === 'archive'
+         ? MailboxPerspective.forCategories(accountIds.map(archiveFolder).filter(Boolean))
+         : MailboxPerspective.forStandardCategories(
+@@ -851,9 +854,9 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+           this.refresh();
+         });
+       } else {
+-        this.setState({ route: 'thread', selected: row, popInRequest, spamReaderScope: null }, () => {
++        this.setState({ route: 'thread', selected: row, popInRequest, recoveryReaderScope: null }, () => {
+           focusReader();
+-          if (this.isSpamList()) this.refresh();
++          if (this.recoveryList()) this.refresh();
+         });
+       }
+     });
+@@ -1001,15 +1004,17 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   private isArchiveList() {
+     return this.state.folder === 'archive' && !this.state.query;
+   }
+-  private isSpamList() {
+-    return this.state.folder === 'spam' && !this.state.query;
++  private recoveryList(): RecoveryRole | undefined {
++    const { folder, query, searchPending } = this.state;
++    return !query && !searchPending && (folder === 'spam' || folder === 'trash') ? folder : undefined;
+   }
+-  private canRestoreSpamThread(thread: Thread) {
+-    if (this.state.route !== 'thread' || this.state.selected !== thread || !this.isSpamList() ||
+-        !this.state.spamReaderScope || this.state.busy || !connectedAccountId(thread.accountId)) return false;
+-    const folder = spamFolder(thread.accountId);
+-    if (!folder || !actionAvailable('inbox', thread.accountId, true)) return false;
+-    return this.state.spamReaderScope === JSON.stringify([thread.accountId, thread.id, folder.id]) &&
++  private canRestoreThread(thread: Thread) {
++    const role = this.recoveryList();
++    if (this.state.route !== 'thread' || this.state.selected !== thread || !role ||
++        !this.state.recoveryReaderScope || this.state.busy || !connectedAccountId(thread.accountId)) return false;
++    const folder = recoveryFolder(thread.accountId, role);
++    if (!folder || !actionAvailable('inbox', thread.accountId, role)) return false;
++    return this.state.recoveryReaderScope === JSON.stringify([thread.accountId, thread.id, folder.id]) &&
+       !this.state.receipt.some(item => item.accountId === thread.accountId && item.threadId === thread.id &&
+         ['queued', 'syncing'].includes(item.status));
+   }
+@@ -1021,7 +1026,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+   listActionsUnavailable() {
+     const { loading, listRead } = this.state;
+     return this.followUpRefilling() || this.searchResultsUnavailable() || ((!!this.followUpView() ||
+-      this.isDraftList() || this.isSentList() || this.isArchiveList() || this.isSpamList()) &&
++      this.isDraftList() || this.isSentList() || this.isArchiveList() || this.recoveryList()) &&
+       (loading || listRead?.failed || listRead?.scope !== this.listReadScope()));
+   }
+   retrySearchRead = () => {
+@@ -1062,27 +1067,27 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     if (this.mounted && this.state.receipt === current) this.setState({ receipt: next });
+   };
+   organize = async (action: MailAction, openedThread?: Thread) => {
+-    const fromSpam = this.isSpamList() && ['inbox', 'trash', 'read', 'unread'].includes(action);
+-    const spamReader = openedThread && fromSpam && action === 'inbox' &&
+-      this.canRestoreSpamThread(openedThread);
+-    if (!spamReader && (this.state.route !== 'list' || this.state.busy || this.listActionsUnavailable())) return;
+-    if (this.isSpamList() && ['archive', 'spam'].includes(action)) return;
+-    const targets = spamReader ? [{accountId: openedThread.accountId, threadId: openedThread.id}] : this.selectedTargets();
+-    if (!targets.length || (fromSpam && !targets.every(target => actionAvailable(action, target.accountId, true)))) return;
++    const recoveryRole = this.recoveryList();
++    const fromSpam = recoveryRole === 'spam';
++    const fromTrash = recoveryRole === 'trash';
++    const readerRestore = openedThread && action === 'inbox' && this.canRestoreThread(openedThread);
++    if (!readerRestore && (this.state.route !== 'list' || this.state.busy || this.listActionsUnavailable())) return;
++    const targets = readerRestore ? [{accountId: openedThread.accountId, threadId: openedThread.id}] : this.selectedTargets();
++    if (!targets.length || (recoveryRole && !targets.every(target => actionAvailable(action, target.accountId, recoveryRole)))) return;
+     const fromArchive = action === 'inbox' && this.isArchiveList();
+     const scope = this.listReadScope();
+     this.receiptStarted = Date.now();
+     this.setState({ busy: true, receipt: [], receiptAction: action },
+-      (fromArchive || fromSpam) ? this.restoreListFocus() : undefined);
++      (fromArchive || recoveryRole) ? this.restoreListFocus() : undefined);
+     try {
+       const result = await organizeMail(
+-        { action, targets, requestId: randomUUID(), fromArchive, fromSpam },
++        { action, targets, requestId: randomUUID(), fromArchive, fromSpam, fromTrash },
+         inboxDesktopAccess
+       );
+       if (this.mounted)
+         this.setState(previous => ({
+           receipt: result.items,
+-          checked: (fromArchive || fromSpam) && (previous.route !== 'list' || scope !== this.listReadScope())
++          checked: (fromArchive || recoveryRole) && (previous.route !== 'list' || scope !== this.listReadScope())
+             ? previous.checked : [],
+           busy: false,
+         }), () => {
+@@ -1098,7 +1103,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     const items = this.state.receipt.filter((r) => r.undoable);
+     if (!items.length) return;
+     this.receiptStarted = Date.now();
+-    this.setState({ busy: true }, (this.isArchiveList() || this.isSpamList()) ? this.restoreListFocus() : undefined);
++    this.setState({ busy: true }, (this.isArchiveList() || this.recoveryList()) ? this.restoreListFocus() : undefined);
+     const receipts = await Promise.all(
+       items.map(async (item) => {
+         try {
+@@ -1130,7 +1135,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     const list = this.state.route === 'list';
+     const listReady = list && !this.listActionsUnavailable();
+     const archive = this.isArchiveList();
+-    const spam = this.isSpamList();
++    const recoveryRole = this.recoveryList();
+     const browse = (delta: number) => {
+       const rows = Array.from(document.querySelectorAll<HTMLButtonElement>('.pr-mail-row'));
+       const index = rows.indexOf(this.focusedRow());
+@@ -1149,19 +1154,21 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       { id: 'multiselect-list:deselect-all', title: '取消选择', disabled: !list || this.followUpRefilling(), run: () => this.setState({ checked: [] }) },
+       ...([['archive', '归档'], ['trash', '移到废纸篓'], ['read', '标为已读'], ['unread', '标为未读']] as [MailAction, string][]).map(([action, title]) => ({
+         id: { archive: 'core:archive-item', trash: 'core:delete-item', read: 'core:mark-as-read', unread: 'core:mark-as-unread' }[action],
+-        title, disabled: !listReady || ((archive || spam) && action === 'archive') || this.state.busy ||
++        title, disabled: !listReady || (archive && action === 'archive') || this.state.busy ||
+           this.state.loading || !this.selectedTargets().length ||
+-          !this.selectedTargets().every(t => actionAvailable(action, t.accountId, spam)),
++          !this.selectedTargets().every(t => actionAvailable(action, t.accountId, recoveryRole)),
+         run: () => this.organize(action),
+       })),
+-      { id: 'paper-reed:restore-archive', title: '移回收件箱',
++      { id: 'paper-reed:restore-archive', title: '从归档移回收件箱',
+         disabled: !archive || !listReady || this.state.busy || !this.selectedTargets().length ||
+           !this.selectedTargets().every(target => actionAvailable('inbox', target.accountId)),
+         run: () => this.organize('inbox') },
+-      { id: 'paper-reed:restore-spam', title: '不是垃圾邮件',
+-        disabled: !spam || !listReady || this.state.busy || !this.selectedTargets().length ||
+-          !this.selectedTargets().every(target => actionAvailable('inbox', target.accountId, true)),
+-        run: () => this.organize('inbox') },
++      ...(['spam', 'trash'] as const).map(role => ({
++        id: `paper-reed:restore-${role}`, title: role === 'spam' ? '不是垃圾邮件' : '从废纸篓移回收件箱',
++        disabled: recoveryRole !== role || !listReady || this.state.busy || !this.selectedTargets().length ||
++          !this.selectedTargets().every(target => actionAvailable('inbox', target.accountId, role)),
++        run: () => this.organize('inbox'),
++      })),
+       { id: 'paper-reed:settings', title: '打开设置', shortcutId: 'application:open-preferences', run: this.preferences },
+       { id: 'paper-reed:agent', title: '交给 Agent', disabled: list && (!listReady || this.isDraftList()), run: this.copyContext },
+     ];
+@@ -1198,12 +1205,12 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     const refilling = this.followUpRefilling();
+     const keepSelection = !searchUnavailable || refilling;
+     const selected = keepSelection ? this.selectedTargets() : [];
+-    const spam = this.isSpamList();
+-    const actions: [MailAction, string][] = spam ? [
+-      ['inbox', '不是垃圾邮件'],
++    const recoveryRole = this.recoveryList();
++    const actions: [MailAction, string][] = recoveryRole ? [
++      ['inbox', recoveryRole === 'spam' ? '不是垃圾邮件' : '移回收件箱'],
+       ['read', '标为已读'],
+       ['unread', '标为未读'],
+-      ['trash', '移到废纸篓'],
++      ...(recoveryRole === 'spam' ? [['trash', '移到废纸篓'] as [MailAction, string]] : []),
+     ] : [
+       ['read', '标为已读'],
+       ['unread', '标为未读'],
+@@ -1270,7 +1277,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+               .filter(
+                 ([action]) =>
+                   (action !== 'archive' || !this.isArchiveList()) &&
+-                  (action !== 'inbox' || this.isArchiveList() || spam ||
++                  (action !== 'inbox' || this.isArchiveList() || recoveryRole ||
+                   this.state.rows.some(
+                     (r) =>
+                       r instanceof Thread &&
+@@ -1282,17 +1289,18 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                 <button
+                   key={action}
+                   type="button"
+-                  className={spam && action === 'inbox' ? 'pr-not-spam' : undefined}
++                  className={recoveryRole && action === 'inbox' ?
++                    (recoveryRole === 'spam' ? 'pr-not-spam' : 'pr-restore-trash') : undefined}
+                   data-mail-action={action}
+                   title={
+-                    !selected.every((t) => actionAvailable(action, t.accountId, spam))
++                    !selected.every((t) => actionAvailable(action, t.accountId, recoveryRole))
+                       ? '所选邮箱尚不支持此操作'
+                       : title
+                   }
+                   disabled={
+                     this.state.busy ||
+                     this.state.loading ||
+-                    !selected.every((t) => actionAvailable(action, t.accountId, spam))
++                    !selected.every((t) => actionAvailable(action, t.accountId, recoveryRole))
+                   }
+                   aria-disabled={refilling || undefined}
+                   onClick={() => this.organize(action)}
+@@ -1335,7 +1343,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       </div>
+     );
+   }
+-  renderSearchEmpty(mailbox?: '已发送' | '归档' | '垃圾') {
++  renderSearchEmpty(mailbox?: '已发送' | '归档' | '垃圾' | '废纸篓') {
+     return (
+       <div className="pr-search-empty">
+         <div role="status">
+@@ -1388,7 +1396,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+           aria-label="关闭整理结果"
+           onKeyDown={keepNativeButtonActivation}
+           onClick={() => this.setState({ receipt: [] },
+-            (this.isArchiveList() || this.isSpamList()) ? this.restoreListFocus() : undefined)}
++            (this.isArchiveList() || this.recoveryList()) ? this.restoreListFocus() : undefined)}
+         >
+           ×
+         </button>
+@@ -1459,7 +1467,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+       contacts?.[0];
+     const sent = this.isSentList();
+     const outgoing = sent ? this.state.sentMessages[row.id] : undefined;
+-    const unread = this.isSpamList() ? this.state.spamUnread[row.id] : row.unread;
++    const unread = this.state.folderUnread[row.id] ?? row.unread;
+     const recipients = outgoing?.participants({ includeFrom: false, includeBcc: true }) || [];
+     const recipientNames = recipients.slice(0, 2)
+       .map(contact => contact.fullName() || contact.email).join('、');
+@@ -1767,15 +1775,17 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+     const drafts = draftList && !searchActive;
+     const sent = route === 'list' && !searchActive && this.isSentList();
+     const archive = route === 'list' && !searchActive && this.isArchiveList();
+-    const spam = route === 'list' && !searchActive && this.isSpamList();
+-    const spamReader = route === 'thread' && this.isSpamList() && selected instanceof Thread;
+-    const canRestoreSpam = spamReader && this.canRestoreSpamThread(selected);
++    const recoveryRole = this.recoveryList();
++    const recoveryList = route === 'list' && !searchActive && recoveryRole;
++    const recoveryReader = route === 'thread' && recoveryRole && selected instanceof Thread;
++    const canRestore = recoveryReader && this.canRestoreThread(selected);
++    const recoveryFolderName = recoveryRole === 'spam' ? '垃圾邮件' : '废纸篓';
+     const operationsRead = this.state.operationsRead?.scope === this.operationsScope()
+       ? this.state.operationsRead : null;
+     const operations = operationsRead ? this.state.operations : [];
+     const followUp = route === 'list' ? this.followUpView() : null;
+     const snoozed = followUp === 'snoozed';
+-    const localList = !!followUp || drafts || sent || archive || spam;
++    const localList = !!followUp || drafts || sent || archive || recoveryList;
+     const atListLimit = this.state.limit >= 100;
+     const readBelowSearch = searchActive || localList || (route === 'list' && this.state.searchClearing);
+     const searchUnavailable = route === 'list' && this.listActionsUnavailable();
+@@ -1956,10 +1966,10 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                   <div className={drafts ? 'pr-notice pr-draft-read-error' :
+                     sent ? 'pr-notice pr-sent-read-error' :
+                     archive ? 'pr-notice pr-archive-read-error' :
+-                    spam ? 'pr-notice pr-spam-read-error' : 'pr-notice'} role="alert">
++                    recoveryList ? `pr-notice pr-${recoveryRole}-read-error` : 'pr-notice'} role="alert">
+                     {drafts ? '草稿暂时无法读取。' : sent ? '已发送邮件暂时无法读取。' :
+                       archive ? '归档邮件暂时无法读取。' :
+-                      spam ? '垃圾邮件暂时无法读取。' : mailReadError}
++                      recoveryList ? `${recoveryFolderName}暂时无法读取。` : mailReadError}
+                     <button onKeyDown={keepNativeButtonActivation} onClick={this.retrySearchRead}>重新读取</button>
+                   </div>
+                 )}
+@@ -2009,11 +2019,12 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                         </button>
+                       </div>
+                   )}
+-                  {spam && !searchUnavailable && !rows.length && (
+-                    this.state.unreadOnly ? this.renderSearchEmpty('垃圾') :
+-                      <div className="pr-follow-up-empty pr-spam-empty">
+-                        <p role="status">{accounts.length && !accounts.some(account => spamFolder(account.id))
+-                          ? '当前邮箱尚无垃圾邮件文件夹' : '本机暂无垃圾邮件'}</p>
++                  {recoveryList && !searchUnavailable && !rows.length && (
++                    this.state.unreadOnly ? this.renderSearchEmpty(recoveryRole === 'spam' ? '垃圾' : '废纸篓') :
++                      <div className={`pr-follow-up-empty pr-${recoveryRole}-empty`}>
++                        <p role="status">{accounts.length && !accounts.some(account => recoveryFolder(account.id, recoveryRole))
++                          ? `当前邮箱尚无${recoveryFolderName}文件夹`
++                          : recoveryRole === 'spam' ? '本机暂无垃圾邮件' : '本机废纸篓为空'}</p>
+                         <button type="button" onKeyDown={keepNativeButtonActivation}
+                           onClick={() => void this.navigate('inbox')}>
+                           返回收件箱
+@@ -2021,11 +2032,11 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                       </div>
+                   )}
+                   {searchActive && !searchUnavailable && !rows.length && this.renderSearchEmpty()}
+-                  {!searchActive && !rows.length && !emptyInbox && (!readFailed || ((sent || archive || spam) && loading)) &&
+-                    (drafts || sent || archive || spam ? searchUnavailable : !followUp || loading) && (
++                  {!searchActive && !rows.length && !emptyInbox && (!readFailed || ((sent || archive || recoveryList) && loading)) &&
++                    (drafts || sent || archive || recoveryList ? searchUnavailable : !followUp || loading) && (
+                     <p className="pr-empty" role="status">
+                       {drafts ? '正在读取草稿…' : sent ? '正在读取已发送邮件…' :
+-                        archive ? '正在读取归档邮件…' : spam ? '正在读取垃圾邮件…' :
++                        archive ? '正在读取归档邮件…' : recoveryList ? `正在读取${recoveryFolderName}…` :
+                         loading ? '正在读取邮件…' : '这里还没有邮件'}
+                     </p>
+                   )}
+@@ -2043,7 +2054,7 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                           : followUp === 'pinned' ? '已显示前 100 个置顶会话'
+                           : sent ? '已显示前 100 个已发送会话'
+                           : archive ? '已显示前 100 个归档会话'
+-                          : spam ? '已显示前 100 个垃圾邮件会话' : '已显示 100 个会话，请缩小搜索范围')
++                          : recoveryList ? `已显示前 100 个${recoveryFolderName}会话` : '已显示 100 个会话，请缩小搜索范围')
+                         : '加载更多'}
+                     </button>
+                   )}
+@@ -2057,12 +2068,12 @@ export default class PaperReedWorkspace extends React.Component<Record<string, n
+                   popInRequest={this.state.popInRequest}
+                   paperReedLocation={{folder: this.state.folder, accountId: this.state.accountId}}
+                   threadActions={<>
+-                    {spamReader && (
+-                      <div className="pr-spam-reader-actions">
+-                        <button type="button" className="pr-not-spam" aria-disabled={!canRestoreSpam}
+-                          onKeyDown={keepNativeButtonActivation}
+-                          onClick={() => { if (canRestoreSpam) void this.organize('inbox', selected as Thread); }}>
+-                          不是垃圾邮件
++                    {recoveryReader && (
++                      <div className={`pr-${recoveryRole}-reader-actions`}>
++                        <button type="button" className={recoveryRole === 'spam' ? 'pr-not-spam' : 'pr-restore-trash'}
++                          aria-disabled={!canRestore} onKeyDown={keepNativeButtonActivation}
++                          onClick={() => { if (canRestore) void this.organize('inbox', selected as Thread); }}>
++                          {recoveryRole === 'spam' ? '不是垃圾邮件' : '移回收件箱'}
+                         </button>
+                       </div>
+                     )}
+diff --git a/app/internal_packages/paper-reed/styles/paper-reed.less b/app/internal_packages/paper-reed/styles/paper-reed.less
+index 22350171957b3dea9f2f86d0bbdbc7b6bfd72fd9..8e7707185eb8317e41ffbadf3505a69ca7fc3513 100644
+--- a/app/internal_packages/paper-reed/styles/paper-reed.less
++++ b/app/internal_packages/paper-reed/styles/paper-reed.less
+@@ -971,7 +971,7 @@
+   .pr-selection-actions { display:flex; flex-wrap:wrap; gap:6px 12px; padding:10px 0; border-bottom:1px solid var(--pr-line); }
+   .pr-selection-actions button { font-size:12px; color:var(--pr-reed); }
+   .pr-selection-actions button:last-child { margin-left:auto; color:var(--pr-muted); }
+-  .pr-not-spam {
++  .pr-not-spam, .pr-restore-trash {
+     border: 1px solid var(--pr-line);
+     border-radius: 4px;
+     background: var(--pr-inset);
+@@ -979,9 +979,9 @@
+     font-weight: 600;
+     padding: 4px 8px;
+   }
+-  .pr-not-spam:not(:disabled):not([aria-disabled=true]):hover { border-color: var(--pr-reed); }
+-  .pr-not-spam:disabled, .pr-not-spam[aria-disabled=true] { opacity: .55; }
+-  .pr-spam-reader-actions { margin-bottom: 12px; }
++  :is(.pr-not-spam, .pr-restore-trash):not(:disabled):not([aria-disabled=true]):hover { border-color: var(--pr-reed); }
++  :is(.pr-not-spam, .pr-restore-trash):is(:disabled, [aria-disabled=true]) { opacity: .55; }
++  .pr-spam-reader-actions, .pr-trash-reader-actions { margin-bottom: 12px; }
+   .pr-mail-item { display:grid; grid-template-columns:18px minmax(0,1fr); gap:10px; align-items:center; border-bottom:1px solid var(--pr-line); }
+   .pr-mail-item > input { margin:0 2px; cursor:pointer; }
+   .pr-mail-item.selected { background:#edf0e8; }
+diff --git a/app/src/flux/stores/message-store.ts b/app/src/flux/stores/message-store.ts
+index 5c646c2d36b5f19151336c423aae56326702a39b..c6633065ed69bec205ab224ff4d8a491fc024934 100644
+--- a/app/src/flux/stores/message-store.ts
++++ b/app/src/flux/stores/message-store.ts
+@@ -220,16 +220,19 @@ class _MessageStore extends MailspringStore {
+     // prompts (since this is a passive action vs. a user-triggered
+     // action.)
+     if (!this._thread) return;
+-    const inSpam = () => AppEnv.config.get('core.paperReed.enabled') &&
+-      FocusedPerspectiveStore.current().categoriesSharedRole() === 'spam';
+-    const spam = inSpam();
+-    const spamFolder = spam ? CategoryStore.getSpamCategory(this._thread.accountId) : null;
+-    if (spam && !(spamFolder instanceof Folder)) return;
+-    const scope = JSON.stringify([this._thread.id, spamFolder?.id]);
++    const recoveryRole = () => {
++      if (!AppEnv.config.get('core.paperReed.enabled')) return null;
++      const role = FocusedPerspectiveStore.current().categoriesSharedRole();
++      return role === 'spam' || role === 'trash' ? role : null;
++    };
++    const role = recoveryRole();
++    const folder = role ? CategoryStore.getCategoryByRole(this._thread.accountId, role) : null;
++    if (role && !(folder instanceof Folder)) return;
++    const scope = JSON.stringify([this._thread.id, folder?.id]);
+     if (this._lastMarkedAsReadThreadId === scope) return;
+     this._lastMarkedAsReadThreadId = scope;
+-    const unread = () => spamFolder
+-      ? this._items.some(message => !!(message.folders?.[spamFolder.id] & 1))
++    const unread = () => folder
++      ? this._items.some(message => !!(message.folders?.[folder.id] & 1))
+       : this._thread.unread;
+ 
+     if (unread()) {
+@@ -238,10 +241,10 @@ class _MessageStore extends MailspringStore {
+       if (markAsReadDelay < 0) return;
+ 
+       setTimeout(() => {
+-        if (markAsReadId !== this.threadId() || spam !== inSpam() || !unread()) return;
+-        if (spamFolder) {
++        if (markAsReadId !== this.threadId() || role !== recoveryRole() || !unread()) return;
++        if (folder) {
+           Actions.queueTask(new ChangeUnreadTask({
+-            threads: [this._thread], unread: false, sourceFolderId: spamFolder.id,
++            threads: [this._thread], unread: false, sourceFolderId: folder.id,
+             source: 'Thread Selected', canBeUndone: false,
+           }));
+           return;
+diff --git a/app/src/flux/tasks/change-mail-task.ts b/app/src/flux/tasks/change-mail-task.ts
+index 65781932137bfbfa31f0e9af30b674b7102b7c87..4f742c8e3cf28fce664b67b336960587ead7bb00 100644
+--- a/app/src/flux/tasks/change-mail-task.ts
++++ b/app/src/flux/tasks/change-mail-task.ts
+@@ -36,7 +36,7 @@ export class ChangeMailTask extends Task {
+     }),
+   };
+ 
+-  paperReed?: { action: string; threadId: string; requestId: string; undoable: boolean; fromArchive?: boolean; fromSpam?: boolean };
++  paperReed?: { action: string; threadId: string; requestId: string; undoable: boolean; fromArchive?: boolean; fromSpam?: boolean; fromTrash?: boolean };
+   threadIds: string[];
+   messageIds: string[];
+   isUndo: boolean;
+diff --git a/app/src/services/mail-core/inbox.ts b/app/src/services/mail-core/inbox.ts
+index acc4e1e6729fb1d730448c9c973ef8a613418412..5c53dcd8ed59871eaac944d9e19fabaf86bbe2be 100644
+--- a/app/src/services/mail-core/inbox.ts
++++ b/app/src/services/mail-core/inbox.ts
+@@ -77,8 +77,10 @@ export function archiveFolder(accountId: string) {
+   return folder instanceof Folder ? folder : null;
+ }
+ 
+-export function spamFolder(accountId: string) {
+-  const folder = CategoryStore.getSpamCategory(accountId);
++export type RecoveryRole = 'spam' | 'trash';
++
++export function recoveryFolder(accountId: string, role: RecoveryRole) {
++  const folder = CategoryStore.getCategoryByRole(accountId, role);
+   return folder instanceof Folder ? folder : null;
+ }
+ 
+@@ -114,13 +116,13 @@ export async function queryInboxPage(input: InboxQuery, access: InboxAccess) {
+   const searching = !!input.query?.trim();
+   const snoozed = input.localView === 'snoozed';
+   const readingSent = input.folder === 'sent' && !searching && !snoozed;
+-  const readingSpam = input.folder === 'spam' && !snoozed;
++  const recoveryRole = !snoozed && (input.folder === 'spam' || input.folder === 'trash') ? input.folder : null;
+   const limit = Math.min(input.limit, 201);
+   const offset = input.offset || 0;
+   const clauses: any[] = [];
+   const archive = input.folder === 'archive' ? archiveMembership(ids, grant) : null;
+-  if (input.folder && input.folder !== 'archive' && !readingSpam) clauses.push({ in: input.folder });
+-  if (input.unread && !readingSpam) clauses.push({ unread: true });
++  if (input.folder && input.folder !== 'archive' && !recoveryRole) clauses.push({ in: input.folder });
++  if (input.unread && !recoveryRole) clauses.push({ unread: true });
+   const makeQuery = (pinned?: boolean) => {
+     const query = threadQuery({ ...grant, accountIds: ids }, {
+       search: input.query,
+@@ -140,7 +142,7 @@ export async function queryInboxPage(input: InboxQuery, access: InboxAccess) {
+   let rows: Thread[];
+   let reminders: Map<string, number>;
+   let sent: { categoryIds: string[]; messages: Record<string, Message> } | undefined;
+-  let spamUnread: Record<string, boolean> | undefined;
++  let folderUnread: Record<string, boolean> | undefined;
+   if (readingSent) {
+     const excluded = new Set(Object.values(grant.excludedFolderIds).flat());
+     const categoryIds = sentCategoryIds(ids).filter(id => !excluded.has(id));
+@@ -172,11 +174,11 @@ export async function queryInboxPage(input: InboxQuery, access: InboxAccess) {
+         if (isMessageAllowed(access.grant(), message)) sent.messages[thread.id] = message;
+       }
+     }
+-  } else if (readingSpam) {
+-    const folderIds = ids.map(spamFolder).filter(folder => folder && isFolderAllowed(grant, folder.accountId, folder.id))
++  } else if (recoveryRole) {
++    const folderIds = ids.map(id => recoveryFolder(id, recoveryRole)).filter(folder => folder && isFolderAllowed(grant, folder.accountId, folder.id))
+       .map(folder => folder.id);
+     rows = [];
+-    spamUnread = {};
++    folderUnread = {};
+     if (folderIds.length) {
+       const eligible = makeQuery().idsOnly().limit(-1).sql();
+       const result = await DatabaseStore._query(
+@@ -191,7 +193,7 @@ export async function queryInboxPage(input: InboxQuery, access: InboxAccess) {
+       for (const row of result) {
+         const thread = new Thread(JSON.parse(row.data));
+         rows.push(thread);
+-        spamUnread[thread.id] = !!row.unread;
++        folderUnread[thread.id] = !!row.unread;
+       }
+     }
+   } else if (snoozed) {
+@@ -217,7 +219,7 @@ export async function queryInboxPage(input: InboxQuery, access: InboxAccess) {
+     rows = result.map(row => new Thread(JSON.parse(row.data)));
+   } else rows = await makeQuery().offset(offset);
+   input.accountIds.forEach((id) => access.check(id, false));
+-  return { rows: rows.filter(t => isThreadAllowed(access.grant(), t)), reminders, sent, spamUnread };
++  return { rows: rows.filter(t => isThreadAllowed(access.grant(), t)), reminders, sent, folderUnread };
+ }
+ function taskId(accountId: string, requestId: string, threadId: string) {
+   return (
+@@ -295,8 +297,12 @@ async function queued(task: ChangeMailTask, key: string) {
+     status: 'queued',
+   };
+ }
+-export function actionAvailable(action: MailAction, accountId: string, fromSpam = false) {
+-  if (fromSpam && !spamFolder(accountId)) return false;
++function recoveryActionAllowed(action: MailAction, role: RecoveryRole) {
++  return ['inbox', 'read', 'unread'].includes(action) || (role === 'spam' && action === 'trash');
++}
++
++export function actionAvailable(action: MailAction, accountId: string, from?: RecoveryRole) {
++  if (from && (!recoveryActionAllowed(action, from) || !recoveryFolder(accountId, from))) return false;
+   if (action === 'read' || action === 'unread') return true;
+   if (CategoryStore.getInboxCategory(accountId) instanceof Label) {
+     const physical = ['archive', 'inbox'].includes(action) ? 'all' : action;
+@@ -310,15 +316,18 @@ export function actionAvailable(action: MailAction, accountId: string, fromSpam
+   return CategoryStore.getCategoryByRole(accountId, action) instanceof Folder;
+ }
+ export async function organizeMail(
+-  input: { action: MailAction; targets: MailTarget[]; requestId: string; fromArchive?: boolean; fromSpam?: boolean },
++  input: { action: MailAction; targets: MailTarget[]; requestId: string; fromArchive?: boolean; fromSpam?: boolean; fromTrash?: boolean },
+   access: InboxAccess
+ ) {
+   if (!['read', 'unread', 'archive', 'spam', 'trash', 'inbox'].includes(input.action))
+     throw new Error('invalid-action');
+   const fromArchive = input.fromArchive === true;
+   const fromSpam = input.fromSpam === true;
+-  if ((fromArchive && (fromSpam || input.action !== 'inbox')) ||
+-      (fromSpam && !['inbox', 'trash', 'read', 'unread'].includes(input.action))) throw new Error('invalid-action');
++  const fromTrash = input.fromTrash === true;
++  const recoveryRole = fromSpam ? 'spam' : fromTrash ? 'trash' : undefined;
++  if ([fromArchive, fromSpam, fromTrash].filter(Boolean).length > 1 ||
++      (fromArchive && input.action !== 'inbox') ||
++      (recoveryRole && !recoveryActionAllowed(input.action, recoveryRole))) throw new Error('invalid-action');
+   if (
+     !input.requestId ||
+     input.requestId.length > 200 ||
+@@ -339,11 +348,12 @@ export async function organizeMail(
+       if (existing) {
+         if (existing.paperReed?.action !== input.action ||
+             !!existing.paperReed?.fromArchive !== fromArchive ||
+-            !!existing.paperReed?.fromSpam !== fromSpam) throw new Error('request-conflict');
++            !!existing.paperReed?.fromSpam !== fromSpam ||
++            !!existing.paperReed?.fromTrash !== fromTrash) throw new Error('request-conflict');
+         items.push(receipt(await taskFor(target.accountId, id, access, true)));
+         continue;
+       }
+-      const sourceKey = fromArchive ? ':archive-source' : fromSpam ? ':spam-source' : '';
++      const sourceKey = fromArchive ? ':archive-source' : recoveryRole ? `:${recoveryRole}-source` : '';
+       const pendingKey = id + ':' + input.action + sourceKey;
+       if ([...pending.keys()].some((k) => k.startsWith(id + ':') && k !== pendingKey))
+         throw new Error('request-conflict');
+@@ -365,13 +375,13 @@ export async function organizeMail(
+             });
+             if (messages.some((m) => !isMessageAllowed(access.grant(), m)))
+               throw new Error('Access denied: excluded mail');
+-            if (!actionAvailable(input.action, target.accountId, fromSpam))
++            if (!actionAvailable(input.action, target.accountId, recoveryRole))
+               throw new Error('unsupported-mailbox-action');
+             const sourceArchive = fromArchive ? archiveFolder(target.accountId) : null;
+-            const sourceSpam = fromSpam ? spamFolder(target.accountId) : null;
++            const scopedFolder = recoveryRole ? recoveryFolder(target.accountId, recoveryRole) : null;
+             if (fromArchive && !sourceArchive)
+               throw new Error('unsupported-mailbox-action');
+-            const source = sourceArchive || sourceSpam;
++            const source = sourceArchive || scopedFolder;
+             if (source && !isFolderAllowed(access.grant(), target.accountId, source.id))
+               throw new Error('Access denied: source excluded');
+             if (source && messages.length) {
+@@ -387,8 +397,8 @@ export async function organizeMail(
+             let undoable = true;
+             if (input.action === 'read' || input.action === 'unread') {
+               const unread = input.action === 'unread';
+-              if (sourceSpam) {
+-                messages = messages.filter(message => message.folderIds().includes(sourceSpam.id));
++              if (scopedFolder) {
++                messages = messages.filter(message => message.folderIds().includes(scopedFolder.id));
+               } else {
+                 messages = messages.filter((m) => m.unread !== unread);
+                 // Mixed flags across copies cannot be reversed by a whole-message flag change.
+@@ -397,7 +407,7 @@ export async function organizeMail(
+                 );
+               }
+               task = new ChangeUnreadTask({ messages, unread, source: 'Paper Reed',
+-                ...(sourceSpam ? { sourceFolderId: sourceSpam.id } : {}),
++                ...(scopedFolder ? { sourceFolderId: scopedFolder.id } : {}),
+               });
+             } else if (CategoryStore.getInboxCategory(target.accountId) instanceof Label) {
+               const inbox = CategoryStore.getInboxCategory(target.accountId);
+@@ -412,13 +422,13 @@ export async function organizeMail(
+                 if (input.action === 'archive') return inInbox && m.folderIds().includes(destination.id);
+                 if (sourceArchive) return m.folderIds().includes(sourceArchive.id) &&
+                   !(m.labels || []).some(label => gmailOutsideArchive.includes(label));
+-                if (sourceSpam) return m.folderIds().includes(sourceSpam.id);
++                if (scopedFolder) return m.folderIds().includes(scopedFolder.id);
+                 if (input.action === 'inbox') return !inInbox || !m.folderIds().includes(destination.id);
+                 return m.folderIds().some((id) => id !== destination.id);
+               });
+               task = new ChangeFolderTask({
+                 messages, folder: destination, gmailInbox: input.action === 'inbox', source: 'Paper Reed',
+-                ...(sourceSpam ? { sourceFolderIds: [sourceSpam.id], exactPlacementUndo: true } : {}),
++                ...(scopedFolder ? { sourceFolderIds: [scopedFolder.id], exactPlacementUndo: true } : {}),
+               });
+             } else {
+               const destination =
+@@ -456,6 +466,7 @@ export async function organizeMail(
+               undoable,
+               ...(fromArchive ? { fromArchive } : {}),
+               ...(fromSpam ? { fromSpam } : {}),
++              ...(fromTrash ? { fromTrash } : {}),
+             };
+             access.check(target.accountId, true);
+             if (messages.some((m) => !isMessageAllowed(access.grant(), m)))

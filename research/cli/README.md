@@ -100,7 +100,9 @@ paper-reed undo --input '{"accountId":"ACCOUNT_ID","taskId":"TASK_ID"}'
 
 使用 `change-get` 查询每个任务。返回 `undoable: true` 后可提交撤销请求，并继续查询撤销任务。`trash` 将邮件移入废纸篓。对 `local-list` 的归档结果使用 `restore-inbox` 时，在 JSON 输入中添加 `"fromArchive": true`，只恢复归档副本。在 `restore-inbox`、`trash`、`mark-read` 或 `mark-unread` 的输入中添加 `"fromSpam": true`，只处理邮件在垃圾邮件文件夹中的副本。`local-list` 查询 `folder: "spam"` 时按垃圾邮件副本的未读状态筛选和返回结果。
 
-限定垃圾邮件来源的标读任务按入队顺序核对服务器状态。如果执行时所有目标副本已经处于所请求的状态，回执为 `succeeded` 且 `undoable: false`。如果只确认了部分写入，回执为 `failed`，其中 `undoable: true` 表示可以撤销已确认的改动。
+对废纸篓结果，`restore-inbox`、`mark-read` 和 `mark-unread` 可以指定 `"fromTrash": true`。操作仅影响废纸篓里的副本，`local-list` 查询 `folder: "trash"` 时也按该文件夹的未读状态返回结果。归档、垃圾邮件和废纸篓三种来源每次只能选一种。
+
+限定垃圾邮件或废纸篓来源的标读任务按入队顺序核对服务器状态。如果执行时所有目标副本已经处于所请求的状态，回执为 `succeeded` 且 `undoable: false`。如果只确认了部分写入，回执为 `failed`，其中 `undoable: true` 表示可以撤销已确认的改动。
 
 重试保持同一请求 ID、目标和动作；仍保留的同一任务不会重复提交，相同目标换动作会返回 `request-conflict`。每个任务只处理提交时已经存在的邮件，后来进入会话的邮件不自动包含在内。
 

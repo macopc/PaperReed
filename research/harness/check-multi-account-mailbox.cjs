@@ -35,6 +35,11 @@ async function stop(){const p=app.process();await app.evaluate(({app})=>app.quit
   await stop();
   return;
  }
+ if(process.env.PAPER_REED_TRASH_PAGE_CHECK){
+  await require('./check-trash-page.cjs')({main,cdp,out,accounts,cli,truth,until,evaluate,pass,complete,undo});
+  await stop();
+  return;
+ }
  const otherRule=await cli('rule-save', {
    accountId:accounts[1].id,name:'第二邮箱规则',field:'subject',
    query:'shared subject',action:'category',value:'notifications',enabled:false,

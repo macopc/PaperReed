@@ -23,6 +23,7 @@ from fakeimap.personalities import personality
 work=Path(tempfile.mkdtemp(prefix='multi-mailbox-',dir=upstream.parent))
 archive_phase=os.environ.get('PAPER_REED_ARCHIVE_PAGE_CHECK', '')
 spam_phase=os.environ.get('PAPER_REED_SPAM_PAGE_CHECK', '')
+trash_phase=os.environ.get('PAPER_REED_TRASH_PAGE_CHECK', '')
 ordinary = personality('dovecot').without('MOVE') if archive_phase.startswith('copy') else 'dovecot'
 servers=[FakeServer('gmail',smtp=True,email='account0@example.test'),FakeServer(ordinary,smtp=True,email='account1@example.test')]
 run=None
@@ -115,6 +116,19 @@ try:
                     for index in range(100):
                         server.append('Junk', message(20 + index, subject=f'Junk fixture {index}',
                                       message_id=f'<junk-page-{index}@example.test>'), flags=['\\Seen'])
+        if trash_phase:
+            raw = message(8, subject='Mail to recover', message_id=f'<trash-review-{i}@example.test>')
+            folder = '[Gmail]/Trash' if i == 0 else 'Trash'
+            flags = [] if trash_phase == 'reader-unread' and i == 1 else ['\\Seen']
+            uid = server.append(folder, raw, flags=flags)
+            if i == 0:
+                server.store.set_labels(folder, [uid], 'add', ['Projects'])
+            else:
+                server.append('Archive', raw, flags=['\\Flagged'])
+                if trash_phase == 'pagination':
+                    for index in range(100):
+                        server.append(folder, message(40 + index, subject=f'Trash fixture {index}',
+                                      message_id=f'<trash-page-{index}@example.test>'), flags=['\\Seen'])
         server.start()
         accounts.append(account_json(**server.account_kwargs(),account_id=f'c-mixed-{i}'))
     (work/'accounts.json').write_text(json.dumps(accounts))
@@ -212,11 +226,12 @@ finally:
                     if direction == 'C' and any(command in line.upper() for command in
                         (' SELECT ', ' UID MOVE ', ' UID COPY ', ' UID STORE ', ' UID EXPUNGE '))]
         (work/'archive-source-commands.log').write_text('\n'.join(commands)+'\n')
-    if spam_phase:
+    if spam_phase or trash_phase:
         for i, server in enumerate(servers):
             commands = [line for _, _, direction, line in server.imap.transcript
                         if direction == 'C' and any(op in line.upper() for op in
                             (' UID MOVE ', ' UID COPY ', ' UID STORE ', ' UID EXPUNGE '))]
-            (work/f'spam-commands-{i}.log').write_text('\n'.join(commands)+'\n')
+            view = 'trash' if trash_phase else 'spam'
+            (work/f'{view}-commands-{i}.log').write_text('\n'.join(commands)+'\n')
     for s in servers:s.stop()
     print('Artifacts:',work)
