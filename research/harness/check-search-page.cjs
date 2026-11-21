@@ -292,6 +292,7 @@ module.exports = async ({ main, cdp, evaluate, until, account }) => {
       await run('resetSave()');
     });
     await test('agentScope', async () => {
+      await run('require(AppEnv.getLoadSettings().resourcePath + "/internal_packages/mcp-server/lib/paper-reed-cli").installCLI().then(() => true)');
       await beginSearch(project, 1);
       await main.locator('.pr-mail-item input').check();
       await run(`(() => {

@@ -12,7 +12,7 @@ module.exports = async ({
   evaluate,
   until,
 }) => {
-  const out = path.resolve(
+  const out = process.env.PAPER_REED_UI_OUTPUT || path.resolve(
     __dirname,
     '../cli-onboarding-validation-2026-11-16'
   );
@@ -52,6 +52,7 @@ module.exports = async ({
       'installer idle'
     );
   await action('.pr-copy-agent');
+  await main.locator('.pr-agent-panel').getByRole('button', {name: '打开连接设置'}).click();
   await until(
     () => run('!!document.querySelector(".pr-cli-setup")'),
     'composer offers CLI setup'
@@ -208,7 +209,7 @@ module.exports = async ({
       () => run('!!document.querySelector(".pr-copy-agent")'),
       'composer restored'
     );
-    await action('.pr-copy-agent');
+    await action('.pr-agent-copy');
     await until(
       () => run('window.prCliCopy.includes("draft-get")'),
       'draft instructions copied'
@@ -231,7 +232,7 @@ module.exports = async ({
       .filter({ hasText: '复制给 Agent' })
       .click();
     await until(
-      () => run('window.prCliCopy.includes("search")'),
+      () => run('window.prCliCopy.includes("local-list")'),
       'mailbox handoff'
     );
     prompt = JSON.parse(await run('window.prCliCopy'));

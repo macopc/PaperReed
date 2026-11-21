@@ -198,6 +198,7 @@ module.exports=async({app,main,cdp,work,account,cli,click,evaluate,until,restart
  assert.equal((await restoredEditor.innerText()).trim(),'Unsaved edit before Agent setup');
  const firstAgentAction=main.getByRole('button',{name:'连接 Agent',exact:true});
  await firstAgentAction.click();
+ await main.locator('.pr-agent-panel').getByRole('button',{name:'打开连接设置'}).click();
  await until(()=>evaluate(cdp,'!document.querySelector(".pr-workspace")'),'unsaved draft saved and Agent preferences opened');
  assert((await cli('draft-get',ref)).body.includes('Unsaved edit before Agent setup'));
  await evaluate(cdp,'require("mailspring-exports").Actions.selectRootSheet(require("mailspring-exports").WorkspaceStore.Sheet.Threads);true');
@@ -228,10 +229,14 @@ module.exports=async({app,main,cdp,work,account,cli,click,evaluate,until,restart
  await action('.pr-draft-status button');
  await until(async()=>(await text()).includes('已保存到本机'),'saved draft restored');
  await evaluate(cdp,`require(AppEnv.getLoadSettings().resourcePath+'/internal_packages/mcp-server/lib/paper-reed-cli').installCLI().then(()=>true)`);
+ const closeHandoff=main.getByRole('button',{name:'收起交接'});
+ if (await closeHandoff.count()) await closeHandoff.click();
  assert.equal(await main.locator('.pr-route-compose .pr-agent-button').count(),0,'Draft has one visible Agent entry');
+ await evaluate(cdp,`require('@electron/remote').clipboard.writeText=value=>{window.workspaceAgentPayload=value};true`);
  await main.locator('.pr-editor .pr-copy-agent').click();
- await until(async()=>(await text()).includes('已复制草稿引用'),'context copied');
- const context=await evaluate(cdp,'(async()=>JSON.parse(await require("@electron/remote").clipboard.readText()))()');
+ await main.locator('.pr-agent-copy').click();
+ await until(async()=>(await text()).includes('已复制任务，可粘贴到 Agent 会话。'),'context copied');
+ const context=await evaluate(cdp,'JSON.parse(window.workspaceAgentPayload)');
  assert.equal(context.context.draftId,created.draftId);assert.equal(context.context.revision,(await cli('draft-get',ref)).revision);
  await screenshot('agent-context');
  await main.locator('.pr-command-trigger').click();

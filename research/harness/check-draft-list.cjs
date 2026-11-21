@@ -135,6 +135,7 @@ module.exports = async ({app, main, cdp, evaluate, until, account, secondAccount
     assert.equal(await main.locator('.pr-subject-heading textarea').inputValue(), secondBefore.subject);
     const handoff = await run(`(async () => {
       const agent = require(AppEnv.getLoadSettings().resourcePath + '/internal_packages/mcp-server/lib/paper-reed-cli');
+      await agent.installCLI();
       const original = agent.agentHandoff;
       let captured;
       agent.agentHandoff = context => {
@@ -711,8 +712,9 @@ module.exports = async ({app, main, cdp, evaluate, until, account, secondAccount
 
     if (agent) {
       main.setDefaultTimeout(8000);
-      await run(`(() => {
+      await run(`(async () => {
         const cli = require(AppEnv.getLoadSettings().resourcePath + '/internal_packages/mcp-server/lib/paper-reed-cli');
+        await cli.installCLI();
         cli.agentHandoff = context => {
           window.movedDraftHandoff = context;
           throw new Error('fixture stops before writing to the system clipboard');
