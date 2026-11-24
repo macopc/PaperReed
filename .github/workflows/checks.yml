@@ -48,3 +48,4 @@ jobs:
         with:
           node-version: '22'
       - run: python3 scripts/prepare-desktop.py "$RUNNER_TEMP/paper-reed-desktop" --typecheck
+      - run: node research/harness/check-desktop-updates.cjs "$RUNNER_TEMP/paper-reed-desktop"
