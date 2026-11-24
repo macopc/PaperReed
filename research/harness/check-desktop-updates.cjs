@@ -13,7 +13,7 @@ const ts = require(path.join(desktop, 'node_modules/typescript'));
 const feedAsset = 'Paper-Reed-update-stable-macos-arm64.json';
 const feedURL = `https://github.com/macopc/PaperReed/releases/latest/download/${feedAsset}`;
 
-function updaterFixture({ version = '0.0.5', packaged = true, specMode = false,
+function updaterFixture({ version = '0.0.5-da520d2', appVersion = '0.0.5', packaged = true, specMode = false,
   platform = 'darwin', arch = 'arm64', paperReed = true } = {}) {
   const updater = new EventEmitter();
   const application = new EventEmitter();
@@ -31,7 +31,7 @@ function updaterFixture({ version = '0.0.5', packaged = true, specMode = false,
   application.windowManager = { sendToAllWindows: (...args) => releases.push(args) };
   const electron = {
     autoUpdater: updater,
-    app: { isPackaged: packaged },
+    app: { isPackaged: packaged, getVersion: () => appVersion },
     BrowserWindow: { getFocusedWindow: () => ({}) },
     dialog: {
       showMessageBox: async (...args) => {
@@ -72,7 +72,7 @@ function updaterFixture({ version = '0.0.5', packaged = true, specMode = false,
 test('selects the stable macOS arm64 feed and keeps unsupported builds off the network', () => {
   for (const options of [
     { platform: 'linux' }, { arch: 'x64' }, { packaged: false },
-    { specMode: true }, { version: '0.0.5-preview.1' },
+    { specMode: true }, { appVersion: '0.0.5-preview.1' },
   ]) {
     const { manager, feeds, timers } = updaterFixture(options);
     assert.equal(manager.getState(), 'unsupported');
@@ -83,11 +83,14 @@ test('selects the stable macOS arm64 feed and keeps unsupported builds off the n
   }
   const { manager, feeds, checks } = updaterFixture();
   assert.equal(checks, 1);
+  assert.equal(manager.version, '0.0.5');
   assert.equal(feeds[0].url, feedURL);
   assert.equal(feeds[0].serverType, 'json');
   manager.updateFeedURL();
   assert.equal(manager.feedURL, feedURL);
-  assert.match(updaterFixture({ paperReed: false }).feeds[0], /updates\.getmailspring\.com/);
+  const upstream = updaterFixture({ paperReed: false });
+  assert.equal(upstream.manager.version, '0.0.5-da520d2');
+  assert.match(upstream.feeds[0], /updates\.getmailspring\.com/);
 });
 
 test('coalesces scheduled and manual checks and retries after an error', () => {

@@ -1,0 +1,17 @@
+diff --git a/app/src/browser/autoupdate-manager.ts b/app/src/browser/autoupdate-manager.ts
+--- a/app/src/browser/autoupdate-manager.ts
++++ b/app/src/browser/autoupdate-manager.ts
+@@ -41,11 +41,12 @@
+     this.paperReed = config.get('core.paperReed.enabled');
+     if (this.paperReed) {
++      this.version = app.getVersion();
+       this.feedURL = paperReedUpdateFeed({
+         packaged: app.isPackaged,
+         specMode,
+         platform: process.platform,
+         arch: process.arch,
+-        version,
++        version: this.version,
+       });
+       if (!this.feedURL) {
+         this.state = UnsupportedState;

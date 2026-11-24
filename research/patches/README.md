@@ -225,3 +225,5 @@
 0089 让 macOS 和 Linux 的安装命令直接执行 Go CLI。原生程序读取同一私有连接配置并调用现有桌面 MCP 工具，保留命令、帮助、JSON 输出、发送回执恢复和退出码约定。打包时按目标架构编译，二进制放在 ASAR 的解包目录。旧 launcher 使用兼容入口。使用 prepare-desktop.py 和 build-desktop.py 时，Go 源码会随仓库同步到上游构建目录。
 
 0090 为正式打包的 macOS arm64 稳定版接入 Paper Reed 自己的 GitHub Releases 更新源。Electron 后台下载 ZIP，校验大小、哈希及应用签名。通过桌面菜单或下载完成提示重启安装。打包后的更新清单由 make-update-feed.py 生成。
+
+0091 Paper Reed 更新器使用应用的发布版本检查稳定版，避免带提交哈希的内部版本禁用正式包的更新。
