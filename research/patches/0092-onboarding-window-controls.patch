@@ -1,0 +1,306 @@
+diff --git a/app/internal_packages/onboarding/lib/page-top-bar.tsx b/app/internal_packages/onboarding/lib/page-top-bar.tsx
+index 8e8b449..c16685f 100644
+--- a/app/internal_packages/onboarding/lib/page-top-bar.tsx
++++ b/app/internal_packages/onboarding/lib/page-top-bar.tsx
+@@ -1,6 +1,7 @@
+ import React, { useEffect, useState } from 'react';
+ import { AccountStore } from 'mailspring-exports';
+ import { RetinaImg } from 'mailspring-component-kit';
++import { ToolbarWindowControls } from '../../../src/components/toolbar-window-controls';
+ import * as OnboardingActions from './onboarding-actions';
+ 
+ const PageTopBar = (props: {
+@@ -13,6 +14,7 @@ const PageTopBar = (props: {
+ }) => {
+   const { pageDepth } = props;
+   const paperReed = AppEnv.config.get('core.paperReed.enabled');
++  const macWindowControls = paperReed && process.platform === 'darwin';
+   const [hasAccounts, setHasAccounts] = useState(() => AccountStore.accounts().length > 0);
+   useEffect(() => {
+     if (!paperReed) return;
+@@ -20,6 +22,13 @@ const PageTopBar = (props: {
+     return () => { unsubscribe(); };
+   }, [paperReed]);
+ 
++  const closeLabel = hasAccounts ? '关闭邮箱设置' : '退出 Paper Reed';
++  const closeDisabled = props.disableNavigation || props.disableClose;
++  const closeWindow = () => {
++    if (AccountStore.accounts().length === 0) AppEnv.quit();
++    else AppEnv.close();
++  };
++
+   const closeClass = pageDepth > 1 ? 'back' : 'close';
+   const closeIcon = pageDepth > 1 ? 'onboarding-back.png' : 'onboarding-close.png';
+   const closeAction = () => {
+@@ -29,16 +38,12 @@ const PageTopBar = (props: {
+     } else if (pageDepth > 1) {
+       (props.onBack || OnboardingActions.moveToPreviousPage)();
+     } else {
+-      if (AccountStore.accounts().length === 0) {
+-        AppEnv.quit();
+-      } else {
+-        AppEnv.close();
+-      }
++      closeWindow();
+     }
+   };
+ 
+   let backButton = null;
+-  if (pageDepth <= 1 || props.allowMoveBack) {
++  if (pageDepth > 1 ? props.allowMoveBack : !macWindowControls) {
+     const icon = <RetinaImg name={closeIcon} mode={RetinaImg.Mode.ContentPreserve} />;
+     const buttonStyle = { WebkitAppRegion: 'no-drag' } as any;
+     backButton = paperReed ? (
+@@ -46,8 +51,8 @@ const PageTopBar = (props: {
+         key={closeClass}
+         type="button"
+         className={closeClass + ' pr-onboarding-window-action'}
+-        aria-label={pageDepth > 1 ? props.backLabel || '返回上一步' : hasAccounts ? '关闭邮箱设置' : '退出 Paper Reed'}
+-        disabled={props.disableNavigation || (pageDepth <= 1 && props.disableClose)}
++        aria-label={pageDepth > 1 ? props.backLabel || '返回上一步' : closeLabel}
++        disabled={pageDepth > 1 ? props.disableNavigation : closeDisabled}
+         onClick={closeAction}
+         style={buttonStyle}
+       >
+@@ -68,7 +73,15 @@ const PageTopBar = (props: {
+     WebkitAppRegion: 'drag',
+   };
+   return (
+-    <div className="dragRegion" style={style}>
++    <div className={macWindowControls ? 'dragRegion pr-onboarding-mac-controls' : 'dragRegion'} style={style}>
++      {macWindowControls && (
++        <ToolbarWindowControls
++          closeDisabled={closeDisabled}
++          closeLabel={closeLabel}
++          onClose={closeWindow}
++          maximizeDisabled
++        />
++      )}
+       {backButton}
+     </div>
+   );
+diff --git a/app/internal_packages/onboarding/styles/onboarding.less b/app/internal_packages/onboarding/styles/onboarding.less
+index e1b431d..5c647c6 100644
+--- a/app/internal_packages/onboarding/styles/onboarding.less
++++ b/app/internal_packages/onboarding/styles/onboarding.less
+@@ -94,7 +94,7 @@
+     margin-bottom: 14px;
+   }
+ 
+-  .close {
++  .dragRegion > .close {
+     position: fixed;
+     z-index: 100;
+     top: 1px;
+@@ -814,6 +814,14 @@ body.platform-win32 {
+     cursor: pointer;
+   }
+   .pr-onboarding-window-action.back { left: 48px; }
++  .pr-onboarding-mac-controls {
++    > .toolbar-window-controls {
++      position: absolute;
++      top: 0;
++      left: -26px;
++    }
++    > .pr-onboarding-window-action.back { top: 9px; left: 86px; }
++  }
+   .pr-onboarding-window-action:hover:not(:disabled) { background: #edf0e8; }
+   .pr-onboarding-window-action:disabled { opacity: .45; cursor: default; }
+   .pr-provider-choose .provider:focus-visible, .pr-onboarding-window-action:focus-visible {
+diff --git a/app/src/components/toolbar-window-controls.tsx b/app/src/components/toolbar-window-controls.tsx
+new file mode 100644
+index 0000000..46ff1e6
+--- /dev/null
++++ b/app/src/components/toolbar-window-controls.tsx
+@@ -0,0 +1,85 @@
++import React from 'react';
++import { localized } from 'mailspring-exports';
++import { RovingTabIndexToolbar } from './roving-tab-index-toolbar';
++
++interface ToolbarWindowControlsProps {
++  closeDisabled?: boolean;
++  closeLabel?: string;
++  onClose?: () => void;
++  maximizeDisabled?: boolean;
++}
++
++export class ToolbarWindowControls extends React.Component<ToolbarWindowControlsProps, { alt: boolean }> {
++  static displayName = 'ToolbarWindowControls';
++
++  constructor(props) {
++    super(props);
++    this.state = { alt: AppEnv.keymaps.getIsAltKeyDown() };
++  }
++
++  componentDidMount() {
++    if (process.platform === 'darwin') {
++      document.addEventListener(AppEnv.keymaps.EVENT_ALT_KEY_STATE_CHANGE, this._onAlt);
++    }
++  }
++
++  componentWillUnmount() {
++    if (process.platform === 'darwin') {
++      document.removeEventListener(AppEnv.keymaps.EVENT_ALT_KEY_STATE_CHANGE, this._onAlt);
++    }
++  }
++
++  _onAlt = () => {
++    this.setState({ alt: AppEnv.keymaps.getIsAltKeyDown() });
++  };
++
++  _onMaximize = (event: React.MouseEvent<HTMLButtonElement>) => {
++    if (process.platform === 'darwin' && !event.altKey) {
++      AppEnv.setFullScreen(!AppEnv.isFullScreen());
++    } else {
++      AppEnv.maximize();
++    }
++  };
++
++  render() {
++    const enabled =
++      process.platform === 'darwin' ||
++      (process.platform === 'linux' &&
++        AppEnv.config.get('core.workspace.menubarStyle') === 'hamburger');
++
++    if (!enabled) {
++      return <span />;
++    }
++
++    return (
++      <RovingTabIndexToolbar
++        label={localized('Window Controls')}
++        className={`toolbar-window-controls alt-${this.state.alt}`}
++      >
++        <button
++          type="button"
++          tabIndex={-1}
++          className="close"
++          aria-label={this.props.closeLabel ?? localized('Close window')}
++          disabled={this.props.closeDisabled}
++          onClick={this.props.onClose ?? (() => AppEnv.close())}
++        />
++        <button
++          type="button"
++          tabIndex={-1}
++          className="minimize"
++          aria-label={localized('Minimize window')}
++          onClick={() => AppEnv.minimize()}
++        />
++        <button
++          type="button"
++          tabIndex={-1}
++          className="maximize"
++          aria-label={localized('Maximize window')}
++          disabled={this.props.maximizeDisabled}
++          onClick={this._onMaximize}
++        />
++      </RovingTabIndexToolbar>
++    );
++  }
++}
+diff --git a/app/src/sheet-toolbar.tsx b/app/src/sheet-toolbar.tsx
+index e579e5b..39e24e4 100644
+--- a/app/src/sheet-toolbar.tsx
++++ b/app/src/sheet-toolbar.tsx
+@@ -7,7 +7,7 @@ import { localized, isRTL, Actions, ComponentRegistry, WorkspaceStore } from 'ma
+ import { SheetDeclaration } from './flux/stores/workspace-store';
+ import { Flexbox } from './components/flexbox';
+ import { RetinaImg } from './components/retina-img';
+-import { RovingTabIndexToolbar } from './components/roving-tab-index-toolbar';
++import { ToolbarWindowControls } from './components/toolbar-window-controls';
+ import * as Utils from './flux/models/utils';
+ import { Disposable } from 'rx-core';
+ import { isWaylandSession } from './browser/is-wayland';
+@@ -109,76 +109,6 @@ class ToolbarBack extends React.Component<Record<string, unknown>, { categoryNam
+   }
+ }
+ 
+-class ToolbarWindowControls extends React.Component<Record<string, unknown>, { alt: boolean }> {
+-  static displayName = 'ToolbarWindowControls';
+-
+-  constructor(props) {
+-    super(props);
+-    this.state = { alt: AppEnv.keymaps.getIsAltKeyDown() };
+-  }
+-
+-  componentDidMount() {
+-    if (process.platform === 'darwin') {
+-      document.addEventListener(AppEnv.keymaps.EVENT_ALT_KEY_STATE_CHANGE, this._onAlt);
+-    }
+-  }
+-
+-  componentWillUnmount() {
+-    if (process.platform === 'darwin') {
+-      document.removeEventListener(AppEnv.keymaps.EVENT_ALT_KEY_STATE_CHANGE, this._onAlt);
+-    }
+-  }
+-
+-  _onAlt = () => {
+-    this.setState({ alt: AppEnv.keymaps.getIsAltKeyDown() });
+-  };
+-
+-  _onMaximize = (event: React.MouseEvent<HTMLButtonElement>) => {
+-    if (process.platform === 'darwin' && !event.altKey) {
+-      AppEnv.setFullScreen(!AppEnv.isFullScreen());
+-    } else {
+-      AppEnv.maximize();
+-    }
+-  };
+-
+-  render() {
+-    const enabled =
+-      process.platform === 'darwin' ||
+-      (process.platform === 'linux' &&
+-        AppEnv.config.get('core.workspace.menubarStyle') === 'hamburger');
+-
+-    if (!enabled) {
+-      return <span />;
+-    }
+-
+-    return (
+-      <RovingTabIndexToolbar
+-        label={localized('Window Controls')}
+-        className={`toolbar-window-controls alt-${this.state.alt}`}
+-      >
+-        <button
+-          tabIndex={-1}
+-          className="close"
+-          aria-label={localized('Close window')}
+-          onClick={() => AppEnv.close()}
+-        />
+-        <button
+-          tabIndex={-1}
+-          className="minimize"
+-          aria-label={localized('Minimize window')}
+-          onClick={() => AppEnv.minimize()}
+-        />
+-        <button
+-          tabIndex={-1}
+-          className="maximize"
+-          aria-label={localized('Maximize window')}
+-          onClick={this._onMaximize}
+-        />
+-      </RovingTabIndexToolbar>
+-    );
+-  }
+-}
+-
+ class ToolbarMenuControl extends React.Component {
+   static displayName = 'ToolbarMenuControl';
+ 
+diff --git a/app/static/style/workspace.less b/app/static/style/workspace.less
+index e47c642..8477b2d 100644
+--- a/app/static/style/workspace.less
++++ b/app/static/style/workspace.less
+@@ -444,7 +444,10 @@ body.is-blurred {
+     &.alt-true .maximize::after {
+       background-image: @gumdrop-glyph-maximize;
+     }
+-    &:hover button::after {
++    button:disabled {
++      background-color: fade(@text-color, 15%);
++    }
++    &:hover button:not(:disabled)::after {
+       opacity: 1;
+     }
+   }

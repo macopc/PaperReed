@@ -162,6 +162,10 @@ async function checkAccountSaveLocked({clickBack=true}={}) {
  const back=main.getByRole('button',{name:/^返回(上一步|邮箱选择)$/});
  await active.getByRole('status').getByText('正在保存邮箱账号…',{exact:true}).waitFor({timeout:2500});
  assert(await back.isDisabled(),'Back is disabled while the account is saved');
+ if(process.platform==='darwin' && process.env.PAPER_REED_ACCOUNT_SAVE_CHECK!=='before'){
+  assert(await main.locator('.pr-onboarding-mac-controls .toolbar-window-controls .close').isDisabled(),
+   'the red window control is disabled while the account is saved');
+ }
  if(clickBack){
   const target=await back.boundingBox();
   await main.mouse.click(target.x+target.width/2,target.y+target.height/2);
@@ -262,6 +266,21 @@ async function checkProviderPicker(phase) {
  assert.match(await picker.textContent(),/Microsoft 网页授权.*Outlook.*Microsoft 365/);
  const close=main.getByRole('button',{name:'退出 Paper Reed',exact:true});
  const store=onboardingStore;
+ if(process.platform==='darwin'){
+  const controls=main.locator('.pr-onboarding-mac-controls .toolbar-window-controls');
+  const minimize=controls.locator('.minimize'), maximize=controls.locator('.maximize');
+  assert(await close.isEnabled());
+  assert(await minimize.isEnabled());
+  assert(await maximize.isDisabled(),'the fixed-size setup window keeps its green control disabled');
+  assert.equal(await controls.getByRole('button').count(),3);
+  await run('window.prMinimizeCalls=0;window.prOriginalMinimize=AppEnv.minimize;AppEnv.minimize=()=>window.prMinimizeCalls++;true');
+  try {
+   await close.focus();await main.keyboard.press('ArrowRight');await main.keyboard.press('Space');
+   assert.equal(await run('window.prMinimizeCalls'),1,'the shared window controls support arrow-key navigation');
+  } finally {
+   await run('AppEnv.minimize=window.prOriginalMinimize;true');
+  }
+ }
  await close.focus();await main.keyboard.press('Tab');
  assert(await run('document.activeElement.dataset.provider==="gmail"'));
  await capture('focus');
@@ -293,12 +312,18 @@ async function checkProviderPicker(phase) {
  assert.equal(exitInert,true,'exiting provider page is inert');
  await main.locator('.pr-icloud-setup').getByRole('heading',{name:'连接 iCloud 邮件'}).waitFor();
  const back=main.getByRole('button',{name:'返回上一步',exact:true});
+ if(process.platform==='darwin'){
+  const backBox=await back.boundingBox();
+  const greenBox=await main.locator('.pr-onboarding-mac-controls .toolbar-window-controls .maximize').boundingBox();
+  assert(backBox && greenBox && backBox.x>=greenBox.x+greenBox.width,
+   'Back is separate from the window-control group');
+ }
  await run(`window.prPickerCloseCalls=0;
   window.prOriginalPickerQuit=AppEnv.quit;window.prOriginalPickerClose=AppEnv.close;
   AppEnv.quit=AppEnv.close=()=>{window.prPickerCloseCalls++;};true`);
  try {
   await back.focus();await main.keyboard.press('Enter');
-  const closeLocked=await run('document.querySelector("button.pr-onboarding-window-action.close")?.disabled');
+  const closeLocked=await run('document.querySelector(\'button[aria-label="退出 Paper Reed"]\')?.disabled');
   await main.keyboard.press('Enter');
   assert.equal(await run('window.prPickerCloseCalls'),0,'rapid Enter after Back cannot close the picker');
   assert.equal(closeLocked,true,'Close is disabled while returning to the picker');
