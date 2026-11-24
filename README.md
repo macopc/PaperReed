@@ -11,8 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/macopc/PaperReed/releases/download/v0.0.2/Paper-Reed-0.0.2-macOS-arm64.zip"><strong>下载 0.0.2 · Apple Silicon</strong></a>
-  · <a href="https://github.com/macopc/PaperReed/releases/tag/v0.0.2">版本说明与校验值</a>
+  <a href="https://github.com/macopc/PaperReed/releases/latest"><strong>下载最新版 · Apple Silicon</strong></a>
   · <a href="README.en.md">English</a>
 </p>
 
@@ -40,7 +39,7 @@
 
 ## 安装测试版
 
-下载 ZIP，解压后把 `Paper Reed.app` 拖进「应用程序」。`0.0.2` 是面向 Apple Silicon Mac 的已签名、公证测试版，当前通过 GitHub Releases 手动更新。邮箱兼容性仍在验证，通用账号需要服务商开放 IMAP／SMTP。[安装包、版本说明与校验值](https://github.com/macopc/PaperReed/releases/tag/v0.0.2)
+下载 ZIP，解压后把 `Paper Reed.app` 拖进「应用程序」。`0.0.4` 及更早版本需要手动升级一次。包含客户端更新器的稳定版可从应用菜单选择「检查更新」，下载完成后重启安装。邮箱兼容性仍在验证，通用账号需要服务商开放 IMAP／SMTP。[安装包、版本说明与校验值](https://github.com/macopc/PaperReed/releases/latest)
 
 ## 在这里参与
 

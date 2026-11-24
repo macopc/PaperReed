@@ -223,3 +223,5 @@
 0088 缩短 Paper Reed CLI 单次启动路径。CLI 使用 Node 内置 HTTP 连接已运行的本机 MCP 服务，复用命令内的连接，并读取服务端返回的 SSE 或 JSON 回执。继续使用协商后的协议版本、会话 ID 和已有的桌面工具权限。连接中断时保留发送回执恢复指引，客户端不自行重发。
 
 0089 让 macOS 和 Linux 的安装命令直接执行 Go CLI。原生程序读取同一私有连接配置并调用现有桌面 MCP 工具，保留命令、帮助、JSON 输出、发送回执恢复和退出码约定。打包时按目标架构编译，二进制放在 ASAR 的解包目录。旧 launcher 使用兼容入口。使用 prepare-desktop.py 和 build-desktop.py 时，Go 源码会随仓库同步到上游构建目录。
+
+0090 为正式打包的 macOS arm64 稳定版接入 Paper Reed 自己的 GitHub Releases 更新源。Electron 后台下载 ZIP，校验大小、哈希及应用签名。通过桌面菜单或下载完成提示重启安装。打包后的更新清单由 make-update-feed.py 生成。

@@ -1,0 +1,269 @@
+diff --git a/app/internal_packages/notifications/lib/items/update-notification.tsx b/app/internal_packages/notifications/lib/items/update-notification.tsx
+index bed96d6..e2752db 100644
+--- a/app/internal_packages/notifications/lib/items/update-notification.tsx
++++ b/app/internal_packages/notifications/lib/items/update-notification.tsx
+@@ -48,7 +48,10 @@ export default class UpdateNotification extends React.Component<
+   };
+ 
+   _onViewChangelog = () => {
+-    shell.openExternal('https://github.com/Foundry376/Mailspring/releases/latest');
++    const repo = AppEnv.config.get('core.paperReed.enabled')
++      ? 'macopc/PaperReed'
++      : 'Foundry376/Mailspring';
++    shell.openExternal(`https://github.com/${repo}/releases/latest`);
+   };
+ 
+   render() {
+@@ -57,19 +60,23 @@ export default class UpdateNotification extends React.Component<
+     if (!updateAvailable) {
+       return <span />;
+     }
++    const paperReed = AppEnv.config.get('core.paperReed.enabled');
++    const title = paperReed
++      ? `Paper Reed ${version} 已下载，重启后安装`
++      : localized(
++          'An update to Mailspring is available %@',
++          version ? `(${version.replace('Mailspring', '').trim()})` : ''
++        );
+     return (
+       <Notification
+         priority="4"
+-        title={localized(
+-          `An update to Mailspring is available %@`,
+-          version ? `(${version.replace('Mailspring', '').trim()})` : ''
+-        )}
+-        subtitle={localized('View changelog')}
++        title={title}
++        subtitle={paperReed ? '查看版本说明' : localized('View changelog')}
+         subtitleAction={this._onViewChangelog}
+         icon="volstead-upgrade.png"
+         actions={[
+           {
+-            label: updateIsManual ? localized('Download Now') : localized('Install'),
++            label: paperReed ? '重启并安装' : localized(updateIsManual ? 'Download Now' : 'Install'),
+             fn: this._onUpdate,
+           },
+         ]}
+diff --git a/app/src/browser/application.ts b/app/src/browser/application.ts
+index 710e01e..4b3f1a9 100644
+--- a/app/src/browser/application.ts
++++ b/app/src/browser/application.ts
+@@ -655,6 +655,7 @@ export default class Application extends EventEmitter {
+     });
+ 
+     this.on('application:install-update', () => {
++      if (this.isSavingAccount() || !this.autoUpdateManager.canInstall()) return;
+       this.quitting = true;
+       this.windowManager.cleanupBeforeAppQuit();
+       this.autoUpdateManager.install();
+diff --git a/app/src/browser/autoupdate-manager.ts b/app/src/browser/autoupdate-manager.ts
+index 5f02746..2aaf3d5 100644
+--- a/app/src/browser/autoupdate-manager.ts
++++ b/app/src/browser/autoupdate-manager.ts
+@@ -1,10 +1,11 @@
+ /* eslint global-require: 0*/
+-import { dialog, nativeImage } from 'electron';
++import { app, BrowserWindow, dialog, nativeImage } from 'electron';
+ import { EventEmitter } from 'events';
+ import path from 'path';
+ import os from 'os';
+ import fs from 'fs';
+ import { localized } from '../intl';
++import { paperReedUpdateFeed } from './paper-reed-update-feed';
+ 
+ let autoUpdater = null;
+ 
+@@ -26,6 +27,8 @@ export default class AutoUpdateManager extends EventEmitter {
+   feedURL: string;
+   releaseNotes: string;
+   releaseVersion: string;
++  private paperReed: boolean;
++  private manualCheck = false;
+ 
+   constructor(version: string, config: import('../config').default, specMode: boolean) {
+     super();
+@@ -35,17 +38,29 @@ export default class AutoUpdateManager extends EventEmitter {
+     this.specMode = specMode;
+     this.preferredChannel = preferredChannel;
+ 
+-    if (config.get('core.paperReed.enabled')) {
+-      this.state = UnsupportedState;
+-      return; // The preview must not install updates from the upstream product.
++    this.paperReed = config.get('core.paperReed.enabled');
++    if (this.paperReed) {
++      this.feedURL = paperReedUpdateFeed({
++        packaged: app.isPackaged,
++        specMode,
++        platform: process.platform,
++        arch: process.arch,
++        version,
++      });
++      if (!this.feedURL) {
++        this.state = UnsupportedState;
++        return;
++      }
++    } else {
++      this.updateFeedURL();
++      this.config.onDidChange('identity.id', this.updateFeedURL);
+     }
+-    this.updateFeedURL();
+-    this.config.onDidChange('identity.id', this.updateFeedURL);
+ 
+     setTimeout(() => this.setupAutoUpdater(), 0);
+   }
+ 
+   updateFeedURL = () => {
++    if (this.paperReed) return;
+     const params = {
+       platform: process.platform,
+       arch: process.arch,
+@@ -86,19 +101,24 @@ export default class AutoUpdateManager extends EventEmitter {
+     }
+ 
+     autoUpdater.on('error', (error) => {
++      if (this.paperReed) {
++        this.finishPaperReedCheck(ErrorState, error);
++        return;
++      }
+       if (this.specMode) return;
+       console.error(`Error Downloading Update: ${error.message}`);
+       this.setState(ErrorState);
+     });
+ 
+-    autoUpdater.setFeedURL(this.feedURL);
++    if (!this.paperReed) autoUpdater.setFeedURL(this.feedURL);
+ 
+     autoUpdater.on('checking-for-update', () => {
+       this.setState(CheckingState);
+     });
+ 
+     autoUpdater.on('update-not-available', () => {
+-      this.setState(NoUpdateAvailableState);
++      if (this.paperReed) this.finishPaperReedCheck(NoUpdateAvailableState);
++      else this.setState(NoUpdateAvailableState);
+     });
+ 
+     autoUpdater.on('update-available', () => {
+@@ -110,8 +130,10 @@ export default class AutoUpdateManager extends EventEmitter {
+       (_event: Electron.Event, releaseNotes: string, releaseVersion: string) => {
+         this.releaseNotes = releaseNotes;
+         this.releaseVersion = releaseVersion;
++        this.manualCheck = false;
+         this.setState(UpdateAvailableState);
+         this.emitUpdateAvailableEvent();
++        if (this.paperReed) this.promptForPaperReedRestart();
+       }
+     );
+ 
+@@ -123,7 +145,7 @@ export default class AutoUpdateManager extends EventEmitter {
+     //check immediately at startup
+     this.check({ hidePopups: true });
+ 
+-    //check every 30 minutes
++    // Public release metadata is cached on GitHub. Check a few times per day.
+     setInterval(
+       () => {
+         if ([UpdateAvailableState, UnsupportedState].includes(this.state)) {
+@@ -132,7 +154,7 @@ export default class AutoUpdateManager extends EventEmitter {
+         }
+         this.check({ hidePopups: true });
+       },
+-      1000 * 60 * 30
++      1000 * 60 * (this.paperReed ? 240 : 30)
+     );
+   }
+ 
+@@ -167,7 +189,10 @@ export default class AutoUpdateManager extends EventEmitter {
+   }
+ 
+   check({ hidePopups }: { hidePopups?: boolean } = {}) {
+-    if (this.config.get('core.paperReed.enabled')) return;
++    if (this.paperReed) {
++      this.checkPaperReed(hidePopups);
++      return;
++    }
+     this.updateFeedURL();
+     if (!hidePopups) {
+       autoUpdater.once('update-not-available', this.onUpdateNotAvailable);
+@@ -176,8 +201,57 @@ export default class AutoUpdateManager extends EventEmitter {
+     autoUpdater.checkForUpdates();
+   }
+ 
++  private checkPaperReed(hidePopups: boolean) {
++    if (!autoUpdater || [UnsupportedState, UpdateAvailableState].includes(this.state)) return;
++    if (!hidePopups) this.manualCheck = true;
++    if ([CheckingState, DownloadingState].includes(this.state)) return;
++
++    this.setState(CheckingState);
++    try {
++      autoUpdater.setFeedURL({ url: this.feedURL, serverType: 'json' });
++      // Electron can emit an error synchronously while initializing the feed.
++      if (this.state === CheckingState) autoUpdater.checkForUpdates();
++    } catch (error) {
++      this.finishPaperReedCheck(ErrorState, error);
++    }
++  }
++
++  private promptForPaperReedRestart() {
++    const window = BrowserWindow.getFocusedWindow();
++    if (!window) return;
++
++    void dialog.showMessageBox(window, {
++      type: 'info',
++      message: `Paper Reed ${this.releaseVersion} 已下载`,
++      buttons: ['稍后', '重启并安装'],
++      defaultId: 1,
++      cancelId: 0,
++    }).then(({ response }) => {
++      if (response === 1) global.application.emit('application:install-update');
++    });
++  }
++
++  private finishPaperReedCheck(state: string, error?: Error) {
++    const wasReady = this.state === UpdateAvailableState;
++    const showDialog = this.manualCheck || wasReady;
++    this.manualCheck = false;
++    if (wasReady && error) global.application.quitting = false;
++    else this.setState(state);
++    if (error) console.error('Paper Reed update failed:', error.message);
++    if (!showDialog) return;
++    void dialog.showMessageBox({
++      type: error ? 'warning' : 'info',
++      message: error ? 'Paper Reed 暂时无法更新' : '已是最新版本',
++      detail: error ? error.message : `当前版本 ${this.version}`,
++    });
++  }
++
++  canInstall() {
++    return !!autoUpdater && (!this.paperReed || this.state === UpdateAvailableState);
++  }
++
+   install() {
+-    if (this.config.get('core.paperReed.enabled')) return;
++    if (!this.canInstall()) return;
+     autoUpdater.quitAndInstall();
+   }
+ 
+diff --git a/app/src/browser/paper-reed-update-feed.ts b/app/src/browser/paper-reed-update-feed.ts
+new file mode 100644
+index 0000000..163fdb8
+--- /dev/null
++++ b/app/src/browser/paper-reed-update-feed.ts
+@@ -0,0 +1,17 @@
++const GithubReleases = 'https://github.com/macopc/PaperReed/releases';
++const StableVersion = /^(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)\.(0|[1-9][0-9]*)$/;
++
++interface UpdateBuild {
++  packaged: boolean;
++  specMode: boolean;
++  platform: NodeJS.Platform;
++  arch: string;
++  version: string;
++}
++
++export function paperReedUpdateFeed({ packaged, specMode, platform, arch, version }: UpdateBuild) {
++  if (!packaged || specMode || !StableVersion.test(version)) return;
++  if (platform === 'darwin' && arch === 'arm64') {
++    return `${GithubReleases}/latest/download/Paper-Reed-update-stable-macos-arm64.json`;
++  }
++}

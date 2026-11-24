@@ -11,8 +11,7 @@
 </p>
 
 <p align="center">
-  <a href="https://github.com/macopc/PaperReed/releases/download/v0.0.2/Paper-Reed-0.0.2-macOS-arm64.zip"><strong>Download 0.0.2 for Apple Silicon</strong></a>
-  · <a href="https://github.com/macopc/PaperReed/releases/tag/v0.0.2">Release notes and checksum</a>
+  <a href="https://github.com/macopc/PaperReed/releases/latest"><strong>Download for Apple Silicon</strong></a>
   · <a href="README.md">中文</a>
 </p>
 
@@ -40,7 +39,7 @@ Connect Gmail, iCloud, or a generic IMAP/SMTP account. Search across your unifie
 
 ## Install the preview
 
-Download and unzip the archive, then drag `Paper Reed.app` into Applications. Version `0.0.2` is a signed, notarized preview for Apple Silicon Macs. Updates are installed manually from GitHub Releases. Provider compatibility is still being tested. Generic accounts require IMAP and SMTP access. [Download, release notes, and checksum](https://github.com/macopc/PaperReed/releases/tag/v0.0.2)
+Download and unzip the archive, then drag `Paper Reed.app` into Applications. Version `0.0.4` and earlier require a one-time manual upgrade. Stable builds with the updater offer **Check for Updates** in the app menu and can restart to install a downloaded update. Provider compatibility is still being tested. Generic accounts require IMAP and SMTP access. [Download, release notes, and checksum](https://github.com/macopc/PaperReed/releases/latest)
 
 ## Get involved
 

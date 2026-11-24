@@ -38,3 +38,17 @@ Contribute only material you have the right to share, under GPL-3.0-only for ori
 遵守 [行为准则](CODE_OF_CONDUCT.md)。涉及漏洞或凭据泄露请使用 [安全报告方式](SECURITY.md)，不要提交公开 Issue。
 
 配置完整的 macOS 预览包使用 `python3 scripts/build-desktop.py --google-client <项目桌面客户端JSON路径> --skip-archive`。该入口要求项目自己的 Google Desktop 配置和 Go 1.23 或更新版本，写入 Paper Reed 版本和源码标识；不会打包邮箱授权令牌。前提、验证和未完成的正式发行事项见 [发行配置记录](research/distribution-validation-2026-11-17/README.md)。
+
+### 客户端内更新
+
+支持自动更新的 macOS Apple Silicon 稳定版会在启动时及每四小时检查 GitHub Releases。发现新版后，由 Electron 在后台下载、校验并准备安装。用户可以点「重启并安装」，也可以继续工作，等下次启动应用时完成更新。已有的 `0.0.4` 须先手动升到首个包含更新器的版本。
+
+先验证候选包。签名和公证完成后，用最终 ZIP 生成更新清单：
+
+```sh
+python3 scripts/make-update-feed.py /path/to/Paper-Reed-0.0.5-macOS-arm64.zip
+```
+
+将同一份 ZIP、`SHA256SUMS` 和生成的 `Paper-Reed-update-stable-macos-arm64.json` 上传到对应版本的 GitHub Release 草稿，确认安装与升级通过后再将该版本公开为 Latest。清单记录了固定版本的下载地址、ZIP 大小和 SHA-256。包需保留正式版的 Bundle ID 和兼容的 Developer ID 签名。后续稳定版继续带上这三项产物。
+
+更新层按渠道、平台和架构区分。当前客户端只订阅 macOS arm64 稳定版，GitHub 草稿和预发布用于先行验证。每次更新替换整个应用包，内置的 CLI 和同步引擎随桌面应用一同更新。以后接入预览渠道或其他架构时，可使用各自的清单及安装方式。
